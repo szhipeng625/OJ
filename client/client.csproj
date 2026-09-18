@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>client</RootNamespace>
+  </PropertyGroup>
+
+  <!-- 本地 HandyControl 源码控件库（与 lsmUI 一致） -->
+  <ItemGroup>
+    <ProjectReference Include="UI\HandyControl\HandyControl.csproj" />
+  </ItemGroup>
+
+  <!-- UI 源码只由控件库工程编译，主工程不重复卷入 -->
+  <ItemGroup>
+    <Compile Remove="UI\**" />
+    <Page Remove="UI\**" />
+    <Resource Remove="UI\**" />
+    <EmbeddedResource Remove="UI\**" />
+    <None Remove="UI\**" />
+    <ApplicationDefinition Remove="UI\**" />
+  </ItemGroup>
+
+</Project>

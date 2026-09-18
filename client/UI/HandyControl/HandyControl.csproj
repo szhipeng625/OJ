@@ -1,0 +1,85 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>HandyControl</AssemblyName>
+    <RootNamespace>HandyControl</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <!-- 与官方控件库保持一致的告警抑制；不签名，免去 key.snk 依赖 -->
+    <NoWarn>0067;0649;1591;MSB3061;SYSLIB0003;SYSLIB0004;SYSLIB0032;CA2022</NoWarn>
+    <MSBuildWarningsAsMessages>NETSDK1138</MSBuildWarningsAsMessages>
+    <!-- 本工程通过 projitems 显式引入源码，关闭默认目录通配，避免重复编译 -->
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+
+  <!-- 1) 共享源码：控件库主体 + 三个内置辅助共享工程（net8 不需要 Microsoft.Windows.Shell，它仅 #if NET40 使用） -->
+  <Import Project="..\Shared\HandyControl_Shared\HandyControl_Shared.projitems" Label="Shared" />
+  <Import Project="..\Shared\Microsoft.Expression.Drawing\Microsoft.Expression.Drawing.projitems" Label="Shared" />
+  <Import Project="..\Shared\System.Windows.Interactivity\System.Windows.Interactivity.projitems" Label="Shared" />
+  <Import Project="..\Shared\Microsoft.Expression.Interactions\Microsoft.Expression.Interactions.projitems" Label="Shared" />
+
+  <!-- 2) projitems 不包含 Properties，需要由本外壳工程显式补入：XmlnsDefinition 程序集特性、多语言 -->
+  <ItemGroup>
+    <Compile Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.Designer.cs" Link="Properties\Langs\Lang.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Lang.resx</DependentUpon>
+    </Compile>
+    <Compile Include="..\Shared\HandyControl_Shared\Properties\Langs\LangProvider.cs" Link="Properties\Langs\LangProvider.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>LangProvider.tt</DependentUpon>
+    </Compile>
+    <Compile Include="..\Shared\HandyControl_Shared\Properties\AssemblyInfo.cs" Link="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+
+  <!-- 3) 多语言资源（嵌入程序集） -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.tr.resx" Link="Properties\Langs\Lang.tr.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.ca-ES.resx" Link="Properties\Langs\Lang.ca-ES.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.cs.resx" Link="Properties\Langs\Lang.cs.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.en.resx" Link="Properties\Langs\Lang.en.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.es.resx" Link="Properties\Langs\Lang.es.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.fa.resx" Link="Properties\Langs\Lang.fa.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.fr.resx" Link="Properties\Langs\Lang.fr.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.ja.resx" Link="Properties\Langs\Lang.ja.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.ko-KR.resx" Link="Properties\Langs\Lang.ko-KR.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.pl.resx" Link="Properties\Langs\Lang.pl.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.pt-BR.resx" Link="Properties\Langs\Lang.pt-BR.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.ru.resx" Link="Properties\Langs\Lang.ru.resx" />
+    <EmbeddedResource Include="..\Shared\HandyControl_Shared\Properties\Langs\Lang.resx" Link="Properties\Langs\Lang.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>Lang.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- 4) 光标、像素着色器脚本、GlowWindow 边框图片（Resource，随程序集打包） -->
+  <ItemGroup>
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\dropper.cur" Link="Resources\dropper.cur" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Effects\BrightnessEffect.ps" Link="Resources\Effects\BrightnessEffect.ps" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Effects\ColorComplementEffect.ps" Link="Resources\Effects\ColorComplementEffect.ps" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Effects\ColorMatrixEffect.ps" Link="Resources\Effects\ColorMatrixEffect.ps" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Effects\ContrastEffect.ps" Link="Resources\Effects\ContrastEffect.ps" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Effects\GrayScaleEffect.ps" Link="Resources\Effects\GrayScaleEffect.ps" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\bottom.png" Link="Resources\Images\GlowWindow\bottom.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\bottomleft.png" Link="Resources\Images\GlowWindow\bottomleft.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\bottomright.png" Link="Resources\Images\GlowWindow\bottomright.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\cornerbottomleft.png" Link="Resources\Images\GlowWindow\cornerbottomleft.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\cornerbottomright.png" Link="Resources\Images\GlowWindow\cornerbottomright.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\cornertopleft.png" Link="Resources\Images\GlowWindow\cornertopleft.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\cornertopright.png" Link="Resources\Images\GlowWindow\cornertopright.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\left.png" Link="Resources\Images\GlowWindow\left.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\leftbottom.png" Link="Resources\Images\GlowWindow\leftbottom.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\lefttop.png" Link="Resources\Images\GlowWindow\lefttop.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\right.png" Link="Resources\Images\GlowWindow\right.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\rightbottom.png" Link="Resources\Images\GlowWindow\rightbottom.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\righttop.png" Link="Resources\Images\GlowWindow\righttop.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\top.png" Link="Resources\Images\GlowWindow\top.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\topleft.png" Link="Resources\Images\GlowWindow\topleft.png" />
+    <Resource Include="..\Shared\HandyControl_Shared\Resources\Images\GlowWindow\topright.png" Link="Resources\Images\GlowWindow\topright.png" />
+  </ItemGroup>
+
+</Project>
