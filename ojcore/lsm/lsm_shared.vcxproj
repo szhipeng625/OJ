@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}</ProjectGuid>
+    <RootNamespace>lsm_shared</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)bin\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <PreprocessorDefinitions>TINYLSM_EXPORTS;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)third_party\spdlog\include;$(ProjectDir)third_party\toml11\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WarningLevel>Level3</WarningLevel>
+      <DisableSpecificWarnings>4251;4275;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>false</SDLCheck>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>LSM_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\logger\logger.cpp" />
+    <ClCompile Include="src\config\config.cpp" />
+    <ClCompile Include="src\utils\bloom_filter.cpp" />
+    <ClCompile Include="src\utils\cursor.cpp" />
+    <ClCompile Include="src\utils\files.cpp" />
+    <ClCompile Include="src\utils\mmap_file.cpp" />
+    <ClCompile Include="src\utils\std_file.cpp" />
+    <ClCompile Include="src\vlog\vlog.cpp" />
+    <ClCompile Include="src\iterator\iterator.cpp" />
+    <ClCompile Include="src\skiplist\skipList.cpp" />
+    <ClCompile Include="src\memtable\memtable.cpp" />
+    <ClCompile Include="src\block\block.cpp" />
+    <ClCompile Include="src\block\blockmeta.cpp" />
+    <ClCompile Include="src\block\block_cache.cpp" />
+    <ClCompile Include="src\block\block_iterator.cpp" />
+    <ClCompile Include="src\sst\concact_iterator.cpp" />
+    <ClCompile Include="src\sst\sst.cpp" />
+    <ClCompile Include="src\sst\sst_iterator.cpp" />
+    <ClCompile Include="src\wal\record.cpp" />
+    <ClCompile Include="src\wal\wal.cpp" />
+    <ClCompile Include="src\lsm\engine.cpp" />
+    <ClCompile Include="src\lsm\level_iterator.cpp" />
+    <ClCompile Include="src\lsm\transation.cpp" />
+    <ClCompile Include="src\lsm\two_merge_iterator.cpp" />
+    <ClCompile Include="src\redis_wrapper\redis_wrapper.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\lsm\compact.h" />
+    <ClInclude Include="include\lsm\engine.h" />
+    <ClInclude Include="include\lsm\export.h" />
+    <ClInclude Include="include\lsm\level_iterator.h" />
+    <ClInclude Include="include\lsm\transaction.h" />
+    <ClInclude Include="include\lsm\two_merge_iterator.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,0 +1,1 @@
+{"name":"Local: block","url":"d:\\tiny-lsm-master\\src\\block\\block.cpp","tests":[{"id":1789058987154,"input":"","output":""}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"d:\\tiny-lsm-master\\src\\block\\block.cpp","group":"local","local":true}

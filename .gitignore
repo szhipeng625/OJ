@@ -1,2 +1,60 @@
-./client/bin
-./client/obj
+# ===== 编译产物 =====
+bin/
+obj/
+x64/
+x86/
+Debug/
+Release/
+*.exe
+*.dll
+*.pdb
+*.lib
+*.exp
+*.ilk
+*.obj
+*.o
+*.a
+*.so
+*.dylib
+
+# ===== Visual Studio / IDE =====
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.sdf
+*.opensdf
+*.cachefile
+*.VC.VC.opendb
+ipch/
+*.tlog
+*.log
+
+# ===== NuGet =====
+packages/
+*.nupkg
+nuget.exe
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ===== 项目特定 =====
+# 数据生成器输出（本地文件，不上传）
+data/gen_output/
+# MySQL 配置（含密码，不上传）
+mysql_config.json
+# 判题临时文件
+temp/
+*.in
+*.out
+*.nobom
+*.err
