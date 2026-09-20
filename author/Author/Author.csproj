@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>author</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <!-- C++ 出题核心 DLL -->
+  <ItemGroup>
+    <None Include="..\authorcore\bin\Release\authorcore.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 公共 HandyControl 控件库 -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\HandyControl\HandyControl.csproj" />
+  </ItemGroup>
+
+  <!-- NuGet 包 -->
+  <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <PackageReference Include="Markdig" Version="0.37.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,4 +1,4 @@
-# OJ 在线判题系统
+﻿# OJ 在线判题系统
 
 WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S 一体化产品，全部用 Visual Studio 构建。
 
@@ -18,16 +18,18 @@ WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S �
 
 ```
 D:\OJ\
-├── client\                      WPF 判题客户端（client.sln）
+├── client\                      判题客户端 + 内嵌 C++ 判题后端（client.sln 统一解决方案）
+│   ├── client.sln               客户端解决方案（client + HandyControl + ojcore + lsm_shared）
 │   ├── MainWindow.xaml          主界面
-│   └── Services\ApiClient.cs    P/Invoke 调 ojcore.dll
-├── ojcore\                      C++ 判题核心（ojcore.sln，VS 2022 / v143）
-│   ├── ojcore.vcxproj           判题 DLL（导出 oj_init/oj_get_problems/oj_submit）
-│   ├── judge.cpp                判题核心（移植自 acmProblem\judge）
-│   └── lsm\                     tiny-lsm 源码（含 lsm_shared.vcxproj，VS 动态库工程）
-│       ├── lsm_shared.vcxproj   tiny-lsm → lsm_shared.dll（C++20，TINYLSM_EXPORTS）
-│       ├── src\ include\        LSM 引擎源码
-│       └── third_party\         spdlog / toml11（header-only，已内置）
+│   ├── Services\ApiClient.cs    P/Invoke 调 ojcore.dll
+│   └── ojcore\                  C++ 判题核心（即客户端的后端判题引擎，VS 2022 / v143）
+│       ├── ojcore.sln           判题核心独立解决方案（ojcore + lsm_shared + client）
+│       ├── ojcore.vcxproj       判题 DLL（导出 oj_init/oj_get_problems/oj_submit）
+│       ├── judge.cpp            判题核心（移植自 acmProblem\judge）
+│       └── lsm\                 tiny-lsm 源码（含 lsm_shared.vcxproj，VS 动态库工程）
+│           ├── lsm_shared.vcxproj   tiny-lsm → lsm_shared.dll（C++20，TINYLSM_EXPORTS）
+│           ├── src\ include\       LSM 引擎源码
+│           └── third_party\        spdlog / toml11（header-only，已内置）
 ├── author\                      出题服务端（Author.sln，WPF + C++）
 │   ├── Author\                  WPF 出题工作台（HandyControl 本地源码，与 client 一致）
 │   ├── authorcore\              C++ 出题核心 DLL（建题/编译标程/生成答案/校验/分发）
@@ -40,8 +42,8 @@ D:\OJ\
 
 | 解决方案 | 内容 |
 |----------|------|
-| `D:\OJ\ojcore\ojcore.sln` | **lsm_shared**（tiny-lsm 动态库）+ **ojcore**（判题 DLL）+ **client**（WPF 客户端） |
-| `D:\OJ\client\client.sln`   | client（WPF）+ HandyControl（本地源码） |
+| `D:\OJ\client\client.sln`   | **client**（WPF）+ **ojcore**（判题 DLL）+ **lsm_shared**（tiny-lsm）+ HandyControl，一体化解决方案 |
+| `D:\OJ\client\ojcore\ojcore.sln` | 判题核心独立解决方案：**lsm_shared**（tiny-lsm 动态库）+ **ojcore**（判题 DLL）+ **client**（WPF 客户端） |
 | `D:\OJ\author\Author.sln`   | **authorcore**（出题 DLL）+ **Author**（WPF 出题工作台）+ HandyControl |
 
 构建顺序由工程依赖自动保证。

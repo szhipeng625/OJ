@@ -7,21 +7,37 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <RootNamespace>client</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>AnyCPU;ARM64</Platforms>
   </PropertyGroup>
 
-  <!-- 本地 HandyControl 源码控件库（与 lsmUI 一致） -->
+  <!-- C++ 判题核心 DLL 复制见下方 CopyNativeLibraries（构建顺序由 client.sln 的项目依赖保证） -->
   <ItemGroup>
-    <ProjectReference Include="UI\HandyControl\HandyControl.csproj" />
+    <ProjectReference Include="..\shared\HandyControl\HandyControl.csproj" />
   </ItemGroup>
 
-  <!-- UI 源码只由控件库工程编译，主工程不重复卷入 -->
+  <!-- NuGet 包 -->
   <ItemGroup>
-    <Compile Remove="UI\**" />
-    <Page Remove="UI\**" />
-    <Resource Remove="UI\**" />
-    <EmbeddedResource Remove="UI\**" />
-    <None Remove="UI\**" />
-    <ApplicationDefinition Remove="UI\**" />
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <PackageReference Include="Markdig" Version="0.37.0" />
   </ItemGroup>
+
+  <!-- 将判题核心 DLL（ojcore.dll / lsm_shared.dll）复制到客户端输出目录。
+       兼容不同构建入口产生的不同输出位置：单独构建 / ojcore.sln 输出到工程目录，
+       client.sln 构建时输出会被重定向到解决方案目录。哪个存在就用哪个。 -->
+  <Target Name="CopyNativeLibraries" AfterTargets="Build">
+    <Copy Condition="Exists('ojcore\x64\$(Configuration)\ojcore.dll')" SourceFiles="ojcore\x64\$(Configuration)\ojcore.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('ojcore\x64\$(Configuration)\lsm_shared.dll')" SourceFiles="ojcore\x64\$(Configuration)\lsm_shared.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\ojcore.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\ojcore.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\lsm_shared.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\lsm_shared.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- 发布阶段同样复制判题核心 DLL 到发布输出目录（dotnet publish 不扫描仅放 bin 的文件） -->
+  <Target Name="CopyNativeLibrariesPublish" AfterTargets="Publish">
+    <Copy Condition="Exists('ojcore\x64\$(Configuration)\ojcore.dll')" SourceFiles="ojcore\x64\$(Configuration)\ojcore.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('ojcore\x64\$(Configuration)\lsm_shared.dll')" SourceFiles="ojcore\x64\$(Configuration)\lsm_shared.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\ojcore.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\ojcore.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\lsm_shared.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\lsm_shared.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

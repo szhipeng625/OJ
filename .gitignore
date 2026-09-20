@@ -1,4 +1,4 @@
-# ===== 编译产物 =====
+﻿# ===== 编译产物 =====
 bin/
 obj/
 x64/
@@ -58,3 +58,15 @@ temp/
 *.out
 *.nobom
 *.err
+
+# ===== 过程残留 / 测试 / 数据产物 =====
+_lang*.txt
+_stats_*.txt
+report.html
+fix_xaml.ps1
+test_login/
+test_upsert/
+client.csproj.user
+dist/
+store/
+**/problems/
