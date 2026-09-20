@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "启动客户端 client（WPF）",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "构建客户端 (client)",
+      "program": "${workspaceFolder}/client/bin/Release/net8.0-windows/client.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/client/bin/Release/net8.0-windows",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "启动服务端 author（WPF）",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "构建服务端 (author)",
+      "program": "${workspaceFolder}/author/Author/bin/Release/net8.0-windows/Author.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/author/Author/bin/Release/net8.0-windows",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}

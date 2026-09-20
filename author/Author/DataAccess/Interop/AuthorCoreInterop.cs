@@ -1,11 +1,14 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace author.Services;
+namespace author.DataAccess.Interop;
 
 /// <summary>
-/// P/Invoke 调用出题核心 authorcore.dll（C++）。
+/// authorcore.dll（C++ 出题核心）的原生 P/Invoke 声明。
+/// 仅做封送，不做业务判断；解析与编排在 DataAccess 客户端 / Business 服务层。
+/// 跨题并发说明：C++ 端 g_root/g_temp 初始化后只读，g_lastError 为 thread_local，
+/// 不同题号使用各自独立的题目目录与 temp 目录，可安全并发调用。
 /// </summary>
-public static class AuthorInterop
+public static class AuthorCoreInterop
 {
     private const string Dll = "authorcore.dll";
 
@@ -108,9 +111,9 @@ public static class AuthorInterop
 
     public static void Init(string root) => ac_init(root);
     public static string List() => Take(ac_list());
-    public static string Create(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string? title, [MarshalAs(UnmanagedType.LPUTF8Str)] string? desc, string? si, string? so)
+    public static string Create(int id, string? title, string? desc, string? si, string? so)
         => Take(ac_create(id, title, desc, si, so));
-    public static string SaveStatement(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string? title, [MarshalAs(UnmanagedType.LPUTF8Str)] string? desc, string? si, string? so)
+    public static string SaveStatement(int id, string? title, string? desc, string? si, string? so)
         => Take(ac_save_statement(id, title, desc, si, so));
     public static string SaveMeta(int id, int timeMs, int memMb, string tagsJson)
         => Take(ac_save_meta(id, timeMs, memMb, tagsJson));

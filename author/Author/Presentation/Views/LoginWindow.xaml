@@ -1,4 +1,4 @@
-﻿<Window x:Class="author.LoginWindow"
+﻿<Window x:Class="author.Presentation.Views.LoginWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="OJ 出题端 · 登录" Height="320" Width="400"

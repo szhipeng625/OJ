@@ -1,0 +1,109 @@
+﻿<Window x:Class="author.Presentation.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OJ 出题工作台 · 启动器" Height="660" Width="1180"
+        WindowStartupLocation="CenterScreen" FontSize="13">
+    <DockPanel Margin="12">
+        <!-- 底部状态栏 -->
+        <Border DockPanel.Dock="Bottom" Background="#F5F7FA" CornerRadius="4" Padding="10,6" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="StatusText" Text="就绪" TextWrapping="Wrap"/>
+                <TextBlock x:Name="TaskBadge" Text="" Foreground="#D48806" Margin="18,0,0,0" FontWeight="SemiBold"/>
+            </StackPanel>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360"/>
+                <ColumnDefinition Width="14"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ============ 左：题库（多窗口入口） ============ -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="出题工作台（服务端）" FontSize="18" FontWeight="Bold" Margin="0,0,0,6"/>
+                <TextBlock DockPanel.Dock="Top" x:Name="RootText" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="NewIdBox" Grid.Column="0" VerticalContentAlignment="Center" ToolTip="新题目编号（数字）"/>
+                    <Button Grid.Column="1" Content="新建" Width="64" Margin="6,0,0,0" Click="OnNewProblem"/>
+                    <Button Grid.Column="2" Content="打开工作台" Width="96" Margin="6,0,0,0" Click="OnOpenWorkspace"/>
+                </Grid>
+                <TextBlock DockPanel.Dock="Top" Foreground="#2d8cf0" FontSize="11" Margin="0,0,0,6"
+                           Text="双击题目可在独立窗口打开；不同题目可同时打开多个窗口并行编译/评测。"/>
+                <ListBox x:Name="ProblemList" MouseDoubleClick="OnOpenWorkspace">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock FontWeight="Bold">
+                                    <Run Text="P"/><Run Text="{Binding Id, Mode=OneWay}"/>
+                                    <Run Text="  "/><Run Text="{Binding Title, Mode=OneWay}"/>
+                                </TextBlock>
+                                <TextBlock Foreground="#888" FontSize="11" Text="{Binding DataText, Mode=OneWay}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- ============ 右：比赛管理 ============ -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="比赛管理" FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
+                    <WrapPanel Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="编号：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestIdBox" Width="60" VerticalContentAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="名称：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestNameBox" Width="150" VerticalContentAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="开始：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestStartBox" Width="140" VerticalContentAlignment="Center" ToolTip="2026-09-20 09:00"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="结束：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestEndBox" Width="140" VerticalContentAlignment="Center" ToolTip="2026-09-20 11:00"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="题目IDs：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestProblemsBox" Width="120" VerticalContentAlignment="Center" ToolTip="逗号分隔，如 1,2,3"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
+                            <TextBlock Text="目标目录：" VerticalAlignment="Center"/>
+                            <TextBox x:Name="ContestTargetBox" Width="150" VerticalContentAlignment="Center" Text="D:\OJ\server"/>
+                        </StackPanel>
+                        <Button Content="保存比赛" Width="80" Margin="0,0,6,0" Click="OnContestSave"/>
+                        <Button Content="发布" Width="70" Click="OnContestPublish"/>
+                    </WrapPanel>
+                </StackPanel>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="320"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <DockPanel Grid.Column="0">
+                        <TextBlock DockPanel.Dock="Top" Text="比赛列表：" Margin="0,0,0,4" Foreground="#888"/>
+                        <ListBox x:Name="ContestList" SelectionChanged="OnSelectContest"/>
+                    </DockPanel>
+                    <DockPanel Grid.Column="2">
+                        <TextBlock DockPanel.Dock="Top" Text="比赛描述 / 详情：" Margin="0,0,0,4" Foreground="#888"/>
+                        <TextBox x:Name="ContestDetailBox" IsReadOnly="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                    </DockPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>

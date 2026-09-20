@@ -19,7 +19,10 @@ Release/
 
 # ===== Visual Studio / IDE =====
 .vs/
-.vscode/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 *.user
 *.suo
 *.sln.docstates
@@ -70,3 +73,12 @@ client.csproj.user
 dist/
 store/
 **/problems/
+
+# ===== 本地测试脚手架（不上传） =====
+xshd_dump/
+author/drain_test/
+author/smoke_concurrency/
+
+# ===== LSM 运行时数据 / 本地生成配置 =====
+**/ojdata/
+author/Author/config.toml

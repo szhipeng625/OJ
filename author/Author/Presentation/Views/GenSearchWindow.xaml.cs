@@ -1,17 +1,14 @@
 ﻿using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
+using author.DataAccess.Models;
 
-namespace author;
+namespace author.Presentation.Views;
 
-/// <summary>跨题查找 gen.cpp 的一条命中。</summary>
-public record SearchHit(int Pid, string Title, int LineNo, string Line, string Keyword);
-
+/// <summary>跨题查找 gen.cpp 的结果窗口。</summary>
 public partial class GenSearchWindow : Window
 {
     public SearchHit? Selected { get; private set; }
 
-    public GenSearchWindow(System.Collections.Generic.List<SearchHit> hits, string keyword)
+    public GenSearchWindow(List<SearchHit> hits, string keyword)
     {
         InitializeComponent();
         HitList.ItemsSource = hits;

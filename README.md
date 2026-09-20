@@ -18,24 +18,33 @@ WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S �
 
 ```
 D:\OJ\
-├── client\                      判题客户端 + 内嵌 C++ 判题后端（client.sln 统一解决方案）
+├── client\                      判题客户端（WPF，三层架构）
 │   ├── client.sln               客户端解决方案（client + HandyControl + ojcore + lsm_shared）
-│   ├── MainWindow.xaml          主界面
-│   ├── Services\ApiClient.cs    P/Invoke 调 ojcore.dll
-│   └── ojcore\                  C++ 判题核心（即客户端的后端判题引擎，VS 2022 / v143）
-│       ├── ojcore.sln           判题核心独立解决方案（ojcore + lsm_shared + client）
-│       ├── ojcore.vcxproj       判题 DLL（导出 oj_init/oj_get_problems/oj_submit）
-│       ├── judge.cpp            判题核心（移植自 acmProblem\judge）
-│       └── lsm\                 tiny-lsm 源码（含 lsm_shared.vcxproj，VS 动态库工程）
-│           ├── lsm_shared.vcxproj   tiny-lsm → lsm_shared.dll（C++20，TINYLSM_EXPORTS）
-│           ├── src\ include\       LSM 引擎源码
-│           └── third_party\        spdlog / toml11（header-only，已内置）
-├── author\                      出题服务端（Author.sln，WPF + C++）
-│   ├── Author\                  WPF 出题工作台（HandyControl 本地源码，与 client 一致）
-│   ├── authorcore\              C++ 出题核心 DLL（建题/编译标程/生成答案/校验/分发）
-│   ├── problems\                服务端题库（独立于客户端）
-│   └── temp\                    标程/spj 编译产物（不随题目分发）
-└── server\                      （旧 Go 版后端，题目目录被客户端/服务端共用）
+│   ├── Presentation\            UI 层：Views（窗口）/ Controls（CodeEditor 等）/ Helpers
+│   │   └── Highlighting\
+│   │       └── CppDarkPlus.xshd C++ 语法高亮插件（VS Code Dark+ 配色，内嵌资源，改色无需改代码）
+│   ├── Business\Services\       业务逻辑层（Auth/Judge/Submit 等服务）
+│   ├── DataAccess\              数据访问层（Interop P/Invoke ojcore.dll、Models）
+│   ├── App.xaml.cs              组合根（DAL → BLL → UI）
+│   └── ojcore\                  C++ 判题核心（VS 2022 / v143，仅 x64）
+│       ├── ojcore.sln / ojcore.vcxproj   判题 DLL（oj_init/oj_get_problems/oj_submit）
+│       ├── judge.cpp            判题核心
+│       └── lsm\                 tiny-lsm 源码 → lsm_shared.dll（C++20）
+├── author\                      出题服务端（WPF + C++，三层架构，与 client 同构）
+│   ├── Author.sln
+│   ├── Author\                  WPF 出题工作台
+│   │   ├── Presentation\        Views（启动器/题目工作台/登录）/ Controls / Helpers（WorkspaceManager）
+│   │   ├── Business\Services\   BuildService（并发编译，同题串行/跨题并行，退出 Drain）等
+│   │   └── DataAccess\          Interop（authorcore/ojcore P/Invoke）、各 Client、Models
+│   ├── authorcore\              C++ 出题核心 DLL（authorcore.dll，仅 x64）
+│   ├── problems\                服务端题库（本地数据，git 忽略）
+│   └── temp\                    标程/spj 编译产物（git 忽略）
+├── shared\HandyControl\         本地 HandyControl 控件库源码（client/author 共用）
+├── server\problems\             判题/出题共用的题目目录
+├── scripts\build.ps1            一键构建/打包脚本（Visual Studio 与 VS Code 共用）
+├── .vscode\                     VS Code 任务（tasks.json）与调试（launch.json）配置
+├── docs\                        setup.sql、MYSQL.md、mysql_config.example.json
+└── build_all.bat                一键打包入口（内部调用 scripts\build.ps1）
 ```
 
 ## 用 VS 打开
@@ -73,13 +82,44 @@ ac_gen_outputs / ac_validate / ac_publish / ac_last_error / ac_free_string`。
 
 ## 一键出包
 
-双击 `D:\OJ\build_all.bat`（或命令行执行）：
+双击 `build_all.bat`，等价于命令行执行：
 
-1. MSBuild 构建 `ojcore.sln`（Release x64，lsm_shared + ojcore + client）
-2. `dotnet publish` 发布 WPF 客户端
-3. 产物汇聚到 `D:\OJ\dist\`，并校验 4 个关键文件
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -All -Publish
+```
 
-运行：双击 `D:\OJ\dist\client.exe`。
+流程：
+
+1. MSBuild 构建 C++ 核心（Release **x64**）：`ojcore`、`lsm_shared`、`authorcore`
+2. `dotnet publish` 客户端到 `dist\`、服务端到 `dist\author\`
+3. 自动补齐运行时原生依赖（ojcore.dll / lsm_shared.dll / libmysql.dll / mysql_config.json / authorcore.dll）
+
+运行：`dist\client.exe`（客户端）、`dist\author\Author.exe`（服务端）。
+
+`scripts\build.ps1` 常用参数：
+
+| 参数 | 作用 |
+|------|------|
+| `-Core` | 只构建三个 C++ DLL（x64） |
+| `-Client` / `-Author` | 只构建客户端 / 服务端（自动先构建 C++ 核心） |
+| `-All` | 全部构建（默认） |
+| `-Publish` | 发布到 `dist`（不带则只构建到各工程 bin，便于调试） |
+| `-Clean` | 清理所有构建/发布产物 |
+| `-Configuration Debug` | 切换配置（默认 Release） |
+
+## 用 VS Code 构建与调试
+
+1. 首次打开本仓库时按推荐安装 **C# Dev Kit** 与 **C/C++** 扩展（也可在 `.vscode/extensions.json` 查看）。
+2. `Ctrl+Shift+B` 选择任务：
+   - **构建全部（不发布，便于调试）**（默认构建任务）
+   - 构建 C++ 核心 / 构建客户端 / 构建服务端
+   - **打包发布到 dist（客户端 + 服务端）**
+   - 清理全部构建产物
+3. `F5` 选择「启动客户端 client」或「启动服务端 author」即可调试 WPF（会先自动构建对应工程）。
+
+> 注意：三个 C++ 工程只有 `Debug|x64` 与 `Release|x64` 两个配置，脚本已固定 `/p:Platform=x64`，
+> 在 Visual Studio 里也请把解决方案平台切到 **x64**，否则会报 MSB8013/MSB8020。
+> 运行判题/编译还需要 MinGW（g++）与 MySQL 8.0，见下文「运行」。
 
 ## Special Judge
 

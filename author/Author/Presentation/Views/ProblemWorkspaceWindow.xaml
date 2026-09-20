@@ -1,46 +1,11 @@
-﻿<Window x:Class="author.MainWindow"
+﻿<Window x:Class="author.Presentation.Views.ProblemWorkspaceWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:hc="https://handyorg.github.io/handycontrol"
-        xmlns:controls="clr-namespace:Author.Controls"
-        Title="出题工作台 · 服务端" Height="720" Width="1280"
+        xmlns:controls="clr-namespace:author.Presentation.Controls"
+        Title="题目工作台" Height="720" Width="1180"
         WindowStartupLocation="CenterScreen" FontSize="13">
-    <Grid Margin="12">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="280"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
-
-        <!-- ================= 左侧：题目列表 ================= -->
-        <DockPanel Grid.Column="0" Margin="0,0,12,0">
-            <TextBlock DockPanel.Dock="Top" Text="出题工作台（服务端）" FontSize="18" FontWeight="Bold" Margin="0,0,0,6"/>
-            <TextBlock DockPanel.Dock="Top" Text="{Binding RootText, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBox x:Name="NewIdBox" Grid.Column="0" VerticalContentAlignment="Center" ToolTip="新题目编号（数字）"/>
-                <Button Grid.Column="1" Content="新建" Width="64" Margin="6,0,0,0" Click="OnNewProblem"/>
-            </Grid>
-            <ListBox x:Name="ProblemList" DockPanel.Dock="Top" Margin="0,0,0,8" SelectionChanged="OnSelectProblem">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel>
-                            <TextBlock FontWeight="Bold">
-                                <Run Text="P"/><Run Text="{Binding Id, Mode=OneWay}"/>
-                                <Run Text="  "/><Run Text="{Binding Title, Mode=OneWay}"/>
-                            </TextBlock>
-                            <TextBlock Foreground="#888" FontSize="11" Text="{Binding DataText, Mode=OneWay}"/>
-                        </StackPanel>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-            <TextBlock x:Name="StatusText" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Text="就绪"/>
-        </DockPanel>
-
-        <!-- ================= 右侧：编辑区 ================= -->
-        <TabControl Grid.Column="1" x:Name="Tabs" IsEnabled="False">
+    <Grid>
+        <TabControl x:Name="Tabs" Margin="8">
             <!-- 题面 -->
             <TabItem Header="题面">
                 <Grid Margin="8">
@@ -141,7 +106,6 @@
             <!-- 数据生成 -->
             <TabItem Header="数据生成" x:Name="GenTab">
                 <DockPanel Margin="8">
-                    <!-- 跨题查找 -->
                     <Border DockPanel.Dock="Top" Background="#F5F7FA" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -155,15 +119,10 @@
                             <Button Grid.Column="2" Content="查找" Width="80" Margin="8,0,0,0" Click="OnGenSearch"/>
                         </Grid>
                     </Border>
-                    <!-- 操作栏 -->
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
                         <Button Content="保存代码（留版本）" Width="140" Click="OnGenSave"/>
                         <Button Content="导入文件" Width="90" Margin="6,0,0,0" Click="OnGenImportFile" ToolTip="导入 .cpp 文件作为生成器代码"/>
                         <Button Content="编译生成器" Width="100" Margin="6,0,0,0" Click="OnGenCompile"/>
-                        
-                        
-                        
-                        
                         <Button Content="生成数据" Width="90" Margin="6,0,0,0" Click="OnGenRun" ToolTip="编译并运行 gen.exe，stdout 重定向为编号.in"/>
                         <Button Content="导入选中.in到题目" Width="130" Margin="12,0,0,0" Click="OnGenImportToProblem" ToolTip="把选中的输入文件复制到本题测试数据目录，便于用标程生成 .out"/>
                         <Button Content="打开输出目录" Width="110" Margin="6,0,0,0" Click="OnOpenGenDir"/>
@@ -176,12 +135,10 @@
                             <ColumnDefinition Width="10"/>
                             <ColumnDefinition Width="440"/>
                         </Grid.ColumnDefinitions>
-                        <!-- 左：生成器代码 -->
                         <DockPanel Grid.Column="0">
-                            <TextBlock DockPanel.Dock="Top" Text="生成器代码 gen.cpp（自动生成 n 个测试数据，stdout 即测试输入）" Foreground="#888" Margin="0,0,0,4"/>
+                            <TextBlock DockPanel.Dock="Top" Text="生成器代码（自动生成测试数据，stdout 即测试输入）" Foreground="#888" Margin="0,0,0,4"/>
                             <controls:CodeEditor x:Name="GenBox"/>
                         </DockPanel>
-                        <!-- 右：版本 + 数据文件 -->
                         <Grid Grid.Column="2">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*"/>
@@ -217,64 +174,6 @@
                 </DockPanel>
             </TabItem>
 
-            <!-- 比赛 -->
-            <TabItem Header="比赛">
-                <Grid Margin="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="60"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="70"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="70"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="120"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="80"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="编号：" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                        <TextBox x:Name="ContestIdBox" Grid.Column="1" VerticalContentAlignment="Center"/>
-                        <TextBlock Grid.Column="2" Text="名称：" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                        <TextBox x:Name="ContestNameBox" Grid.Column="3" VerticalContentAlignment="Center"/>
-                        <TextBlock Grid.Column="4" Text="开始：" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                        <TextBox x:Name="ContestStartBox" Grid.Column="5" VerticalContentAlignment="Center" ToolTip="2026-09-20 09:00"/>
-                        <TextBlock Grid.Column="6" Text="结束：" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                        <TextBox x:Name="ContestEndBox" Grid.Column="7" VerticalContentAlignment="Center" ToolTip="2026-09-20 11:00"/>
-                        <TextBlock Grid.Column="8" Text="题目IDs：" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                        <TextBox x:Name="ContestProblemsBox" Grid.Column="9" VerticalContentAlignment="Center" ToolTip="逗号分隔，如 1,2,3"/>
-                        <TextBlock Grid.Column="10" Text="目标目录：" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                        <TextBox x:Name="ContestTargetBox" Grid.Column="11" VerticalContentAlignment="Center" Text="D:\OJ\server"/>
-                        <Button Grid.Column="12" Content="保存比赛" Margin="6,0,0,0" Click="OnContestSave"/>
-                        <Button Grid.Column="13" Content="发布" Margin="6,0,0,0" Click="OnContestPublish"/>
-                    </Grid>
-                    <Grid Grid.Row="1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="300"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <DockPanel Grid.Column="0">
-                            <TextBlock DockPanel.Dock="Top" Text="比赛列表：" Margin="0,0,0,4" Foreground="#888"/>
-                            <ListBox x:Name="ContestList" SelectionChanged="OnSelectContest"/>
-                        </DockPanel>
-                        <DockPanel Grid.Column="2">
-                            <TextBlock DockPanel.Dock="Top" Text="比赛描述 / 详情：" Margin="0,0,0,4" Foreground="#888"/>
-                            <TextBox x:Name="ContestDetailBox" IsReadOnly="True" TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-                        </DockPanel>
-                    </Grid>
-                </Grid>
-            </TabItem>
-
             <!-- 发布 -->
             <TabItem Header="发布">
                 <StackPanel Margin="8">
@@ -308,5 +207,14 @@
                 </StackPanel>
             </TabItem>
         </TabControl>
+
+        <!-- 后台任务遮罩（编译/评测/发布期间禁用编辑区） -->
+        <Border x:Name="BusyMask" Background="#80000000" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="240" Height="6"/>
+                <TextBlock x:Name="BusyText" Text="处理中…" Foreground="White" Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

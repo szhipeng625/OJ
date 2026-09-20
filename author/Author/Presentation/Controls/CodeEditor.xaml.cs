@@ -11,9 +11,10 @@ using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
+using System.IO;
 using System.Xml;
 
-namespace Author.Controls
+namespace author.Presentation.Controls
 {
     public partial class CodeEditor : UserControl
     {
@@ -69,109 +70,50 @@ namespace Author.Controls
             Editor.TextArea.KeyDown += TextArea_KeyDown;
         }
 
+        // 高亮定义名称（XSHD 插件，见 Presentation/Highlighting/CppDarkPlus.xshd）
+        private const string DarkDefinitionName = "C++ Dark+";
+        private static readonly object HighlightInitLock = new();
+
         private void SetupCppHighlighting()
         {
-            try
-            {
-                // 尝试加载内置 C++ 高亮
-                var builtIn = HighlightingManager.Instance.GetDefinition("C++");
-                if (builtIn != null)
-                {
-                    Editor.SyntaxHighlighting = builtIn;
-                    return;
-                }
-            }
-            catch { }
-
-            // 自定义 C++ 高亮
-            Editor.SyntaxHighlighting = CreateCppHighlighting();
+            Editor.SyntaxHighlighting = LoadDarkPlusDefinition();
         }
 
-        private static IHighlightingDefinition CreateCppHighlighting()
+        /// <summary>
+        /// 加载内嵌的 C++ Dark+ 高亮插件（XSHD）。插件缺失时回退到 AvalonEdit 内置 C++ 定义。
+        /// 想改配色/关键字：直接改 CppDarkPlus.xshd，无需动本文件。
+        /// </summary>
+        private static IHighlightingDefinition? LoadDarkPlusDefinition()
         {
-            var xshd = @"<?xml version=""1.0""?>
-<SyntaxDefinition name=""C++"" xmlns=""http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008"">
-  <Color name=""Comment"" foreground=""#6A9955"" fontStyle=""Italic""/>
-  <Color name=""String"" foreground=""#CE9178""/>
-  <Color name=""Char"" foreground=""#CE9178""/>
-  <Color name=""Number"" foreground=""#B5CEA8""/>
-  <Color name=""Keyword"" foreground=""#569CD6"" fontWeight=""bold""/>
-  <Color name=""Type"" foreground=""#4EC9B0""/>
-  <Color name=""Preprocessor"" foreground=""#C586C0""/>
-  <Color name=""Function"" foreground=""#DCDCAA""/>
+            lock (HighlightInitLock)
+            {
+                var registered = HighlightingManager.Instance.GetDefinition(DarkDefinitionName);
+                if (registered != null) return registered;
 
-  <RuleSet>
-    <Span color=""Comment"" multiline=""true"">
-      <Begin><!--</Begin>
-      <End>--></End>
-    </Span>
-    <Span color=""Comment"">
-      <Begin>//</Begin>
-    </Span>
-    <Span color=""String"">
-      <Begin>""</Begin>
-      <End>""</End>
-      <RuleSet>
-        <Span begin=""\\"" end=""[^0-9a-fA-FxXuU]"" color=""String""/>
-      </RuleSet>
-    </Span>
-    <Span color=""Char"">
-      <Begin>'</Begin>
-      <End>'</End>
-    </Span>
-    <Span color=""Preprocessor"">
-      <Begin>^\s*#</Begin>
-    </Span>
+                try
+                {
+                    var asm = typeof(CodeEditor).Assembly;
+                    var resName = asm.GetManifestResourceNames()
+                        .FirstOrDefault(n => n.EndsWith("CppDarkPlus.xshd", StringComparison.OrdinalIgnoreCase));
+                    if (resName != null)
+                    {
+                        using var stream = asm.GetManifestResourceStream(resName);
+                        if (stream != null)
+                        {
+                            using var reader = new XmlTextReader(stream);
+                            var def = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+                            HighlightingManager.Instance.RegisterHighlighting(DarkDefinitionName,
+                                new[] { ".cpp", ".hpp", ".cc", ".cxx", ".h", ".c" }, def);
+                            return def;
+                        }
+                    }
+                }
+                catch { }
 
-    <Keywords color=""Keyword"">
-      <Word>alignas</Word><Word>alignof</Word><Word>and</Word><Word>and_eq</Word>
-      <Word>asm</Word><Word>auto</Word><Word>bitand</Word><Word>bitor</Word>
-      <Word>bool</Word><Word>break</Word><Word>case</Word><Word>catch</Word>
-      <Word>char</Word><Word>char8_t</Word><Word>char16_t</Word><Word>char32_t</Word>
-      <Word>class</Word><Word>compl</Word><Word>concept</Word><Word>const</Word>
-      <Word>consteval</Word><Word>constexpr</Word><Word>constinit</Word><Word>const_cast</Word>
-      <Word>continue</Word><Word>co_await</Word><Word>co_return</Word><Word>co_yield</Word>
-      <Word>decltype</Word><Word>default</Word><Word>delete</Word><Word>do</Word>
-      <Word>double</Word><Word>dynamic_cast</Word><Word>else</Word><Word>enum</Word>
-      <Word>explicit</Word><Word>export</Word><Word>extern</Word><Word>false</Word>
-      <Word>float</Word><Word>for</Word><Word>friend</Word><Word>goto</Word>
-      <Word>if</Word><Word>inline</Word><Word>int</Word><Word>long</Word>
-      <Word>mutable</Word><Word>namespace</Word><Word>new</Word><Word>noexcept</Word>
-      <Word>not</Word><Word>not_eq</Word><Word>nullptr</Word><Word>operator</Word>
-      <Word>or</Word><Word>or_eq</Word><Word>private</Word><Word>protected</Word>
-      <Word>public</Word><Word>register</Word><Word>reinterpret_cast</Word><Word>requires</Word>
-      <Word>return</Word><Word>short</Word><Word>signed</Word><Word>sizeof</Word>
-      <Word>static</Word><Word>static_assert</Word><Word>static_cast</Word><Word>struct</Word>
-      <Word>switch</Word><Word>template</Word><Word>this</Word><Word>thread_local</Word>
-      <Word>throw</Word><Word>true</Word><Word>try</Word><Word>typedef</Word>
-      <Word>typeid</Word><Word>typename</Word><Word>union</Word><Word>unsigned</Word>
-      <Word>using</Word><Word>virtual</Word><Word>void</Word><Word>volatile</Word>
-      <Word>wchar_t</Word><Word>while</Word><Word>xor</Word><Word>xor_eq</Word>
-    </Keywords>
-
-    <Keywords color=""Type"">
-      <Word>std</Word><Word>string</Word><Word>vector</Word><Word>map</Word>
-      <Word>set</Word><Word>unordered_map</Word><Word>unordered_set</Word><Word>pair</Word>
-      <Word>queue</Word><Word>stack</Word><Word>deque</Word><Word>list</Word>
-      <Word>array</Word><Word>tuple</Word><Word>optional</Word><Word>variant</Word>
-      <Word>function</Word><Word>shared_ptr</Word><Word>unique_ptr</Word><Word>weak_ptr</Word>
-      <Word>iterator</Word><Word>size_t</Word><Word>ptrdiff_t</Word><Word>int8_t</Word>
-      <Word>int16_t</Word><Word>int32_t</Word><Word>int64_t</Word><Word>uint8_t</Word>
-      <Word>uint16_t</Word><Word>uint32_t</Word><Word>uint64_t</Word><Word>fstream</Word>
-      <Word>ifstream</Word><Word>ofstream</Word><Word>stringstream</Word><Word>istream</Word>
-      <Word>ostream</Word><Word>iostream</Word><Word>bitset</Word><Word>complex</Word>
-    </Keywords>
-
-    <Rule color=""Number"">\b\d+(\.\d+)?([eE][+-]?\d+)?[fFlLuU]?\b</Rule>
-    <Rule color=""Number"">\b0[xX][0-9a-fA-F]+[lLuU]?\b</Rule>
-    <Rule color=""Number"">\b0[0-7]+[lLuU]?\b</Rule>
-  </RuleSet>
-</SyntaxDefinition>";
-
-            using var reader = new XmlTextReader(new System.IO.StringReader(xshd));
-            return HighlightingLoader.Load(reader, HighlightingManager.Instance);
+                // 回退：AvalonEdit 内置 C++（浅色配色）
+                return HighlightingManager.Instance.GetDefinition("C++");
+            }
         }
-
         // C++ 补全项
         private static readonly List<CompletionData> CompletionItems = new()
         {
@@ -284,26 +226,30 @@ namespace Author.Controls
             if (prefix.Length == 0) return;
 
             var matches = CompletionItems
-                .Where(c => c.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+             .Where(c => c.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+             .Take(200)
+             .ToList();
             if (matches.Count == 0) return;
 
-            _completionWindow = new CompletionWindow(textArea)
+            var window = new CompletionWindow(textArea)
             {
                 Width = 320,
                 Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30)),
                 Foreground = Brushes.White,
+                StartOffset = line.Offset + wordStart,   // ★ 关键
             };
-            _completionWindow.CompletionList.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C));
-            _completionWindow.CompletionList.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30));
-            _completionWindow.CompletionList.Foreground = Brushes.White;
-            _completionWindow.CompletionList.SelectedItem = matches[0];
+            window.CompletionList.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C));
+            window.CompletionList.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30));
+            window.CompletionList.Foreground = Brushes.White;
 
             foreach (var item in matches)
-                _completionWindow.CompletionList.CompletionData.Add(item);
+                window.CompletionList.CompletionData.Add(item);
 
-            _completionWindow.Show();
-            _completionWindow.Closed += (s, e) => _completionWindow = null;
+            window.CompletionList.SelectItem(prefix);    // ★ 添加后再选中
+
+            window.Closed += (s, e) => { if (_completionWindow == window) _completionWindow = null; };
+            _completionWindow = window;
+            window.Show();
         }
     }
 

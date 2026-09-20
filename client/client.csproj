@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -39,5 +39,9 @@
     <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\ojcore.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\ojcore.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(SolutionDir)x64\$(Configuration)\lsm_shared.dll')" SourceFiles="$(SolutionDir)x64\$(Configuration)\lsm_shared.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Presentation\Highlighting\CppDarkPlus.xshd" />
+  </ItemGroup>
 
 </Project>

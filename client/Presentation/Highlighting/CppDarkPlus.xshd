@@ -1,0 +1,163 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  C++ 语法高亮插件（AvalonEdit XSHD）。
+  规则取自 AvalonEdit 6.3.1 内置 CPP-Mode.xshd（Andrea Paatz / Mike Krueger / Siegfried Pammer），
+  配色改为 Visual Studio Code Dark+（背景 #1E1E1E，编辑器默认前景 #D4D4D4），并补充 C++11/17/20 关键字。
+  修改配色只需改本文件，无需改 C# 代码。
+-->
+<SyntaxDefinition name="C++ Dark+" extensions=".c;.h;.cc;.cpp;.hpp;.cxx;.hxx"
+                  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <!-- ===== VS Code Dark+ 调色板 ===== -->
+  <Color name="Comment" foreground="#6A9955" fontStyle="italic" />
+  <Color name="Character" foreground="#CE9178" />
+  <Color name="String" foreground="#CE9178" />
+  <Color name="Preprocessor" foreground="#C586C0" />
+  <Color name="Punctuation" foreground="#D4D4D4" />
+  <Color name="MethodName" foreground="#DCDCAA" />
+  <Color name="Digits" foreground="#B5CEA8" />
+  <Color name="CompoundKeywords" foreground="#569CD6" />
+  <Color name="This" foreground="#569CD6" fontWeight="bold" />
+  <Color name="Operators" foreground="#D4D4D4" />
+  <Color name="Namespace" foreground="#569CD6" />
+  <Color name="Friend" foreground="#569CD6" />
+  <Color name="Modifiers" foreground="#569CD6" />
+  <Color name="TypeKeywords" foreground="#569CD6" />
+  <Color name="BooleanConstants" foreground="#569CD6" />
+  <Color name="Keywords" foreground="#569CD6" />
+  <Color name="LoopKeywords" foreground="#C586C0" />
+  <Color name="JumpKeywords" foreground="#C586C0" />
+  <Color name="ExceptionHandling" foreground="#C586C0" />
+  <Color name="ControlFlow" foreground="#C586C0" />
+  <!-- 类型 / STL 名（青色 #4EC9B0），补充内置规则未覆盖的常用类型 -->
+  <Color name="TypeNames" foreground="#4EC9B0" />
+
+  <RuleSet ignoreCase="false">
+    <Rule color="Punctuation">
+    [?,.;()\[\]{}+\-/%*&lt;&gt;^=~!&amp;]+
+    </Rule>
+
+    <Keywords color="CompoundKeywords">
+      <Word>__abstract</Word><Word>__box</Word><Word>__delegate</Word><Word>__gc</Word>
+      <Word>__identifier</Word><Word>__nogc</Word><Word>__pin</Word><Word>__property</Word>
+      <Word>__sealed</Word><Word>__try_cast</Word><Word>__typeof</Word><Word>__value</Word>
+      <Word>__event</Word><Word>__hook</Word><Word>__raise</Word><Word>__unhook</Word>
+      <Word>__interface</Word>
+      <Word>ref class</Word><Word>ref struct</Word><Word>value class</Word><Word>value struct</Word>
+      <Word>interface class</Word><Word>interface struct</Word><Word>enum class</Word><Word>enum struct</Word>
+      <Word>delegate</Word><Word>event</Word><Word>property</Word>
+      <Word>abstract</Word><Word>override</Word><Word>sealed</Word><Word>generic</Word><Word>where</Word>
+      <Word>finally</Word><Word>for each</Word><Word>gcnew</Word><Word>in</Word><Word>initonly</Word>
+      <Word>literal</Word><Word>nullptr</Word>
+    </Keywords>
+
+    <Keywords color="This">
+      <Word>this</Word>
+    </Keywords>
+
+    <Keywords color="Operators">
+      <Word>and</Word><Word>and_eq</Word><Word>bitand</Word><Word>bitor</Word>
+      <Word>new</Word><Word>delete</Word><Word>not</Word><Word>not_eq</Word>
+      <Word>or</Word><Word>or_eq</Word><Word>xor</Word><Word>xor_eq</Word>
+    </Keywords>
+
+    <Keywords color="Namespace">
+      <Word>using</Word><Word>namespace</Word>
+    </Keywords>
+
+    <Keywords color="Friend">
+      <Word>friend</Word>
+    </Keywords>
+
+    <Keywords color="Modifiers">
+      <Word>private</Word><Word>protected</Word><Word>public</Word><Word>const</Word>
+      <Word>volatile</Word><Word>static</Word>
+      <Word>constexpr</Word><Word>consteval</Word><Word>constinit</Word><Word>const_cast</Word>
+      <Word>explicit</Word><Word>extern</Word><Word>inline</Word><Word>mutable</Word>
+      <Word>register</Word><Word>thread_local</Word><Word>virtual</Word>
+    </Keywords>
+
+    <Keywords color="TypeKeywords">
+      <Word>bool</Word><Word>char</Word><Word>char8_t</Word><Word>char16_t</Word><Word>char32_t</Word>
+      <Word>wchar_t</Word><Word>unsigned</Word><Word>union</Word><Word>virtual</Word>
+      <Word>double</Word><Word>float</Word><Word>short</Word><Word>signed</Word>
+      <Word>void</Word><Word>int</Word><Word>long</Word>
+      <Word>class</Word><Word>enum</Word><Word>struct</Word>
+      <Word>auto</Word><Word>concept</Word><Word>requires</Word><Word>decltype</Word>
+      <Word>size_t</Word><Word>ptrdiff_t</Word><Word>int8_t</Word><Word>int16_t</Word>
+      <Word>int32_t</Word><Word>int64_t</Word><Word>uint8_t</Word><Word>uint16_t</Word>
+      <Word>uint32_t</Word><Word>uint64_t</Word>
+    </Keywords>
+
+    <Keywords color="BooleanConstants">
+      <Word>false</Word><Word>true</Word>
+    </Keywords>
+
+    <Keywords color="LoopKeywords">
+      <Word>do</Word><Word>for</Word><Word>while</Word><Word>co_await</Word><Word>co_return</Word><Word>co_yield</Word>
+    </Keywords>
+
+    <Keywords color="JumpKeywords">
+      <Word>break</Word><Word>continue</Word><Word>goto</Word><Word>return</Word>
+    </Keywords>
+
+    <Keywords color="ExceptionHandling">
+      <Word>catch</Word><Word>throw</Word><Word>try</Word><Word>noexcept</Word>
+    </Keywords>
+
+    <Keywords color="ControlFlow">
+      <Word>case</Word><Word>else</Word><Word>if</Word><Word>switch</Word><Word>default</Word>
+    </Keywords>
+
+    <Keywords color="Keywords">
+      <Word>asm</Word><Word>compl</Word><Word>dynamic_cast</Word><Word>export</Word>
+      <Word>operator</Word><Word>reinterpret_cast</Word><Word>sizeof</Word><Word>static_cast</Word>
+      <Word>template</Word><Word>typedef</Word><Word>typeid</Word><Word>typename</Word>
+      <Word>alignas</Word><Word>alignof</Word><Word>static_assert</Word>
+    </Keywords>
+
+    <!-- 常用 STL 类型名（青色），想扩充直接往这里加 <Word> -->
+    <Keywords color="TypeNames">
+      <Word>std</Word><Word>string</Word><Word>wstring</Word><Word>string_view</Word>
+      <Word>vector</Word><Word>map</Word><Word>unordered_map</Word><Word>set</Word><Word>unordered_set</Word>
+      <Word>multimap</Word><Word>multiset</Word><Word>unordered_multimap</Word><Word>unordered_multiset</Word>
+      <Word>pair</Word><Word>tuple</Word><Word>optional</Word><Word>variant</Word><Word>any</Word>
+      <Word>queue</Word><Word>stack</Word><Word>deque</Word><Word>list</Word><Word>forward_list</Word>
+      <Word>array</Word><Word>bitset</Word><Word>function</Word><Word>shared_ptr</Word>
+      <Word>unique_ptr</Word><Word>weak_ptr</Word><Word>intrusive_ptr</Word>
+      <Word>fstream</Word><Word>ifstream</Word><Word>ofstream</Word><Word>stringstream</Word>
+      <Word>istringstream</Word><Word>ostringstream</Word><Word>istream</Word><Word>ostream</Word>
+      <Word>iostream</Word><Word>complex</Word><Word>atomic</Word><Word>mutex</Word><Word>thread</Word>
+      <Word>future</Word><Word>promise</Word><Word>chrono</Word><Word>numeric_limits</Word>
+    </Keywords>
+
+    <Span color="Preprocessor">
+      <Begin>\#</Begin>
+    </Span>
+    <Span color="Comment">
+      <Begin>//</Begin>
+    </Span>
+    <Span color="Comment" multiline="true">
+      <Begin>/\*</Begin>
+      <End>\*/</End>
+    </Span>
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+    <Span color="Character">
+      <Begin>'</Begin>
+      <End>'</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- 函数名（后跟括号） -->
+    <Rule color="MethodName">[\d\w_]+(?=(\s*\())</Rule>
+    <!-- 数字：十六进制 / 浮点 / 科学计数 -->
+    <Rule color="Digits">\b0[xX][0-9a-fA-F']+|(\b\d[\d']*(\.[0-9]+)?|\.[0-9]+)([eE][+-]?[0-9]+)?[fFlLuU]*</Rule>
+  </RuleSet>
+</SyntaxDefinition>

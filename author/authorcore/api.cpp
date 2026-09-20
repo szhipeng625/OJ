@@ -15,8 +15,8 @@
 #include <cstdio>
 #include <cstring>
 // ===== 全局变量与工具函数（api.cpp / gen.cpp 共用） =====
-std::string g_root;          // 题库根目录
-std::string g_lastError;
+std::string g_root;          // 题库根目录（ac_init 后只读，多线程安全）
+thread_local std::string g_lastError;  // 最近错误：线程本地，支持多题并发编译/评测
 
 std::string readFile(const std::string& path) {
     std::ifstream f(path, std::ios::binary);

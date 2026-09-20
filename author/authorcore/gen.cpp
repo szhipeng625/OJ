@@ -16,7 +16,7 @@
 #include <cstring>
 // 来自 api.cpp 的全局变量
 extern std::string g_root;
-extern std::string g_lastError;
+extern thread_local std::string g_lastError;  // api.cpp 定义，线程本地
 
 // 来自 api.cpp 的全局工具函数
 std::string readFile(const std::string& path);
