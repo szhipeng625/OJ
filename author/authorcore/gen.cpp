@@ -57,23 +57,19 @@ std::string genOutDir(int id, const std::string& name) { return genDir(id, name)
 
 const char* kGenTemplate =
     "// 数据生成器 {name}.cpp\n"
-    "// 运行约定：argv[1] = 输出目录，argv[2] = 随机种子，argv[3] = 数据组数 n\n"
-    "// 将 1.in ~ n.in 写入输出目录（每行一个测试点内容，自行用 ofstream 写文件）。\n"
+    "// 运行约定：每个测试点独立运行一次，直接把测试数据输出到 stdout（cout）。\n"
+    "// 后台会把 stdout 重定向写入 1.in ~ n.in。\n"
+    "// argv[1]=输出目录, argv[2]=随机种子, argv[3]=总组数 n, argv[4]=当前组号 i（1 起）。\n"
     "#include <bits/stdc++.h>\n"
     "using namespace std;\n"
     "int main(int argc, char** argv) {\n"
-    "    string outDir = (argc > 1) ? argv[1] : \".\";\n"
     "    int seed = (argc > 2) ? atoi(argv[2]) : 1;\n"
-    "    int n = (argc > 3) ? atoi(argv[3]) : 1;\n"
     "    mt19937 rng((unsigned)seed);\n"
     "    uniform_int_distribution<int> dist(1, 100);\n"
-    "    for (int i = 1; i <= n; ++i) {\n"
-    "        int m = dist(rng);\n"
-    "        ofstream f(outDir + \"/\" + to_string(i) + \".in\");\n"
-    "        f << m << \"\\n\";\n"
-    "        for (int j = 0; j < m; ++j) f << (j ? \" \" : \"\") << dist(rng);\n"
-    "        f << \"\\n\";\n"
-    "    }\n"
+    "    int m = dist(rng);\n"
+    "    cout << m << \"\\n\";\n"
+    "    for (int j = 0; j < m; ++j) cout << (j ? \" \" : \"\") << dist(rng);\n"
+    "    cout << \"\\n\";\n"
     "    return 0;\n"
     "}\n";
 
@@ -94,47 +90,56 @@ long long fileSize(const std::string& path) {
     return li.QuadPart;
 }
 
-// 运行子进程并捕获 stdout（合并 stderr），超时毫秒
-struct RunCap {
+// 运行子进程并把 stdout 重定向到指定文件（stderr 捕获为错误文本），超时毫秒
+struct RunRedirect {
     bool ok = false;
     bool timeout = false;
     int exitCode = 0;
-    std::string output;
+    std::string errText;
 };
 
-RunCap runCapture(const std::string& exe, const std::string& args,
-                   const std::string& workDir, int timeoutMs) {
-    RunCap r;
+RunRedirect runRedirect(const std::string& exe, const std::string& args,
+                        const std::string& workDir, const std::string& outFile,
+                        int timeoutMs) {
+    RunRedirect r;
     SECURITY_ATTRIBUTES sa{sizeof(sa), NULL, TRUE};
-    HANDLE hOutRead = NULL, hOutWrite = NULL;
-    if (!CreatePipe(&hOutRead, &hOutWrite, &sa, 0)) return r;
-    SetHandleInformation(hOutRead, HANDLE_FLAG_INHERIT, 0);
+    HANDLE hErrRead = NULL, hErrWrite = NULL;
+    if (!CreatePipe(&hErrRead, &hErrWrite, &sa, 0)) return r;
+    SetHandleInformation(hErrRead, HANDLE_FLAG_INHERIT, 0);
+    HANDLE hOut = CreateFileA(outFile.c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hOut == INVALID_HANDLE_VALUE) {
+        CloseHandle(hErrRead); CloseHandle(hErrWrite);
+        r.errText = "无法创建输出文件: " + outFile;
+        return r;
+    }
     STARTUPINFOA si{sizeof(si)};
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = hOutWrite;
-    si.hStdError = hOutWrite;
+    si.hStdInput = NULL;
+    si.hStdOutput = hOut;
+    si.hStdError = hErrWrite;
     PROCESS_INFORMATION pi;
     std::string cmd = "\"" + exe + "\" " + args;
     std::vector<char> cmdBuf(cmd.begin(), cmd.end());
     cmdBuf.push_back('\0');
     if (!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
                          workDir.empty() ? NULL : workDir.c_str(), &si, &pi)) {
-        CloseHandle(hOutRead); CloseHandle(hOutWrite);
+        CloseHandle(hOut); CloseHandle(hErrRead); CloseHandle(hErrWrite);
+        r.errText = "启动失败";
         return r;
     }
-    CloseHandle(hOutWrite);
-    std::string out;
+    CloseHandle(hOut); CloseHandle(hErrWrite);
     char buf[8192];
     DWORD dwRead;
-    while (ReadFile(hOutRead, buf, sizeof(buf), &dwRead, NULL) && dwRead > 0)
-        out.append(buf, dwRead);
-    CloseHandle(hOutRead);
+    while (ReadFile(hErrRead, buf, sizeof(buf), &dwRead, NULL) && dwRead > 0)
+        r.errText.append(buf, dwRead);
+    CloseHandle(hErrRead);
     DWORD wait = WaitForSingleObject(pi.hProcess, timeoutMs);
     if (wait == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, 1); r.timeout = true; }
     GetExitCodeProcess(pi.hProcess, (LPDWORD)&r.exitCode);
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
     r.ok = !r.timeout && r.exitCode == 0;
-    r.output = out;
     return r;
 }
 
@@ -306,7 +311,7 @@ AC_API const char* ac_gen_compile(int id, const char* name) {
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
-// 运行生成器：生成 n 组数据写入 {题目}/{生成器}/ 下的 1.in 2.in ... n.in
+// 运行生成器：每个测试点独立运行一次，stdout 直接重定向到 {题目}/{生成器}/i.in
 AC_API const char* ac_gen_run(int id, const char* name, int n) {
     std::string gn = name ? name : "";
     if (n <= 0) n = 1;
@@ -344,30 +349,43 @@ AC_API const char* ac_gen_run(int id, const char* name, int n) {
         }
     }
 
-    // 生成器协议：argv[1]=输出目录, argv[2]=随机种子, argv[3]=组数 n
-    // 生成器自行把 1.in ~ n.in 写到输出目录（见 ac_gen_create 的模板）。
-    DWORD seed = GetTickCount();
-    std::string args = "\"" + outDir + "\" " + std::to_string(seed) + " " + std::to_string(n);
-    RunCap r = runCapture(exe, args, outDir, 60000);
-    if (r.timeout) {
-        g_lastError = "生成器运行超时（60s）";
-        return dup("{\"ok\":false,\"error\":\"生成器运行超时（60s）\"}");
+    // 生成器协议（cout 模式）：每个测试点运行一次，stdout 重定向到 i.in。
+    // argv[1]=输出目录, argv[2]=随机种子, argv[3]=总组数 n, argv[4]=当前组号 i（1 起）。
+    DWORD baseSeed = GetTickCount();
+    int generated = 0;
+    std::vector<std::string> fails;
+    for (int i = 1; i <= n; ++i) {
+        DWORD seed = baseSeed + i;
+        std::string args = "\"" + outDir + "\" " + std::to_string(seed)
+                         + " " + std::to_string(n) + " " + std::to_string(i);
+        std::string outFile = outDir + "\\" + std::to_string(i) + ".in";
+        RunRedirect rr = runRedirect(exe, args, outDir, outFile, 60000);
+        if (rr.timeout) { fails.push_back(std::to_string(i) + ".in：超时"); continue; }
+        if (!rr.ok) {
+            std::string e = std::to_string(i) + ".in：退出码 " + std::to_string(rr.exitCode);
+            if (!rr.errText.empty()) e += "：" + rr.errText.substr(0, 120);
+            fails.push_back(e);
+            continue;
+        }
+        ++generated;
     }
-    if (!r.ok) {
-        std::string err = "生成器退出码" + std::to_string(r.exitCode);
-        if (!r.output.empty()) err += ": " + r.output.substr(0, 200);
+
+    if (generated == 0) {
+        std::string err = "生成器没有产出任何数据";
+        if (!fails.empty()) err += "（" + fails.front() + "）";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
 
-    int cnt = genFileCount(id, gn);
-    if (cnt == 0) {
-        g_lastError = "生成器没有产出数据（请把 1.in ~ n.in 写入 argv[1] 指定的输出目录）";
-        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(g_lastError) + "\"}");
-    }
-    std::string json = "{\"ok\":true,\"generated\":" + std::to_string(cnt)
+    std::string json = "{\"ok\":true,\"generated\":" + std::to_string(generated)
         + ",\"total\":" + std::to_string(n)
-        + ",\"outDir\":\"" + jsonEscape(outDir) + "\",\"fails\":[]}";
+        + ",\"outDir\":\"" + jsonEscape(outDir) + "\""
+        + ",\"fails\":[";
+    for (size_t i = 0; i < fails.size(); ++i) {
+        if (i) json += ",";
+        json += "\"" + jsonEscape(fails[i]) + "\"";
+    }
+    json += "]}";
     g_lastError.clear();
     return dup(json);
 }

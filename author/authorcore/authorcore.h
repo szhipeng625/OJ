@@ -98,8 +98,9 @@ AC_API const char* ac_gen_save(int id, const char* name, const char* code);
 // 编译指定生成器为 exe（temp\\{id}\\{name}.exe），{"ok":true} / {"ok":false,"error":"..."}
 AC_API const char* ac_gen_compile(int id, const char* name);
 
-// 运行指定生成器，生成 n 组数据写入该生成器子目录（argv[1]=输出目录, argv[2]=种子, argv[3]=n）
-// {"ok":true,"generated":N,"total":N,"outDir":"...","fails":[]}
+// 运行指定生成器：每个测试点独立运行一次，stdout 重定向写入该生成器子目录的 1.in~n.in
+// （argv[1]=输出目录, argv[2]=种子, argv[3]=总组数 n, argv[4]=当前组号 i，生成器直接 cout 即可）
+// {"ok":true,"generated":N,"total":N,"outDir":"...","fails":[...]}
 AC_API const char* ac_gen_run(int id, const char* name, int n);
 
 // 指定生成器生成的数据文件列表，[{"name":"1.in","size":165,"modified":"09-19 20:09"}]

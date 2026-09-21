@@ -200,7 +200,7 @@
                                              Text="10" Margin="4,0,0,0"
                                              ToolTip="本次生成的数据组数 n（生成器 argv[3]）"/>
                                     <Button Content="生成数据" Width="90" Margin="6,0,0,0" Click="OnGenRun"
-                 ToolTip="生成器读取 argv[1]=输出目录 / argv[2]=种子 / argv[3]=组数，把 1.in~n.in 写到输出目录"/>
+                 ToolTip="每个测试点运行一次生成器，stdout 自动重定向到 1.in~n.in；生成器直接 cout 即可"/>
                                     <Button Content="打开目录" Width="80" Margin="6,0,0,0" Click="OnOpenGenDir"/>
                                 </StackPanel>
                             </DockPanel>
