@@ -66,32 +66,42 @@
                 </Grid>
             </TabItem>
 
-            <!-- 测试数据 -->
-            <TabItem Header="测试数据">
-                <DockPanel Margin="8">
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="自动搜索填充" Click="OnAutoFill" Width="120" Margin="0,0,6,0"
-                                ToolTip="从测试数据目录自动搜索 .in/.out 并填充到本题"/>
-                        <Button Content="导入 .in 文件" Click="OnImportIn" Width="110" Margin="0,0,6,0"/>
-                        <Button Content="导入 .out 文件" Click="OnImportOut" Width="110" Margin="0,0,6,0"/>
-                        <Button Content="运行标程生成答案" Click="OnGenOutputs" Width="150" Margin="0,0,6,0" ToolTip="用已编译的 std.exe 对所有 *.in 生成 *.out"/>
-                        <Button Content="删除选中" Click="OnDeleteData" Width="90"/>
-                    </StackPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="测试数据配对（.in ⇄ .out）：" Margin="0,0,0,4" Foreground="#888"/>
-                    <ListBox x:Name="DataList" DockPanel.Dock="Top" Height="260"/>
-                    <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                </DockPanel>
-            </TabItem>
+            <!-- 生成标准答案：标准程序 + 测试数据（生成器 .in ⇄ 标程 .out 放在一起） -->
+            <TabItem Header="生成标准答案">
+                <Grid Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.15*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="0.85*"/>
+                    </Grid.ColumnDefinitions>
 
-            <!-- 标程 -->
-            <TabItem Header="标程 (std.cpp)">
-                <DockPanel Margin="8">
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="保存并编译标程" Width="130" Click="OnCompileStd"/>
-                        <TextBlock x:Name="StdMsg" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#888" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <controls:CodeEditor x:Name="StdBox"/>
-                </DockPanel>
+                    <!-- 左：标准程序 std.cpp -->
+                    <DockPanel Grid.Column="0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                            <TextBlock Text="标准程序 std.cpp" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button DockPanel.Dock="Right" Content="保存并编译标程" Width="130" Click="OnCompileStd"/>
+                        </DockPanel>
+                        <TextBlock x:Name="StdMsg" DockPanel.Dock="Bottom" Foreground="#888" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <controls:CodeEditor x:Name="StdBox"/>
+                    </DockPanel>
+
+                    <!-- 右：测试数据（数据生成器生成 .in，标程运行生成 .out，统一展示） -->
+                    <DockPanel Grid.Column="2">
+                        <TextBlock DockPanel.Dock="Top" Text="测试数据（生成器生成 .in ⇄ 标程生成 .out）："
+                                   Margin="0,0,0,4" Foreground="#888" TextWrapping="Wrap"/>
+                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                            <Button Content="运行标程生成答案" Click="OnGenOutputs" Width="150" Margin="0,0,6,0"
+                                    ToolTip="用已编译的 std.exe 对所有 *.in 生成 *.out"/>
+                            <Button Content="自动搜索填充" Click="OnAutoFill" Width="120" Margin="0,0,6,0"
+                                    ToolTip="从测试数据目录自动搜索 .in/.out 并填充到本题"/>
+                            <Button Content="导入 .in" Click="OnImportIn" Width="80" Margin="0,0,6,0"/>
+                            <Button Content="导入 .out" Click="OnImportOut" Width="80" Margin="0,0,6,0"/>
+                            <Button Content="删除选中" Click="OnDeleteData" Width="90"/>
+                        </WrapPanel>
+                        <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <ListBox x:Name="DataList"/>
+                    </DockPanel>
+                </Grid>
             </TabItem>
 
             <!-- 数据生成 -->
