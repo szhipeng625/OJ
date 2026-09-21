@@ -2,6 +2,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using author.Business.Services;
 using author.DataAccess.Models;
@@ -92,10 +93,11 @@ public partial class ProblemWorkspaceWindow : Window
     // ---------- 测试数据 ----------
     private async Task RefreshDataList()
     {
-        var pairs = await _wb.Problems.ListDataAsync(_id);
+        var rows = await _wb.Problems.ListGroupedRowsAsync(_id);
         if (!IsLoaded) return;
-        DataList.ItemsSource = pairs;
-        DataList.DisplayMemberPath = nameof(DataPair.Display);
+        var view = new ListCollectionView(rows);
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(DataRow.GroupTitle)));
+        DataGroupView.ItemsSource = view;
     }
 
     private async void OnAutoFill(object sender, RoutedEventArgs e)
@@ -138,23 +140,24 @@ public partial class ProblemWorkspaceWindow : Window
         });
     }
 
-    private async void OnGenOutputs(object sender, RoutedEventArgs e)
+    private async void OnGenerateAnswers(object sender, RoutedEventArgs e)
     {
-        await RunBusy("正在运行标程生成答案…", async () =>
+        await RunBusy("正在自动搜索并生成标准答案…", async () =>
         {
-            var r = await _wb.Problems.GenOutputsAsync(_id);
+            var r = await _wb.Problems.GenerateAnswersAsync(_id, StdBox.Text, _testDataDir);
             if (IsLoaded) DataMsg.Text = r.Message;
             await RefreshDataList();
+            _mgr.NotifyProblemListChanged();
         });
     }
 
     private async void OnDeleteData(object sender, RoutedEventArgs e)
     {
-        if (DataList.SelectedItem is not DataPair pair) return;
+        if (DataGroupView.SelectedItem is not DataRow row) return;
         await RunBusy("正在删除…", async () =>
         {
-            await _wb.Problems.DeleteDataAsync(_id, pair.BaseName);
-            if (IsLoaded) DataMsg.Text = $"已删除 {pair.BaseName}";
+            await _wb.Problems.DeleteDataAsync(_id, row.GroupKey, row.BaseName);
+            if (IsLoaded) DataMsg.Text = $"已删除 {row.BaseName}（{row.GroupTitle}）";
             await RefreshDataList();
             _mgr.NotifyProblemListChanged();
         });
@@ -341,8 +344,27 @@ public partial class ProblemWorkspaceWindow : Window
             var sv = await _wb.Generators.SaveAsync(_id, _genName, GenBox.Text);
             if (!sv.Ok) { if (IsLoaded) GenMsg.Text = sv.Message; return; }
             var r = await _wb.Generators.RunAsync(_id, _genName, n);
-            if (IsLoaded) GenMsg.Text = r.Message;
+            if (!r.Ok)
+            {
+                if (IsLoaded) GenMsg.Text = r.Message;
+                await RefreshGenFiles();
+                return;
+            }
             await RefreshGenFiles();
+
+            // 后台自动运行标程，把标准程序输出重定向到对应的 .out 文件位置
+            string ans;
+            if (File.Exists(_wb.Problems.StdExePath(_id)))
+            {
+                var gr = await _wb.Problems.GenOutputsAsync(_id);
+                ans = gr.Message;
+            }
+            else
+            {
+                ans = "（标程尚未编译，未自动生成 .out；可到「生成标准答案」页一键生成）";
+            }
+            if (IsLoaded) GenMsg.Text = r.Message + "\n" + ans;
+            _mgr.NotifyProblemListChanged();
         });
     }
 

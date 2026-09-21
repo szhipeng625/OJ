@@ -85,13 +85,13 @@
                         <controls:CodeEditor x:Name="StdBox"/>
                     </DockPanel>
 
-                    <!-- 右：测试数据（数据生成器生成 .in，标程运行生成 .out，统一展示） -->
+                    <!-- 右：测试数据（生成器生成 .in 一列，标程生成 .out 一列，按生成器组别一一对应） -->
                     <DockPanel Grid.Column="2">
-                        <TextBlock DockPanel.Dock="Top" Text="测试数据（生成器生成 .in ⇄ 标程生成 .out）："
+                        <TextBlock DockPanel.Dock="Top" Text="测试数据（左列输入 .in，右列输出 .out，按生成器组别一一对应）："
                                    Margin="0,0,0,4" Foreground="#888" TextWrapping="Wrap"/>
                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                            <Button Content="运行标程生成答案" Click="OnGenOutputs" Width="150" Margin="0,0,6,0"
-                                    ToolTip="用已编译的 std.exe 对所有 *.in 生成 *.out"/>
+                            <Button Content="生成标准答案" Click="OnGenerateAnswers" Width="130" Margin="0,0,6,0"
+                                    ToolTip="后台自动搜索填充 .in/.out → 编译标程 → 运行标程把输出重定向到对应 .out"/>
                             <Button Content="自动搜索填充" Click="OnAutoFill" Width="120" Margin="0,0,6,0"
                                     ToolTip="从测试数据目录自动搜索 .in/.out 并填充到本题"/>
                             <Button Content="导入 .in" Click="OnImportIn" Width="80" Margin="0,0,6,0"/>
@@ -99,7 +99,23 @@
                             <Button Content="删除选中" Click="OnDeleteData" Width="90"/>
                         </WrapPanel>
                         <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                        <ListBox x:Name="DataList"/>
+                        <ListView x:Name="DataGroupView" BorderThickness="1" BorderBrush="#FFE3E6EB">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="输入数据 (.in)" Width="190" DisplayMemberBinding="{Binding InDisplay}"/>
+                                    <GridViewColumn Header="输出数据 (.out)" Width="190" DisplayMemberBinding="{Binding OutDisplay}"/>
+                                </GridView>
+                            </ListView.View>
+                            <ListView.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <TextBlock FontWeight="Bold" Margin="0,6,0,2" Foreground="#2d8cf0" Text="{Binding Name}"/>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListView.GroupStyle>
+                        </ListView>
                     </DockPanel>
                 </Grid>
             </TabItem>

@@ -17,6 +17,16 @@ public record DataPair(string BaseName, bool HasOut)
         : $"{BaseName}.in ⇄ {BaseName}.out  ✗ 缺答案";
 }
 
+/// <summary>
+/// 「生成标准答案」页的一行：某组别（生成器 / 根目录）下的一组输入输出数据。
+/// GroupKey 用于删除时定位目录，GroupTitle 用于界面分组显示。
+/// </summary>
+public sealed record DataRow(string GroupKey, string GroupTitle, string BaseName, string InFile, string OutFile, bool HasOut)
+{
+    public string InDisplay => InFile;
+    public string OutDisplay => HasOut ? OutFile : "缺 " + OutFile + "（未生成）";
+}
+
 /// <summary>加载一道题时需要的全部文件内容。</summary>
 public record ProblemContent(
     string StatementTitle,

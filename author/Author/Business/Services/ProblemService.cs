@@ -75,11 +75,15 @@ public sealed class ProblemService
     public Task<List<DataPair>> ListDataAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.ListDataPairs(id));
 
+    /// <summary>按组别（根目录 + 各生成器）列出输入/输出数据，供两列展示。</summary>
+    public Task<List<DataRow>> ListGroupedRowsAsync(int id)
+        => _build.RunAsync(Gate(id), () => _author.ListGroupedRows(id));
+
     public Task<int> ImportDataAsync(int id, IEnumerable<string> files)
         => _build.RunAsync(Gate(id), () => _author.ImportFiles(id, files));
 
-    public Task DeleteDataAsync(int id, string baseName)
-        => _build.RunAsync(Gate(id), () => _author.DeleteDataPair(id, baseName));
+    public Task DeleteDataAsync(int id, string group, string baseName)
+        => _build.RunAsync(Gate(id), () => _author.DeleteDataPairInGroup(id, group, baseName));
 
     /// <summary>保存并编译标程。</summary>
     public Task<JobResult> CompileStdAsync(int id, string code)
@@ -97,13 +101,13 @@ public sealed class ProblemService
                 : new JobResult(false, "编译失败：" + AuthorClient.ParseError(r));
         });
 
-    /// <summary>运行标程对所有 *.in 生成 *.out。</summary>
+    /// <summary>运行标程对所有 *.in 生成 *.out（stdout 重定向到对应 .out 文件）。</summary>
     public Task<JobResult> GenOutputsAsync(int id)
         => _build.RunAsync(Gate(id), () =>
         {
             string stdExe = _author.StdExePath(id);
             if (!File.Exists(stdExe))
-                return new JobResult(false, "请先在「标程」页保存并编译标程");
+                return new JobResult(false, "标程尚未编译，请先保存并编译标程");
             string r = _author.GenOutputs(id, stdExe);
             try
             {
@@ -114,6 +118,44 @@ public sealed class ProblemService
                 return new JobResult(true, string.Join("\n", lines));
             }
             catch { return new JobResult(true, r); }
+        });
+
+    /// <summary>
+    /// 一键生成标准答案：后台自动搜索填充 .in/.out → 编译标程 → 运行标程把输出重定向到各 .out。
+    /// </summary>
+    public Task<JobResult> GenerateAnswersAsync(int id, string stdCode, string testDataDir)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            string stdExe = _author.StdExePath(id);
+            Directory.CreateDirectory(Path.GetDirectoryName(stdExe)!);
+            _author.WriteProblemFile(id, "std.cpp", stdCode);
+            string r = _author.Compile(_author.ProblemDir(id) + "\\std.cpp", stdExe);
+            if (!r.Contains("\"ok\":true"))
+                return new JobResult(false, "标程编译失败：" + AuthorClient.ParseError(r));
+
+            var (inCnt, outCnt) = _author.AutoFillData(id, testDataDir);
+            string fillMsg = inCnt > 0 ? $"自动搜索填充 {inCnt} 个 .in / {outCnt} 个 .out；" : "";
+
+            string gr = _author.GenOutputs(id, stdExe);
+            int okCount = 0;
+            var fails = new List<string>();
+            try
+            {
+                using var doc = JsonDocument.Parse(gr);
+                foreach (var x in doc.RootElement.GetProperty("results").EnumerateArray())
+                {
+                    string file = x.GetProperty("file").GetString() ?? "";
+                    string status = x.GetProperty("status").GetString() ?? "";
+                    if (status == "OK") okCount++;
+                    else fails.Add($"{file}({status})");
+                }
+            }
+            catch { /* 解析失败按 0 处理 */ }
+
+            if (okCount > 0)
+                return new JobResult(true, fillMsg + $"标准答案生成完成：{okCount} 组 .out 已就位"
+                    + (fails.Count > 0 ? "；失败：" + string.Join("、", fails.Take(5)) : ""));
+            return new JobResult(false, fillMsg + "没有生成标准答案（未找到 .in 或标程运行失败）");
         });
 
     /// <summary>完整性校验，返回展示文本。</summary>

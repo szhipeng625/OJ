@@ -188,6 +188,44 @@ public sealed class AuthorClient
         if (File.Exists(outF)) File.Delete(outF);
     }
 
+    /// <summary>
+    /// 按组别（题目根目录 + 各数据生成器子目录）列出所有输入/输出数据，
+    /// 供「生成标准答案」页两列展示，并可按生成器组别一一对应。
+    /// </summary>
+    public List<DataRow> ListGroupedRows(int id)
+    {
+        var rows = new List<DataRow>();
+        AddGroup(rows, "", "手工数据（题目根目录）", ProblemDir(id));
+        foreach (var g in ListGenerators(id))
+        {
+            string title = "生成器 " + g.Name + (string.IsNullOrEmpty(g.Desc) ? "" : "（" + g.Desc + "）");
+            AddGroup(rows, g.Name, title, GenOutDir(id, g.Name));
+        }
+        return rows;
+    }
+
+    private static void AddGroup(List<DataRow> rows, string groupKey, string groupTitle, string dir)
+    {
+        if (!Directory.Exists(dir)) return;
+        foreach (var f in Directory.GetFiles(dir, "*.in").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            string baseName = Path.GetFileNameWithoutExtension(f);
+            string outFile = baseName + ".out";
+            bool hasOut = File.Exists(Path.Combine(dir, outFile));
+            rows.Add(new DataRow(groupKey, groupTitle, baseName, Path.GetFileName(f), outFile, hasOut));
+        }
+    }
+
+    /// <summary>删除指定组别（生成器目录或题目根目录）下的一组 .in/.out。</summary>
+    public void DeleteDataPairInGroup(int id, string group, string baseName)
+    {
+        string dir = string.IsNullOrEmpty(group) ? ProblemDir(id) : GenOutDir(id, group);
+        string inF = Path.Combine(dir, baseName + ".in");
+        string outF = Path.Combine(dir, baseName + ".out");
+        if (File.Exists(inF)) File.Delete(inF);
+        if (File.Exists(outF)) File.Delete(outF);
+    }
+
     // ===== 生成器本地文件（authorcore，多生成器编程） =====
     /// <summary>列出题目下所有数据生成器。</summary>
     public List<GenSummary> ListGenerators(int id)
