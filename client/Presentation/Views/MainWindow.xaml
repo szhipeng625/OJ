@@ -100,95 +100,209 @@
             <!-- ================= 比赛 ================= -->
             <TabItem x:Name="ContestTab" Header="比赛" IsEnabled="False">
                 <Grid Margin="4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="240"/>
-                        <ColumnDefinition Width="10"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="10"/>
-                        <ColumnDefinition Width="260"/>
-                    </Grid.ColumnDefinitions>
+                    <!-- ============ 视图一：比赛列表（未进入比赛前只看得到列表） ============ -->
+                    <Grid x:Name="ContestListView">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="340"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                    <!-- 左：比赛列表 + 题目列表 -->
-                    <DockPanel Grid.Column="0">
-                        <TextBlock DockPanel.Dock="Top" Text="比赛列表" FontWeight="SemiBold" Margin="4,4,0,4"/>
-                        <ListBox x:Name="ContestList" DockPanel.Dock="Top" Height="180"
-                                 SelectionChanged="OnSelectContest"/>
-                        <TextBlock DockPanel.Dock="Top" Text="比赛题目" FontWeight="SemiBold" Margin="4,8,0,4"/>
-                        <ListBox x:Name="ContestProblemList" BorderThickness="0" Background="Transparent"
-                                 SelectionChanged="OnSelectContestProblem"/>
-                    </DockPanel>
-
-                    <!-- 中：做题区 -->
-                    <Grid Grid.Column="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="1.6*"/>
-                            <RowDefinition Height="6"/>
-                            <RowDefinition Height="2.6*"/>
-                            <RowDefinition Height="6"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="6"/>
-                            <RowDefinition Height="140"/>
-                        </Grid.RowDefinitions>
-
-                        <!-- 比赛信息条 -->
-                        <Border Grid.Row="0" Background="#FFF0F4FB" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
-                            <DockPanel>
-                                <CheckBox x:Name="VirtualBox" DockPanel.Dock="Right" Content="虚拟参赛"
-                                          VerticalAlignment="Center" Margin="12,0,0,0" ToolTip="比赛结束后可虚拟参赛，提交计入虚拟榜"/>
-                                <Button DockPanel.Dock="Right" Content="刷新榜单" Width="90" Margin="0,0,12,0"
-                                        Click="OnRefreshBoard"/>
-                                <TextBlock x:Name="ContestInfoText" VerticalAlignment="Center"
-                                           TextWrapping="Wrap" Foreground="#333"/>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- 题目描述 -->
-                        <Border Grid.Row="1" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="12">
-                            <DockPanel>
-                                <TextBlock x:Name="ContestMetaText" DockPanel.Dock="Top" Margin="0,0,0,4"
-                                           Foreground="#666" FontSize="12" TextWrapping="Wrap"/>
-                                <TextBlock DockPanel.Dock="Top" Text="题目描述" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                <WebBrowser x:Name="ContestDescBox"/>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- 代码编辑 -->
-                        <Border Grid.Row="3" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
-                            <DockPanel>
-                                <Border Background="#1E1E1E" CornerRadius="0" Margin="10">
-                                    <controls:CodeEditor x:Name="ContestCodeBox" Text="#include &lt;iostream&gt;&#x0a;using namespace std;&#x0a;int main(){&#x0a;    return 0;&#x0a;}"/>
-                                </Border>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- 提交栏 -->
-                        <DockPanel Grid.Row="5">
-                            <Button x:Name="ContestSubmitBtn" Content="提交判题" Style="{StaticResource ButtonPrimary}"
-                                    Width="120" Height="34" Click="ContestSubmit_OnClick"/>
-                            <TextBlock x:Name="ContestStatusText" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="Gray"/>
+                        <DockPanel Grid.Column="0">
+                            <Grid DockPanel.Dock="Top" Margin="4,4,4,8">
+                                <TextBlock Text="比赛列表" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right" Click="OnRefreshContests"/>
+                            </Grid>
+                            <ListBox x:Name="ContestList" SelectionChanged="OnSelectContest"/>
                         </DockPanel>
 
-                        <!-- 结果 -->
-                        <Border Grid.Row="7" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="12">
+                        <Border Grid.Column="2" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="14">
                             <DockPanel>
-                                <TextBlock x:Name="ContestVerdictText" DockPanel.Dock="Top" Text="结果：等待提交"
-                                           FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
-                                <ListBox x:Name="ContestCaseList" BorderThickness="0"/>
+                                <StackPanel x:Name="ContestDetailHead" DockPanel.Dock="Top">
+                                    <TextBlock x:Name="ContestListTitle" FontSize="16" FontWeight="SemiBold"
+                                               Text="请选择左侧比赛" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="ContestListMeta" Foreground="#666" FontSize="12"
+                                               Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                    <TextBlock Text="比赛说明" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                                </StackPanel>
+                                <Border DockPanel.Dock="Bottom" Background="#FFF7F9FC" CornerRadius="6"
+                                        Padding="10" Margin="0,10,0,0">
+                                    <StackPanel>
+                                        <CheckBox x:Name="RegisterVirtualBox" Margin="0,2"
+                                                  Content="虚拟参赛（比赛结束后补赛，不计正式排名）"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <Button x:Name="RegisterBtn" Content="报名"
+                                                    Style="{StaticResource ButtonPrimary}"
+                                                    Width="120" Height="34" Click="OnRegisterContest"/>
+                                            <Button x:Name="EnterContestBtn" Content="进入比赛"
+                                                    Style="{StaticResource ButtonPrimary}"
+                                                    Width="120" Height="34" Margin="10,0,0,0"
+                                                    Click="OnEnterContest" Visibility="Collapsed"/>
+                                            <TextBlock x:Name="RegisterHint" VerticalAlignment="Center"
+                                                       Margin="12,0,0,0" Foreground="Gray" FontSize="12"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <WebBrowser x:Name="ContestListDesc"/>
                             </DockPanel>
                         </Border>
                     </Grid>
 
-                    <!-- 右：榜单 -->
-                    <Border Grid.Column="4" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="10">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="正式榜" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <ListBox x:Name="BoardListOfficial" DockPanel.Dock="Top" Height="220"
-                                     BorderThickness="0"/>
-                            <TextBlock DockPanel.Dock="Top" Text="虚拟榜" FontWeight="SemiBold" Margin="0,8,0,4"/>
-                            <ListBox x:Name="BoardListVirtual" BorderThickness="0"/>
-                        </DockPanel>
-                    </Border>
+                    <!-- ============ 视图二：比赛工作台 ============ -->
+                    <Grid x:Name="ContestRoomView" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- 比赛导航栏：做题 / 排行榜 / 提交记录 -->
+                        <Border Grid.Row="0" Background="#FFF0F4FB" CornerRadius="6" Padding="8,6" Margin="0,0,0,6">
+                            <DockPanel LastChildFill="False">
+                                <Button Content="&#x2190; 返回比赛列表" Width="120" Height="32"
+                                        HorizontalAlignment="Left" Click="OnExitContest"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                            DockPanel.Dock="Right">
+                                    <Button x:Name="NavSolveBtn" Content="做题" Width="90" Height="32"
+                                            Margin="4,0" Click="OnNavSolve"/>
+                                    <Button x:Name="NavBoardBtn" Content="排行榜" Width="90" Height="32"
+                                            Margin="4,0" Click="OnNavBoard"/>
+                                    <Button x:Name="NavSubsBtn" Content="提交记录" Width="90" Height="32"
+                                            Margin="4,0" Click="OnNavSubmissions"/>
+                                </StackPanel>
+                                <TextBlock x:Name="RoomTitle" FontWeight="SemiBold" FontSize="14"
+                                           VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- 做题页：左题目、右代码 -->
+                        <Grid x:Name="RoomSolvePanel" Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <DockPanel Grid.Column="0">
+                                <TextBlock DockPanel.Dock="Top" Text="本场题目" FontWeight="SemiBold"
+                                           Margin="4,4,0,6"/>
+                                <ListBox x:Name="ContestProblemList" SelectionChanged="OnSelectContestProblem"/>
+                            </DockPanel>
+
+                            <Grid Grid.Column="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="1.6*"/>
+                                    <RowDefinition Height="6"/>
+                                    <RowDefinition Height="2.6*"/>
+                                    <RowDefinition Height="6"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="6"/>
+                                    <RowDefinition Height="140"/>
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Background="#FFF0F4FB" CornerRadius="6"
+                                        Padding="10,8" Margin="0,0,0,6">
+                                    <TextBlock x:Name="ContestInfoText" VerticalAlignment="Center"
+                                               TextWrapping="Wrap" Foreground="#333"/>
+                                </Border>
+
+                                <Border Grid.Row="1" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                        CornerRadius="8" Padding="12">
+                                    <DockPanel>
+                                        <TextBlock x:Name="ContestMetaText" DockPanel.Dock="Top"
+                                                   Margin="0,0,0,4" Foreground="#666" FontSize="12"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock DockPanel.Dock="Top" Text="题目描述" FontWeight="SemiBold"
+                                                   Margin="0,0,0,4"/>
+                                        <WebBrowser x:Name="ContestDescBox"/>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Grid.Row="3" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
+                                    <Border Background="#1E1E1E" CornerRadius="0" Margin="10">
+                                        <controls:CodeEditor x:Name="ContestCodeBox"
+                                                             Text="#include &lt;iostream&gt;&#x0a;using namespace std;&#x0a;int main(){&#x0a;    return 0;&#x0a;}"/>
+                                    </Border>
+                                </Border>
+
+                                <DockPanel Grid.Row="5">
+                                    <Button x:Name="ContestSubmitBtn" Content="提交判题"
+                                            Style="{StaticResource ButtonPrimary}"
+                                            Width="120" Height="34" Click="ContestSubmit_OnClick"/>
+                                    <TextBlock x:Name="ContestStatusText" VerticalAlignment="Center"
+                                               Margin="14,0,0,0" Foreground="Gray"/>
+                                </DockPanel>
+
+                                <Border Grid.Row="7" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                        CornerRadius="8" Padding="12">
+                                    <DockPanel>
+                                        <TextBlock x:Name="ContestVerdictText" DockPanel.Dock="Top"
+                                                   Text="结果：等待提交" FontSize="14" FontWeight="Bold"
+                                                   Margin="0,0,0,6"/>
+                                        <ListBox x:Name="ContestCaseList" BorderThickness="0"/>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
+                        </Grid>
+
+                        <!-- 排行榜页 -->
+                        <Border x:Name="RoomBoardPanel" Grid.Row="1" Visibility="Collapsed"
+                                BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="10">
+                            <DockPanel>
+                                <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
+                                               Text="排行榜（带 * 为虚拟参赛者，不占正式名次，位置按成绩排列）"/>
+                                    <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right"
+                                            Click="OnRefreshBoard"/>
+                                </Grid>
+                                <ListView x:Name="BoardListView">
+                                    <ListView.View>
+                                        <GridView>
+                                            <GridViewColumn Header="名次" Width="80"
+                                                            DisplayMemberBinding="{Binding Rank}"/>
+                                            <GridViewColumn Header="用户" Width="220"
+                                                            DisplayMemberBinding="{Binding Username}"/>
+                                            <GridViewColumn Header="AC 数" Width="80"
+                                                            DisplayMemberBinding="{Binding Solved}"/>
+                                            <GridViewColumn Header="罚时(分)" Width="100"
+                                                            DisplayMemberBinding="{Binding Penalty}"/>
+                                        </GridView>
+                                    </ListView.View>
+                                </ListView>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- 提交记录页 -->
+                        <Border x:Name="RoomSubsPanel" Grid.Row="1" Visibility="Collapsed"
+                                BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="10">
+                            <DockPanel>
+                                <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
+                                               Text="本场提交记录（每人每题保留最后一次提交结果，按时间倒序）"/>
+                                    <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right"
+                                            Click="OnRefreshSubmissions"/>
+                                </Grid>
+                                <ListView x:Name="SubmissionListView">
+                                    <ListView.View>
+                                        <GridView>
+                                            <GridViewColumn Header="提交时间" Width="160"
+                                                            DisplayMemberBinding="{Binding Ts}"/>
+                                            <GridViewColumn Header="题号" Width="70"
+                                                            DisplayMemberBinding="{Binding ProblemId}"/>
+                                            <GridViewColumn Header="用户" Width="150"
+                                                            DisplayMemberBinding="{Binding Username}"/>
+                                            <GridViewColumn Header="结果" Width="70"
+                                                            DisplayMemberBinding="{Binding Verdict}"/>
+                                            <GridViewColumn Header="详情" Width="260"
+                                                            DisplayMemberBinding="{Binding Detail}"/>
+                                            <GridViewColumn Header="类型" Width="70"
+                                                            DisplayMemberBinding="{Binding Kind}"/>
+                                        </GridView>
+                                    </ListView.View>
+                                </ListView>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
                 </Grid>
             </TabItem>
         </TabControl>

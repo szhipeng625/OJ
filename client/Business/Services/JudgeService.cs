@@ -24,6 +24,18 @@ public class JudgeService
 
     public Task<BoardData?> GetBoardAsync(int contestId) => _api.GetBoardAsync(contestId);
 
+    public Task<SubmitResult?> SubmitContestAsync(int problemId, string code, string username, bool virt, int contestId)
+        => _api.SubmitContestAsync(problemId, code, username, virt, contestId);
+
+    public Task<ContestRegistration> RegisterContestAsync(int contestId, string username, bool virt)
+        => _api.RegisterContestAsync(contestId, username, virt);
+
+    public Task<ContestRegistration> GetContestRegistrationAsync(int contestId, string username)
+        => _api.GetContestRegistrationAsync(contestId, username);
+
+    public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int contestId)
+        => _api.GetContestSubmissionsAsync(contestId);
+
     /// <summary>按比赛配置的题目编号集合过滤出比赛题目（业务规则）。</summary>
     public List<Problem> FilterContestProblems(List<Problem> all, IEnumerable<int> problemIds)
     {

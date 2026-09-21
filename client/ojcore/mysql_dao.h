@@ -43,6 +43,16 @@ bool mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
 // 按用户名查用户 id（存在返回 true 并填 out_user_id）
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id);
 
+// 比赛报名（幂等：重复报名更新虚拟标记）
+bool mysql_contest_register(long long user_id, int contest_id, bool virt, std::string& err);
+
+// 查询某用户的报名状态：registered=是否已报名，virt=是否虚拟参赛
+bool mysql_contest_registration(long long user_id, int contest_id,
+                                bool& registered, bool& virt);
+
+// 比赛提交记录 JSON 数组（时间倒序；每人每题保留最后一次结果）
+bool mysql_contest_submissions(int cid, std::string& out_json);
+
 // 榜单聚合：official / virtual 两个 JSON 数组（ICPC 规则，20 分钟罚时）
 bool mysql_board(int cid, const std::string& start_str,
                  const std::string& problems_csv,

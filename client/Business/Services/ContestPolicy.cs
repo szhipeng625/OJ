@@ -1,4 +1,6 @@
-﻿namespace client.Business.Services;
+﻿using client.DataAccess.Models;
+
+namespace client.Business.Services;
 
 /// <summary>
 /// BLL：比赛时间窗口等纯业务规则，不依赖 UI 与 DAL，可独立测试。
@@ -40,5 +42,41 @@ public static class ContestPolicy
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// 合并正式榜与虚拟榜为一张榜：按 AC 数降序、罚时升序排列（同名次正式选手在前）。
+    /// 正式选手名次按其在正式选手中的先后编号；虚拟选手不编号（Rank=0），
+    /// 但行位置严格按成绩插入，UI 据此把虚拟选手显示为带 *、无名次的占位行。
+    /// </summary>
+    public static List<BoardEntry> MergeBoard(BoardData? board)
+    {
+        var raw = new List<(int Solved, long Penalty, bool Virt, string Name)>();
+        if (board is not null)
+        {
+            foreach (var r in board.Official)
+                raw.Add((r.Solved, r.Penalty, false, r.Username));
+            foreach (var r in board.Virtual)
+                raw.Add((r.Solved, r.Penalty, true, r.Username));
+        }
+        raw.Sort((a, b) =>
+        {
+            int c = b.Solved.CompareTo(a.Solved);
+            if (c != 0) return c;
+            c = a.Penalty.CompareTo(b.Penalty);
+            if (c != 0) return c;
+            c = a.Virt.CompareTo(b.Virt);   // 同分正式选手在前
+            return c != 0 ? c : string.CompareOrdinal(a.Name, b.Name);
+        });
+
+        var result = new List<BoardEntry>();
+        int officialRank = 0;
+        foreach (var r in raw)
+        {
+            if (!r.Virt) officialRank++;
+            result.Add(new BoardEntry(r.Virt ? 0 : officialRank,
+                r.Virt ? (r.Name + " *") : r.Name, r.Solved, r.Penalty, r.Virt));
+        }
+        return result;
     }
 }

@@ -59,6 +59,14 @@ OJ_API const char* oj_submit_ex(int problem_id, const char* code,
 //       "virtual":[...]}
 OJ_API const char* oj_get_board(int cid);
 
+// 比赛提交（带 contest_id）、报名与比赛提交记录
+OJ_API const char* oj_submit_contest(int problem_id, const char* code,
+                                     const char* username, int virtual_,
+                                     int contest_id);
+OJ_API const char* oj_contest_register(int cid, const char* username, int virtual_);
+OJ_API const char* oj_contest_registration(int cid, const char* username);
+OJ_API const char* oj_contest_submissions(int cid);
+
 // ===== MySQL 用户体系（可选，未配置时回退本地 anonymous）=====
 
 // 初始化 MySQL 模式。host/port/user/pass/db 为连接参数；problem_dir 仍为题目目录。

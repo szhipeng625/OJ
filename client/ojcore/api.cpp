@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 #include <cstring>
 #include <ctime>
@@ -243,7 +244,7 @@ static int init_lsm_safe(const std::string& dataDir, std::string& errOut) {
 
 // 判题核心：跑题、构造结果 JSON、落 LSM。virtual_ 非 0 表示虚拟参赛。
 static const char* do_judge(int problem_id, const char* code,
-                            const char* username, int virtual_) {
+                            const char* username, int virtual_, int contest_id) {
     std::string problemDir = g_problemDir + "\\" + std::to_string(problem_id);
     std::string src  = g_tempDir + "\\user.cpp";
     std::string exe  = g_tempDir + "\\user.exe";
@@ -297,6 +298,7 @@ static const char* do_judge(int problem_id, const char* code,
     // 拼结果 JSON（含 problemId / username / virtual / ts 供按题查询历史提交与榜单聚合）
     std::string json = "{\"id\":" + std::to_string(sid)
         + ",\"problemId\":" + std::to_string(problem_id)
+        + ",\"contestId\":" + std::to_string(contest_id)
         + ",\"username\":\"" + jsonEscape(username) + "\""
         + ",\"virtual\":" + (virtual_ ? "true" : "false")
         + ",\"verdict\":\"" + verdict + "\""
@@ -333,7 +335,7 @@ static const char* do_judge(int problem_id, const char* code,
             if (uid > 0) {
                 int totalMs = 0;
                 for (auto& c : cases) totalMs += (int)c.timeMs;
-                oj::mysql_upsert_submission(uid, problem_id, 0, verdict, detail,
+                oj::mysql_upsert_submission(uid, problem_id, contest_id, verdict, detail,
                                             totalMs, virtual_ != 0, tsBuf);
             }
         }
@@ -414,14 +416,23 @@ OJ_API const char* oj_get_submissions(int problem_id) {
 }
 
 OJ_API const char* oj_submit(int problem_id, const char* code) {
-    return do_judge(problem_id, code, "anonymous", 0);
+    return do_judge(problem_id, code, "anonymous", 0, 0);
 }
 
 OJ_API const char* oj_submit_ex(int problem_id, const char* code,
                                 const char* username, int virtual_) {
     return do_judge(problem_id, code,
                     (username && *username) ? username : "anonymous",
-                    virtual_ ? 1 : 0);
+                    virtual_ ? 1 : 0, 0);
+}
+
+// 比赛提交：contest_id 写入提交记录（LSM + MySQL），供榜单与提交记录按比赛聚合
+OJ_API const char* oj_submit_contest(int problem_id, const char* code,
+                                     const char* username, int virtual_,
+                                     int contest_id) {
+    return do_judge(problem_id, code,
+                    (username && *username) ? username : "anonymous",
+                    virtual_ ? 1 : 0, contest_id);
 }
 
 // 判题核心：跑题、构造结果 JSON、落 LSM。virtual_ 非 0 表示虚拟参赛。
@@ -487,6 +498,19 @@ OJ_API const char* oj_get_board(int cid) {
     std::string startStr = jsonStr(craw, "startTime");
     time_t startT = parseTime(startStr);
 
+    // MySQL 可用时榜单直接查库（跨进程持久），失败再回退 LSM
+    if (oj::mysql_available()) {
+        std::string csv;
+        for (size_t i = 0; i < pids.size(); ++i) {
+            if (i) csv += ",";
+            csv += std::to_string(pids[i]);
+        }
+        if (csv.empty()) csv = "0";
+        std::string off, virt;
+        if (oj::mysql_board(cid, startStr, csv, off, virt))
+            return dup("{\"official\":" + off + ",\"virtual\":" + virt + "}");
+    }
+
     // 2. 收集每个人每题的 AC 信息
     struct Cell { int wrong = 0; long long acMin = -1; };   // acMin<0 表示未 AC
     struct UserStat {
@@ -517,8 +541,14 @@ OJ_API const char* oj_get_board(int cid) {
             if (kv.first.rfind("submission:", 0) != 0) continue;
             std::string val = kv.second;
             long long pid = jsonInt(val, "problemId");
-            bool inContest = false;
-            for (int x : pids) if (x == pid) { inContest = true; break; }
+            long long recCid = jsonInt(val, "contestId", 0);
+            bool inContest;
+            if (recCid > 0) {
+                inContest = (recCid == cid);          // 新记录：按 contestId 精确归属
+            } else {
+                inContest = false;                    // 老记录回退：按题目集合归属
+                for (int x : pids) if (x == pid) { inContest = true; break; }
+            }
             if (!inContest) continue;
             std::string verdict = jsonStr(val, "verdict");
             bool ac = (verdict == "AC");
@@ -565,6 +595,114 @@ OJ_API const char* oj_get_board(int cid) {
     return dup(json);
 }
 
+// ===== 比赛报名 / 比赛提交记录 =====
+
+static std::string contestRegKey(int cid, const std::string& uname) {
+    return "reg:" + std::to_string(cid) + ":" + uname;
+}
+
+// 报名（幂等）。MySQL 可用时写 contest_registrations；LSM 始终写一份本地凭证。
+OJ_API const char* oj_contest_register(int cid, const char* username, int virtual_) {
+    std::string uname = (username && *username) ? username : "anonymous";
+    SYSTEMTIME st; GetLocalTime(&st);
+    char tbuf[32];
+    snprintf(tbuf, sizeof(tbuf), "%04d-%02d-%02d %02d:%02d:%02d",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    bool virt = virtual_ != 0;
+    bool ok = true;
+    try {
+        if (oj::mysql_available()) {
+            long long uid = 0; std::string err;
+            if (oj::mysql_user_id_by_name(uname, uid))
+                ok = oj::mysql_contest_register(uid, cid, virt, err);
+        }
+    } catch (...) { ok = false; }
+    try {
+        std::string val = "{\"username\":\"" + jsonEscape(uname) + "\""
+            + ",\"virtual\":" + (virt ? "true" : "false")
+            + ",\"ts\":\"" + tbuf + "\"}";
+        g_lsm->put(contestRegKey(cid, uname), val);
+        ok = true;   // LSM 成功即视为报名成功
+    } catch (...) {}
+    return dup(std::string("{\"ok\":") + (ok ? "true" : "false")
+             + ",\"registered\":true,\"virtual\":" + (virt ? "true" : "false") + "}");
+}
+
+// 查询当前用户是否已报名及参赛类型
+OJ_API const char* oj_contest_registration(int cid, const char* username) {
+    std::string uname = (username && *username) ? username : "anonymous";
+    bool registered = false, virt = false;
+    try {
+        if (oj::mysql_available()) {
+            long long uid = 0; bool r = false, v = false;
+            if (oj::mysql_user_id_by_name(uname, uid) &&
+                oj::mysql_contest_registration(uid, cid, r, v)) {
+                registered = r; virt = v;
+            }
+        }
+    } catch (...) {}
+    if (!registered) {
+        try {
+            auto vv = g_lsm->get(contestRegKey(cid, uname));
+            if (vv.has_value() && !vv->empty()) {
+                registered = true;
+                virt = vv->find("\"virtual\":true") != std::string::npos;
+            }
+        } catch (...) {}
+    }
+    return dup(std::string("{\"ok\":true,\"registered\":") + (registered ? "true" : "false")
+             + ",\"virtual\":" + (virt ? "true" : "false") + "}");
+}
+
+// 比赛提交记录（按 contestId 精确归属，老记录回退题目集合），时间倒序
+OJ_API const char* oj_contest_submissions(int cid) {
+    // MySQL 可用时提交记录直接查库（每人每题最后一次结果），失败回退 LSM 全量历史
+    if (oj::mysql_available()) {
+        std::string out;
+        if (oj::mysql_contest_submissions(cid, out)) return dup(out);
+    }
+    std::string craw = readFile(serverRoot() + "\\contests\\" + std::to_string(cid) + "\\contest.json");
+    std::vector<int> pids;
+    if (!craw.empty()) pids = parseIntArray(craw, "problems");
+
+    struct Rec { long long id; std::string ts; std::string val; };
+    std::vector<Rec> recs;
+    try {
+        auto it = g_lsm->begin(0);
+        auto end = g_lsm->end();
+        for (; it != end; ++it) {
+            auto kv = *it;
+            if (kv.first.rfind("submission:", 0) != 0) continue;
+            const std::string& val = kv.second;
+            long long pid = jsonInt(val, "problemId");
+            long long recCid = jsonInt(val, "contestId", 0);
+            bool inContest;
+            if (recCid > 0) {
+                inContest = (recCid == cid);
+            } else {
+                inContest = false;
+                for (int x : pids) if (x == pid) { inContest = true; break; }
+            }
+            if (!inContest) continue;
+            Rec r;
+            r.id = jsonInt(val, "id");
+            r.ts = jsonStr(val, "ts");
+            r.val = val;
+            recs.push_back(std::move(r));
+        }
+    } catch (...) {}
+    std::sort(recs.begin(), recs.end(), [](const Rec& a, const Rec& b) {
+        if (a.ts != b.ts) return a.ts > b.ts;
+        return a.id > b.id;
+    });
+    std::string out = "[";
+    for (size_t i = 0; i < recs.size(); ++i) {
+        if (i) out += ",";
+        out += recs[i].val;
+    }
+    out += "]";
+    return dup(out);
+}
 // ===== MySQL 用户体系 =====
 
 OJ_API int oj_init_mysql(const char* host, int port, const char* user,

@@ -213,6 +213,15 @@ bool mysql_init_schema(std::string& err) {
   version INT NOT NULL DEFAULT 1,
   updated_at DATETIME NOT NULL,
   INDEX idx_gen_updated (updated_at)
+))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS contest_registrations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  contest_id INT NOT NULL,
+  is_virtual TINYINT NOT NULL DEFAULT 0,
+  registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_user_contest (user_id, contest_id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
 ))SQL"
     };
     for (auto d : ddl) if (!ExecSQL(d, &err)) return false;
@@ -337,6 +346,75 @@ bool mysql_user_id_by_name(const std::string& username, long long& out_user_id) 
     return out_user_id > 0;
 }
 
+bool mysql_contest_register(long long user_id, int contest_id, bool virt, std::string& err) {
+    // 幂等报名：已存在则更新虚拟标记
+    std::string sql = "INSERT INTO contest_registrations(user_id,contest_id,is_virtual) VALUES("
+        + std::to_string(user_id) + "," + std::to_string(contest_id) + ","
+        + (virt ? "1" : "0") + ") "
+        "ON DUPLICATE KEY UPDATE is_virtual=VALUES(is_virtual)";
+    return ExecSQL(sql, &err);
+}
+
+bool mysql_contest_registration(long long user_id, int contest_id,
+                                bool& registered, bool& virt) {
+    registered = false; virt = false;
+    std::string sql = "SELECT is_virtual FROM contest_registrations WHERE user_id="
+        + std::to_string(user_id) + " AND contest_id=" + std::to_string(contest_id) + " LIMIT 1";
+    if (!g_conn || !g_sql.mysql_query || !g_sql.mysql_store_result || !g_sql.mysql_fetch_row) return false;
+    if (g_sql.mysql_query(g_conn, sql.c_str()) != 0) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    char** row = g_sql.mysql_fetch_row(res);
+    if (row && row[0]) { registered = true; virt = atoi(row[0]) != 0; }
+    g_sql.mysql_free_result(res);
+    return true;
+}
+static std::string jsonEscRow(const std::string& s) {
+    std::string o;
+    for (char c : s) {
+        switch (c) {
+            case '"':  o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n";  break;
+            case '\r': break;
+            case '\t': o += "\\t";  break;
+            default:   o += c;
+        }
+    }
+    return o;
+}
+
+bool mysql_contest_submissions(int cid, std::string& out_json) {
+    // 每人每题每比赛只保留最后一次结果（submissions 唯一键 upsert 语义），时间倒序
+    std::string sql =
+        "SELECT s.id, s.problem_id, u.username, s.verdict, s.detail, s.time_ms, "
+        "s.`virtual`, DATE_FORMAT(s.created_at, '%Y-%m-%d %H:%i:%s') "
+        "FROM submissions s JOIN users u ON u.id=s.user_id "
+        "WHERE s.contest_id=" + std::to_string(cid) + " "
+        "ORDER BY s.created_at DESC, s.id DESC";
+    if (!g_conn || !g_sql.mysql_query || !g_sql.mysql_store_result || !g_sql.mysql_fetch_row) return false;
+    if (g_sql.mysql_query(g_conn, sql.c_str()) != 0) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "{\"id\":" + std::string(row[0] ? row[0] : "0")
+                 + ",\"problemId\":" + std::string(row[1] ? row[1] : "0")
+                 + ",\"username\":\"" + jsonEscRow(row[2] ? row[2] : "") + "\""
+                 + ",\"verdict\":\"" + jsonEscRow(row[3] ? row[3] : "") + "\""
+                 + ",\"detail\":\"" + jsonEscRow(row[4] ? row[4] : "") + "\""
+                 + ",\"timeMs\":" + std::string(row[5] ? row[5] : "0")
+                 + ",\"virtual\":" + std::string(atoi(row[6]) ? "true" : "false")
+                 + ",\"ts\":\"" + std::string(row[7] ? row[7] : "") + "\"}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
 bool mysql_board(int cid, const std::string& start_str,
                 const std::string& problems_csv,
                 std::string& out_official, std::string& out_virtual) {

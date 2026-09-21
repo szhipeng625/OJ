@@ -36,6 +36,23 @@ public static class OJInterop
     private static extern IntPtr oj_get_board(int cid);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_submit_contest(int problem_id,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string code,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username,
+        int virtual_, int contest_id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_contest_register(int cid,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username, int virtual_);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_contest_registration(int cid,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_contest_submissions(int cid);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern int oj_init_mysql([MarshalAs(UnmanagedType.LPUTF8Str)] string host, int port,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string user,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string pass,
@@ -90,6 +107,18 @@ public static class OJInterop
     public static string GetContestJson(int cid) => PtrToString(oj_get_contest(cid));
 
     public static string GetBoardJson(int cid) => PtrToString(oj_get_board(cid));
+
+    public static string SubmitContestJson(int problemId, string code, string username, bool virt, int contestId)
+        => PtrToString(oj_submit_contest(problemId, code, username, virt ? 1 : 0, contestId));
+
+    public static string ContestRegisterJson(int cid, string username, bool virt)
+        => PtrToString(oj_contest_register(cid, username, virt ? 1 : 0));
+
+    public static string ContestRegistrationJson(int cid, string username)
+        => PtrToString(oj_contest_registration(cid, username));
+
+    public static string ContestSubmissionsJson(int cid)
+        => PtrToString(oj_contest_submissions(cid));
 
     public static int InitMySQL(string host, int port, string user, string pass, string db, string problemDir)
         => oj_init_mysql(host, port, user, pass, db, problemDir);

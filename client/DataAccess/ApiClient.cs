@@ -85,6 +85,36 @@ public class ApiClient
     public Task<BoardData?> GetBoardAsync(int cid)
         => Task.Run(() => JsonSerializer.Deserialize<BoardData>(OJInterop.GetBoardJson(cid), Opt));
 
+    /// <summary>比赛提交（contest_id 写入提交记录，供榜单/提交记录按比赛聚合）。</summary>
+    public Task<SubmitResult?> SubmitContestAsync(int problemId, string code, string username, bool virt, int contestId)
+        => Task.Run(() => JsonSerializer.Deserialize<SubmitResult>(
+            OJInterop.SubmitContestJson(problemId, code, username, virt, contestId), Opt));
+
+    /// <summary>报名比赛（幂等）。</summary>
+    public Task<ContestRegistration> RegisterContestAsync(int cid, string username, bool virt)
+        => Task.Run(() =>
+        {
+            var j = JsonDocument.Parse(OJInterop.ContestRegisterJson(cid, username, virt)).RootElement;
+            bool ok = j.TryGetProperty("ok", out var o) && o.GetBoolean();
+            bool v = j.TryGetProperty("virtual", out var vv) && vv.GetBoolean();
+            return new ContestRegistration(ok, true, v);
+        });
+
+    /// <summary>查询当前用户对某比赛的报名状态。</summary>
+    public Task<ContestRegistration> GetContestRegistrationAsync(int cid, string username)
+        => Task.Run(() =>
+        {
+            var j = JsonDocument.Parse(OJInterop.ContestRegistrationJson(cid, username)).RootElement;
+            bool registered = j.TryGetProperty("registered", out var r) && r.GetBoolean();
+            bool v = j.TryGetProperty("virtual", out var vv) && vv.GetBoolean();
+            return new ContestRegistration(true, registered, v);
+        });
+
+    /// <summary>比赛提交记录（时间倒序；每人每题保留最后一次结果）。</summary>
+    public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int cid)
+        => Task.Run(() => JsonSerializer.Deserialize<List<ContestSubmission>>(
+            OJInterop.ContestSubmissionsJson(cid), Opt));
+
     // ---------- 用户体系 ----------
 
     public Task<LoginResult?> LoginAsync(string u, string p)
