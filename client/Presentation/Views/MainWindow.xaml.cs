@@ -1,10 +1,16 @@
 ﻿using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using client.Business.Services;
 using client.DataAccess.Models;
 using client.Presentation.Helpers;
+using Microsoft.Win32;
 
 namespace client.Presentation.Views;
 
@@ -14,16 +20,28 @@ public partial class MainWindow : Window
     private readonly AuthService _auth;
     private readonly LocalIdentityService _identity;
 
-    private readonly ObservableCollection<CaseResult> _cases = new();
-    private readonly ObservableCollection<CaseResult> _contestCases = new();
-    private Problem? _current;
     private string _nickname = "anonymous";
     private LoginResult? _me;     // MySQL 登录态；null = 本地模式
 
+    // 题库列表行：左侧列表可搜索过滤，右侧个人信息复用同一数据源
+    private readonly ObservableCollection<ProblemRow> _problemRows = new();
+    private readonly ListCollectionView _problemView;
+    private readonly ListCollectionView _profileView;
+
+    // 比赛
     private List<ContestInfo> _contests = new();
-    private ContestDetail? _currentContest;
-    private List<Problem> _contestProblems = new();
+    private ContestDetail? _currentContest;      // 列表页选中的比赛
+    private ContestDetail? _roomContest;         // 已进入工作台的比赛
+    private bool _roomVirtual;
     private Problem? _currentContestProblem;
+    private readonly ObservableCollection<ProblemRow> _contestProblemRows = new();
+    private readonly ListCollectionView _contestProblemView;
+
+    // 做题窗口：同一时刻只保留一个，返回即关闭并释放内存
+    private SolveWindow? _solveWindow;
+
+    // 比赛开始倒计时刷新
+    private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public MainWindow(JudgeService judge, AuthService auth, LocalIdentityService identity)
     {
@@ -31,8 +49,15 @@ public partial class MainWindow : Window
         _judge = judge;
         _auth = auth;
         _identity = identity;
-        CaseList.ItemsSource = _cases;
-        ContestCaseList.ItemsSource = _contestCases;
+
+        _problemView = new ListCollectionView(_problemRows);
+        _profileView = new ListCollectionView(_problemRows);
+        _contestProblemView = new ListCollectionView(_contestProblemRows);
+
+        ProblemList.ItemsSource = _problemView;
+        ProfileStatusList.ItemsSource = _profileView;
+        ContestProblemList.ItemsSource = _contestProblemView;
+
         Loaded += async (_, _) => await OnLoaded();
     }
 
@@ -48,8 +73,143 @@ public partial class MainWindow : Window
         {
             LoadNickname();
         }
+        RefreshProfile();
+        _countdownTimer.Tick += (_, _) => UpdateCountdown();
+        _countdownTimer.Start();
         await LoadProblems();
         await LoadContests();
+    }
+
+    private void RefreshProfile()
+    {
+        if (_me is { } me)
+        {
+            string display = string.IsNullOrWhiteSpace(me.Nickname) ? me.Username : me.Nickname;
+            ProfileName.Text = display;
+            ProfileRole.Text = $"{me.Role} · {me.Username}";
+            EditNickBtn.Visibility = Visibility.Visible;
+            UploadAvatarBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ProfileName.Text = _nickname;
+            ProfileRole.Text = "本地用户";
+            EditNickBtn.Visibility = Visibility.Collapsed;
+            UploadAvatarBtn.Visibility = Visibility.Collapsed;
+        }
+        ApplyAvatar(_me?.Avatar);
+    }
+
+    private void ApplyAvatar(string? avatar)
+    {
+        if (string.IsNullOrWhiteSpace(avatar))
+        {
+            AvatarImage.Source = null;
+            AvatarImage.Visibility = Visibility.Collapsed;
+            AvatarFallback.Visibility = Visibility.Visible;
+            return;
+        }
+        try
+        {
+            string base64 = avatar.Contains(',') ? avatar[(avatar.IndexOf(',') + 1)..] : avatar;
+            byte[] bytes = Convert.FromBase64String(base64);
+            using var ms = new MemoryStream(bytes);
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+            AvatarImage.Source = bmp;
+            AvatarImage.Visibility = Visibility.Visible;
+            AvatarFallback.Visibility = Visibility.Collapsed;
+        }
+        catch
+        {
+            AvatarImage.Source = null;
+            AvatarImage.Visibility = Visibility.Collapsed;
+            AvatarFallback.Visibility = Visibility.Visible;
+        }
+    }
+
+    private async void OnEditNickname(object sender, RoutedEventArgs e)
+    {
+        if (_me is null) return;
+        string? newNick = PromptText("修改昵称", "请输入新昵称：",
+            string.IsNullOrWhiteSpace(_me.Nickname) ? _me.Username : _me.Nickname);
+        if (string.IsNullOrWhiteSpace(newNick)) return;
+        bool ok = await _auth.UpdateProfileAsync(_me.Token, newNick.Trim(), _me.Avatar);
+        if (!ok) { MessageBox.Show("修改昵称失败"); return; }
+        _me = _me with { Nickname = newNick.Trim() };
+        RefreshProfile();
+        NickBadge.Text = "👤 " + (string.IsNullOrWhiteSpace(_me.Nickname) ? _me.Username : _me.Nickname);
+    }
+
+    private async void OnUploadAvatar(object sender, RoutedEventArgs e)
+    {
+        if (_me is null) return;
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择头像图片",
+            Filter = "图片文件|*.png;*.jpg;*.jpeg;*.gif;*.bmp"
+        };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(dlg.FileName);
+            string ext = (Path.GetExtension(dlg.FileName) ?? ".png").ToLowerInvariant();
+            string mime = ext switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                ".bmp" => "image/bmp",
+                _ => "image/png"
+            };
+            string dataUrl = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+            bool ok = await _auth.UpdateProfileAsync(_me.Token, _me.Nickname, dataUrl);
+            if (!ok) { MessageBox.Show("上传头像失败"); return; }
+            _me = _me with { Avatar = dataUrl };
+            ApplyAvatar(dataUrl);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("读取图片失败：" + ex.Message);
+        }
+    }
+
+    private string? PromptText(string title, string message, string initial)
+    {
+        var win = new Window
+        {
+            Title = title,
+            Width = 380,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = ResizeMode.NoResize
+        };
+        var panel = new StackPanel { Margin = new Thickness(16) };
+        panel.Children.Add(new TextBlock { Text = message, Margin = new Thickness(0, 0, 0, 8) });
+        var box = new TextBox { Height = 26, Text = initial };
+        panel.Children.Add(box);
+        var btn = new Button { Content = "确定", Width = 80, Height = 28, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        btn.Click += (_, _) => win.DialogResult = true;
+        panel.Children.Add(btn);
+        win.Content = panel;
+        return win.ShowDialog() == true ? box.Text : null;
+    }
+
+    private void UpdateCountdown()
+    {
+        if (_currentContest is { } c)
+        {
+            string cd = ContestPolicy.Countdown(c.StartTime);
+            CountdownText.Text = string.IsNullOrEmpty(cd) ? "" : "距比赛开始还有 " + cd;
+        }
+        else
+        {
+            CountdownText.Text = "";
+        }
     }
 
     private void LoadNickname()
@@ -98,20 +258,16 @@ public partial class MainWindow : Window
         try
         {
             var problems = await _judge.GetProblemsAsync();
-            ProblemList.Items.Clear();
+            var progress = await _judge.GetUserProgressAsync(_nickname) ?? new();
+            var acSet = progress.Where(p => p.Ac).Select(p => p.ProblemId).ToHashSet();
+            var verdictMap = progress.ToDictionary(p => p.ProblemId, p => p.Verdict);
+
+            _problemRows.Clear();
             if (problems is { Count: > 0 })
             {
                 foreach (var p in problems)
-                {
-                    string tags = p.Tags is { Length: > 0 } ? $"  [{string.Join(",", p.Tags)}]" : "";
-                    ProblemList.Items.Add(new ListBoxItem
-                    {
-                        Content = $"[{p.Id}] {p.Title}{tags}",
-                        Tag = p,
-                        ToolTip = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB"
-                    });
-                }
-                ProblemList.SelectedIndex = 0;
+                    _problemRows.Add(MakeRow(p, acSet, verdictMap));
+
                 ConnBadge.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x33, 0x99, 0x66));
                 ConnBadge.Text = $"已连接 · {problems.Count} 题";
             }
@@ -120,67 +276,123 @@ public partial class MainWindow : Window
                 ConnBadge.Background = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E));
                 ConnBadge.Text = "无题目";
             }
+            RefreshProblemView();
+            UpdateProfile();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             ConnBadge.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0xD9, 0x53, 0x4F));
             ConnBadge.Text = "连接失败";
-            StatusText.Text = "无法连接后端：" + ex.Message;
         }
+    }
+
+    private static ProblemRow MakeRow(Problem p, HashSet<int> acSet, Dictionary<int, string> verdictMap)
+    {
+        string tags = p.Tags is { Length: > 0 } ? $"  [{string.Join(",", p.Tags)}]" : "";
+        string display = $"[{p.Id}] {p.Title}{tags}";
+        if (acSet.Contains(p.Id))
+            return new ProblemRow(p, display, "✔", GreenBrush, "已通过");
+        if (verdictMap.TryGetValue(p.Id, out var v))
+            return new ProblemRow(p, display, "✘", RedBrush, $"未通过（最近提交：{v}）");
+        return new ProblemRow(p, display, "", GrayBrush, "未提交");
+    }
+
+    private void RefreshProblemView()
+    {
+        string q = SearchBox?.Text?.Trim() ?? "";
+        _problemView.Filter = o => o is ProblemRow r &&
+            (string.IsNullOrEmpty(q) ||
+             r.Problem.Id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
+             r.Problem.Title.Contains(q, StringComparison.OrdinalIgnoreCase));
+        _problemView.Refresh();
+    }
+
+    private void OnSearchTextChanged(object sender, TextChangedEventArgs e) => RefreshProblemView();
+
+    private void UpdateProfile()
+    {
+        int total = _problemRows.Count;
+        int solved = _problemRows.Count(r => r.StatusMark == "✔");
+        StatSolved.Text = solved.ToString();
+        StatTotal.Text = total.ToString();
+        StatRatio.Text = total > 0 ? $"{solved * 100 / total}%" : "0%";
+        SolveProgress.Maximum = total > 0 ? total : 1;
+        SolveProgress.Value = solved;
     }
 
     private void ProblemList_OnSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (ProblemList.SelectedItem is ListBoxItem { Tag: Problem p })
-        {
-            _current = p;
-            ShowProblem(p);
-        }
+        if (ProblemList.SelectedItem is ProblemRow row)
+            ShowProblemDescription(row.Problem);
     }
 
-    private void ShowProblem(Problem p)
+    private void ProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        MarkdownRenderer.Render(DescBox, p.Description);
+        if (ProblemList.SelectedItem is ProblemRow row)
+            OpenSolveWindow(row.Problem, null, false);
+    }
+
+    private void ShowProblemDescription(Problem p)
+    {
+        HomeDescTitle.Text = p.Title;
+        MarkdownRenderer.Render(HomeDescBox, p.Description);
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
-        MetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
+        HomeMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
+        ProfilePanel.Visibility = Visibility.Collapsed;
+        ProblemDescPanel.Visibility = Visibility.Visible;
     }
 
-    private async void SubmitBtn_OnClick(object sender, RoutedEventArgs e)
+    private void OnBackToProfile(object sender, RoutedEventArgs e)
     {
-        if (_current is null) { MessageBox.Show("请先在左侧选择题目"); return; }
-        var code = CodeBox.Text;
-        if (string.IsNullOrWhiteSpace(code)) { MessageBox.Show("请填写代码"); return; }
+        ProblemDescPanel.Visibility = Visibility.Collapsed;
+        ProfilePanel.Visibility = Visibility.Visible;
+    }
 
-        SubmitBtn.IsEnabled = false;
-        StatusText.Text = "判题中...";
-        VerdictText.Text = "结果：判题中...";
-        VerdictText.Foreground = Brushes.Gray;
-        _cases.Clear();
+    private void OpenSolveWindow(Problem p, ContestDetail? contest, bool roomVirtual)
+    {
+        _solveWindow?.Close();
+        _solveWindow = null;
+        var win = new SolveWindow(_judge, p, _nickname, contest, roomVirtual) { Owner = this };
+        _solveWindow = win;
+        win.Closed += async (_, _) =>
+        {
+            if (ReferenceEquals(_solveWindow, win)) _solveWindow = null;
+            await RefreshProblemStatusAsync();
+        };
+        win.Show();
+    }
 
+    /// <summary>做题窗口返回后刷新题库 / 比赛的通过状态与个人信息统计。</summary>
+    private async Task RefreshProblemStatusAsync()
+    {
         try
         {
-            var result = await _judge.SubmitAsync(_current.Id, code, _nickname, false);
-            if (result is null) { VerdictText.Text = "结果：无响应"; return; }
-            VerdictText.Text = $"结果：{result.Verdict}   —   {result.Detail}";
-            VerdictText.Foreground = result.Verdict == "AC"
-                ? new SolidColorBrush(Color.FromArgb(0xFF, 0x33, 0x99, 0x66))
-                : new SolidColorBrush(Color.FromArgb(0xFF, 0xD9, 0x53, 0x4F));
-            foreach (var c in result.Cases) _cases.Add(c);
-            StatusText.Text = $"提交 #{result.Id} 完成";
+            var progress = await _judge.GetUserProgressAsync(_nickname) ?? new();
+            var acSet = progress.Where(p => p.Ac).Select(p => p.ProblemId).ToHashSet();
+            var verdictMap = progress.ToDictionary(p => p.ProblemId, p => p.Verdict);
+            for (int i = 0; i < _problemRows.Count; i++)
+            {
+                var old = _problemRows[i];
+                _problemRows[i] = MakeRow(old.Problem, acSet, verdictMap);
+            }
+            UpdateProfile();
+
+            if (_roomContest is not null)
+            {
+                var cProgress = await _judge.GetUserContestProgressAsync(_roomContest.Id, _nickname) ?? new();
+                var cAcSet = cProgress.Where(x => x.Ac).Select(x => x.ProblemId).ToHashSet();
+                var cVerdictMap = cProgress.ToDictionary(x => x.ProblemId, x => x.Verdict);
+                for (int i = 0; i < _contestProblemRows.Count; i++)
+                {
+                    var old = _contestProblemRows[i];
+                    _contestProblemRows[i] = MakeRow(old.Problem, cAcSet, cVerdictMap);
+                }
+            }
         }
-        catch (Exception ex)
-        {
-            VerdictText.Text = "结果：请求失败";
-            StatusText.Text = ex.Message;
-        }
-        finally { SubmitBtn.IsEnabled = true; }
+        catch { /* 状态刷新失败不影响主流程 */ }
     }
 
     // ---------- 比赛 ----------
-    // 视图状态：列表页选中的比赛 / 已进入工作台的比赛及其参赛身份
-    private ContestDetail? _roomContest;
-    private bool _roomVirtual;
-
     private async Task LoadContests()
     {
         try
@@ -238,7 +450,7 @@ public partial class MainWindow : Window
             {
                 RegisterBtn.Visibility = Visibility.Visible;
                 EnterContestBtn.Visibility = Visibility.Collapsed;
-                RegisterHint.Text = ended ? "比赛已结束，只能虚拟参赛" : "报名后即可进入比赛";
+                RegisterHint.Text = ended ? "比赛已结束，可查看比赛（报名后虚拟补赛）" : "报名后即可进入比赛";
             }
             RegisterBtn.IsEnabled = true;
         }
@@ -297,25 +509,22 @@ public partial class MainWindow : Window
             _roomContest = _currentContest;
 
             var all = await _judge.GetProblemsAsync() ?? new();
-            _contestProblems = _judge.FilterContestProblems(all, _roomContest.Problems);
-            ContestProblemList.Items.Clear();
-            foreach (var p in _contestProblems)
-                ContestProblemList.Items.Add(new ListBoxItem { Content = $"[{p.Id}] {p.Title}", Tag = p });
+            var probs = _judge.FilterContestProblems(all, _roomContest.Problems);
+            var progress = await _judge.GetUserContestProgressAsync(_roomContest.Id, _nickname) ?? new();
+            var acSet = progress.Where(x => x.Ac).Select(x => x.ProblemId).ToHashSet();
+            var verdictMap = progress.ToDictionary(x => x.ProblemId, x => x.Verdict);
+
+            _contestProblemRows.Clear();
+            foreach (var p in probs)
+                _contestProblemRows.Add(MakeRow(p, acSet, verdictMap));
 
             string status = ContestPolicy.Status(_roomContest.StartTime, _roomContest.EndTime);
             RoomTitle.Text = $"【C{_roomContest.Id}】{_roomContest.Name}（{(_roomVirtual ? "虚拟参赛" : "正式参赛")}）";
             ContestInfoText.Text = $"{_roomContest.StartTime} ~ {_roomContest.EndTime}  ·  {status}  ·  你正在以{(_roomVirtual ? "虚拟" : "正式")}身份参赛";
 
-            // 重置做题区
-            ContestCodeBox.Text = "#include <iostream>\nusing namespace std;\nint main(){\n    return 0;\n}";
-            _contestCases.Clear();
-            ContestVerdictText.Text = "结果：等待提交";
-            ContestVerdictText.Foreground = Brushes.Gray;
-            ContestStatusText.Text = "";
-            ContestMetaText.Text = "";
-            MarkdownRenderer.Render(ContestDescBox, "");
             _currentContestProblem = null;
             ContestProblemList.SelectedIndex = -1;
+            ShowContestInfo();
 
             // 切换到工作台，默认做题页
             ContestListView.Visibility = Visibility.Collapsed;
@@ -328,14 +537,14 @@ public partial class MainWindow : Window
         }
     }
 
-    // 返回比赛列表：关闭工作台并清空题目/榜单/提交记录状态
+    // 返回比赛列表：关闭做题窗口与工作台并清空状态
     private void OnExitContest(object sender, RoutedEventArgs e)
     {
+        _solveWindow?.Close();
+        _solveWindow = null;
         _roomContest = null;
         _currentContestProblem = null;
-        _contestProblems = new();
-        ContestProblemList.Items.Clear();
-        _contestCases.Clear();
+        _contestProblemRows.Clear();
         BoardListView.ItemsSource = null;
         SubmissionListView.ItemsSource = null;
         ContestRoomView.Visibility = Visibility.Collapsed;
@@ -374,53 +583,37 @@ public partial class MainWindow : Window
 
     private void OnSelectContestProblem(object sender, SelectionChangedEventArgs e)
     {
-        if (ContestProblemList.SelectedItem is not ListBoxItem { Tag: Problem p }) return;
-        _currentContestProblem = p;
+        if (ContestProblemList.SelectedItem is ProblemRow row)
+        {
+            _currentContestProblem = row.Problem;
+            ShowContestProblemDescription(row.Problem);
+        }
+    }
+
+    private void ContestProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_roomContest is null) return;
+        if (ContestProblemList.SelectedItem is ProblemRow row)
+            OpenSolveWindow(row.Problem, _roomContest, _roomVirtual);
+    }
+
+    private void ShowContestProblemDescription(Problem p)
+    {
+        ContestDescTitle.Text = p.Title;
         MarkdownRenderer.Render(ContestDescBox, p.Description);
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
         ContestMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
+        ContestInfoPanel.Visibility = Visibility.Collapsed;
+        ContestProblemDescPanel.Visibility = Visibility.Visible;
     }
 
-    private async void ContestSubmit_OnClick(object sender, RoutedEventArgs e)
+    private void ShowContestInfo()
     {
-        if (_roomContest is null) { MessageBox.Show("请先进入比赛"); return; }
-        if (_currentContestProblem is null) { MessageBox.Show("请选择一道比赛题目"); return; }
-
-        var code = ContestCodeBox.Text;
-        if (string.IsNullOrWhiteSpace(code)) { MessageBox.Show("请填写代码"); return; }
-
-        // 时间窗口校验（业务规则在 BLL ContestPolicy；参赛身份报名时锁定）
-        if (!ContestPolicy.CanSubmitOfficial(_roomContest.StartTime, _roomContest.EndTime, _roomVirtual, out var reason))
-        {
-            MessageBox.Show(reason);
-            return;
-        }
-
-        ContestSubmitBtn.IsEnabled = false;
-        ContestStatusText.Text = "判题中...";
-        ContestVerdictText.Text = "结果：判题中...";
-        ContestVerdictText.Foreground = Brushes.Gray;
-        _contestCases.Clear();
-
-        try
-        {
-            var result = await _judge.SubmitContestAsync(_currentContestProblem.Id, code,
-                                                         _nickname, _roomVirtual, _roomContest.Id);
-            if (result is null) { ContestVerdictText.Text = "结果：无响应"; return; }
-            ContestVerdictText.Text = $"结果：{result.Verdict}   —   {result.Detail}";
-            ContestVerdictText.Foreground = result.Verdict == "AC"
-                ? new SolidColorBrush(Color.FromArgb(0xFF, 0x33, 0x99, 0x66))
-                : new SolidColorBrush(Color.FromArgb(0xFF, 0xD9, 0x53, 0x4F));
-            foreach (var c in result.Cases) _contestCases.Add(c);
-            ContestStatusText.Text = $"提交 #{result.Id}（{(_roomVirtual ? "虚拟" : "正式")}）完成";
-        }
-        catch (Exception ex)
-        {
-            ContestVerdictText.Text = "结果：请求失败";
-            ContestStatusText.Text = ex.Message;
-        }
-        finally { ContestSubmitBtn.IsEnabled = true; }
+        ContestProblemDescPanel.Visibility = Visibility.Collapsed;
+        ContestInfoPanel.Visibility = Visibility.Visible;
     }
+
+    private void OnBackToContestInfo(object sender, RoutedEventArgs e) => ShowContestInfo();
 
     private async void OnRefreshBoard(object sender, RoutedEventArgs e) => await RefreshBoard();
 
@@ -451,7 +644,8 @@ public partial class MainWindow : Window
         if (_roomContest is null) return;
         try
         {
-            var subs = await _judge.GetContestSubmissionsAsync(_roomContest.Id);
+            bool viewAll = _me?.Role == "admin" || ContestPolicy.IsEnded(_roomContest.EndTime);
+            var subs = await _judge.GetContestSubmissionsAsync(_roomContest.Id, _nickname, viewAll);
             SubmissionListView.ItemsSource = (subs ?? new())
                 .Select(s => new
                 {
@@ -463,7 +657,29 @@ public partial class MainWindow : Window
                     Kind = s.Virtual ? "虚拟" : "正式"
                 })
                 .ToList();
+            SubsHeaderText.Text = viewAll
+                ? "本场提交记录（每人每题保留最后一次提交结果，按时间倒序）"
+                : "本场提交记录（比赛进行中，仅显示你自己的提交）";
         }
         catch { }
     }
+
+    // 题目列表行（左侧列表与右侧个人信息列表共用）
+    public sealed record ProblemRow(
+        Problem Problem,
+        string Display,
+        string StatusMark,
+        Brush StatusBrush,
+        string StatusTip);
+
+    private static Brush FrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(0xFF, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static readonly Brush GreenBrush = FrozenBrush(0x33, 0x99, 0x66);
+    private static readonly Brush RedBrush = FrozenBrush(0xD9, 0x53, 0x4F);
+    private static readonly Brush GrayBrush = FrozenBrush(0x9E, 0x9E, 0x9E);
 }

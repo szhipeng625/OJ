@@ -113,7 +113,6 @@ static RunOutcome run_one(const std::string& exe, const std::string& inFile,
 
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t0);
 
     BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
     if (!ok) {
@@ -133,6 +132,8 @@ static RunOutcome run_one(const std::string& exe, const std::string& inFile,
         AssignProcessToJobObject(hJob, pi.hProcess);
     }
 
+    // 进程启动完成后开始计时：不计入进程创建开销，报告的是实际运行时间
+    QueryPerformanceCounter(&t0);
     DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
     QueryPerformanceCounter(&t1);
     r.ms = (long long)((t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart);

@@ -186,6 +186,8 @@ bool mysql_init_schema(std::string& err) {
   password_hash CHAR(64) NOT NULL,
   salt CHAR(32) NOT NULL,
   role ENUM('admin','author','user') NOT NULL DEFAULT 'user',
+  nickname VARCHAR(64) NOT NULL DEFAULT '',
+  avatar MEDIUMTEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS sessions (
@@ -242,7 +244,21 @@ bool mysql_init_schema(std::string& err) {
             if (!ExecSQL("ALTER TABLE submissions ADD UNIQUE KEY uq_user_problem (user_id, problem_id, contest_id)", &err)) return false;
         }
     }
-    // 3) 匿名默认用户（未登录提交统一归到该账号；空哈希无法登录）
+    // 3) 用户资料列：nickname / avatar（老库升级，新库 DDL 已包含）
+    {
+        std::string hasNick;
+        if (!QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                         "WHERE table_schema=DATABASE() AND table_name='users' AND column_name='nickname'",
+                         hasNick)) hasNick = "0";
+        if (hasNick == "0" && !ExecSQL("ALTER TABLE users ADD COLUMN nickname VARCHAR(64) NOT NULL DEFAULT ''", &err)) return false;
+
+        std::string hasAvatar;
+        if (!QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                         "WHERE table_schema=DATABASE() AND table_name='users' AND column_name='avatar'",
+                         hasAvatar)) hasAvatar = "0";
+        if (hasAvatar == "0" && !ExecSQL("ALTER TABLE users ADD COLUMN avatar MEDIUMTEXT", &err)) return false;
+    }
+    // 4) 匿名默认用户（未登录提交统一归到该账号；空哈希无法登录）
     if (!ExecSQL("INSERT IGNORE INTO users(username,password_hash,salt,role) VALUES('anonymous','','','user')", &err)) return false;
     return true;
 }
@@ -253,9 +269,10 @@ bool mysql_register(const std::string& username, const std::string& password,
     if (password.size() < 6) { err = "密码至少 6 位"; return false; }
     std::string salt = RandomHex(16);
     std::string hash = Sha256Hex(salt + password);
-    std::string sql = "INSERT INTO users(username,password_hash,salt,role) VALUES('"
+    std::string sql = "INSERT INTO users(username,password_hash,salt,role,nickname) VALUES('"
         + SqlEscape(username) + "','" + hash + "','" + salt + "','"
-        + (role == "admin" || role == "author" ? role : "user") + "')";
+        + (role == "admin" || role == "author" ? role : "user") + "','"
+        + SqlEscape(username) + "')";
     if (!ExecSQL(sql, &err)) {
         if (g_sql.mysql_errno && g_sql.mysql_errno(g_conn) == 1062) err = "用户名已被注册";
         return false;
@@ -265,8 +282,9 @@ bool mysql_register(const std::string& username, const std::string& password,
 
 bool mysql_login(const std::string& username, const std::string& password,
                  std::string& out_token, long long& out_user_id,
-                 std::string& out_role, std::string& out_username, std::string& err) {
-    std::string sql = "SELECT id, password_hash, salt, role, username FROM users WHERE username='"
+                 std::string& out_role, std::string& out_username,
+                 std::string& out_nickname, std::string& out_avatar, std::string& err) {
+    std::string sql = "SELECT id, password_hash, salt, role, username, nickname, avatar FROM users WHERE username='"
         + SqlEscape(username) + "'";
     if (!ExecSQL(sql, &err)) return false;
     void* res = g_sql.mysql_store_result(g_conn);
@@ -278,6 +296,8 @@ bool mysql_login(const std::string& username, const std::string& password,
     std::string salt = row[2];
     std::string role = row[3];
     std::string uname = row[4] ? row[4] : username;
+    std::string nickname = row[5] ? row[5] : "";
+    std::string avatar = row[6] ? row[6] : "";
     g_sql.mysql_free_result(res);
     if (Sha256Hex(salt + password) != hashInDb) { err = "用户名或密码错误"; return false; }
 
@@ -293,12 +313,15 @@ bool mysql_login(const std::string& username, const std::string& password,
     out_user_id = uid;
     out_role = role;
     out_username = uname;
+    out_nickname = nickname;
+    out_avatar = avatar;
     return true;
 }
 
 bool mysql_whoami(const std::string& token, long long& out_user_id,
-                  std::string& out_role, std::string& out_username, std::string& err) {
-    std::string sql = "SELECT u.id, u.role, u.username FROM sessions s JOIN users u ON u.id=s.user_id "
+                  std::string& out_role, std::string& out_username,
+                  std::string& out_nickname, std::string& out_avatar, std::string& err) {
+    std::string sql = "SELECT u.id, u.role, u.username, u.nickname, u.avatar FROM sessions s JOIN users u ON u.id=s.user_id "
                       "WHERE s.token='" + SqlEscape(token) + "' AND s.expires_at > NOW()";
     if (!ExecSQL(sql, &err)) return false;
     void* res = g_sql.mysql_store_result(g_conn);
@@ -308,8 +331,17 @@ bool mysql_whoami(const std::string& token, long long& out_user_id,
     out_user_id = atoll(row[0]);
     out_role = row[1] ? row[1] : "user";
     out_username = row[2] ? row[2] : "";
+    out_nickname = row[3] ? row[3] : "";
+    out_avatar = row[4] ? row[4] : "";
     g_sql.mysql_free_result(res);
     return true;
+}
+
+bool mysql_update_profile(long long user_id, const std::string& nickname,
+                          const std::string& avatar, std::string& err) {
+    std::string sql = "UPDATE users SET nickname='" + SqlEscape(nickname)
+        + "', avatar='" + SqlEscape(avatar) + "' WHERE id=" + std::to_string(user_id);
+    return ExecSQL(sql, &err);
 }
 
 bool mysql_logout(const std::string& token) {
@@ -377,14 +409,18 @@ static std::string jsonEscRow(const std::string& s) {
     return o;
 }
 
-bool mysql_contest_submissions(int cid, std::string& out_json) {
+bool mysql_contest_submissions(int cid, const std::string& username, bool view_all,
+                               std::string& out_json) {
     // 每人每题每比赛只保留最后一次结果（submissions 唯一键 upsert 语义），时间倒序
+    // view_all=false 时只返回 username 本人记录（比赛进行中参赛者互不可见）
     std::string sql =
         "SELECT s.id, s.problem_id, u.username, s.verdict, s.detail, s.time_ms, "
         "s.`virtual`, DATE_FORMAT(s.created_at, '%Y-%m-%d %H:%i:%s') "
         "FROM submissions s JOIN users u ON u.id=s.user_id "
-        "WHERE s.contest_id=" + std::to_string(cid) + " "
-        "ORDER BY s.created_at DESC, s.id DESC";
+        "WHERE s.contest_id=" + std::to_string(cid);
+    if (!view_all)
+        sql += " AND u.username='" + SqlEscape(username) + "'";
+    sql += " ORDER BY s.created_at DESC, s.id DESC";
     if (!g_conn || !g_sql.mysql_query || !g_sql.mysql_store_result || !g_sql.mysql_fetch_row) return false;
     if (g_sql.mysql_query(g_conn, sql.c_str()) != 0) return false;
     void* res = g_sql.mysql_store_result(g_conn);
@@ -412,12 +448,17 @@ bool mysql_board(int cid, const std::string& start_str,
                 const std::string& problems_csv,
                 std::string& out_official, std::string& out_virtual) {
     // 按 user + problem 聚合：取该题最早 AC 时间（分钟）+ 错误提交次数*20
+    // 正式选手相对比赛开始时间计时；虚拟选手相对其报名时间计时。
     // SQL 直接算好，C++ 再按用户汇总
+    std::string startEsc = SqlEscape(start_str);
     std::string sql =
         "SELECT u.username, s.problem_id, s.`virtual`, "
-        "  MIN(IF(s.verdict='AC', TIMESTAMPDIFF(MINUTE, '" + SqlEscape(start_str) + "', s.created_at), NULL)) AS ac_min, "
+        "  MIN(IF(s.verdict='AC', TIMESTAMPDIFF(MINUTE, "
+        "      IF(s.`virtual`=1, COALESCE(cr.registered_at, '" + startEsc + "'), '" + startEsc + "'), "
+        "      s.created_at), NULL)) AS ac_min, "
         "  SUM(IF(s.verdict<>'AC', 1, 0)) AS wrong_before "
         "FROM submissions s JOIN users u ON u.id=s.user_id "
+        "LEFT JOIN contest_registrations cr ON cr.user_id=s.user_id AND cr.contest_id=s.contest_id "
         "WHERE s.contest_id=" + std::to_string(cid) +
         " AND s.problem_id IN (" + problems_csv + ") "
         "GROUP BY u.username, s.problem_id, s.virtual "

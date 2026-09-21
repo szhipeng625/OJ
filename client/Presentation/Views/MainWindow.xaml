@@ -33,64 +33,137 @@
             <TabItem Header="题库">
                 <Grid Margin="4">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="230"/>
+                        <ColumnDefinition Width="340"/>
                         <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
+                    <!-- 左：题库列表（含搜索），始终显示 -->
+                    <Border Grid.Column="0" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="8">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="题目列表" FontWeight="SemiBold"
-                                       Margin="12,10,0,6"/>
+                            <Border DockPanel.Dock="Top" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                    CornerRadius="6" Margin="0,0,0,8">
+                                <Grid>
+                                    <TextBox x:Name="SearchBox" Height="30" Margin="8,6"
+                                             VerticalContentAlignment="Center"
+                                             TextChanged="OnSearchTextChanged"/>
+                                    <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" Foreground="#999"
+                                               HorizontalAlignment="Right" Margin="0,0,16,0"
+                                               VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock DockPanel.Dock="Top" Text="题目列表" FontWeight="SemiBold" Margin="4,0,0,6"/>
                             <ListBox x:Name="ProblemList" BorderThickness="0" Background="Transparent"
-                                     SelectionChanged="ProblemList_OnSelected"/>
+                                     SelectionChanged="ProblemList_OnSelected"
+                                     MouseDoubleClick="ProblemList_OnDoubleClick">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMark}"
+                                                       Foreground="{Binding StatusBrush}" FontWeight="Bold"
+                                                       Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding StatusTip}"/>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </DockPanel>
                     </Border>
 
+                    <!-- 右：个人信息（默认）/ 题目描述（单击题目后）切换 -->
                     <Grid Grid.Column="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="1.8*"/>
-                            <RowDefinition Height="8"/>
-                            <RowDefinition Height="3*"/>
-                            <RowDefinition Height="8"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="8"/>
-                            <RowDefinition Height="170"/>
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="14">
+                        <!-- 个人信息 -->
+                        <Border x:Name="ProfilePanel" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                CornerRadius="8" Padding="16">
                             <DockPanel>
-                                <TextBlock x:Name="MetaText" DockPanel.Dock="Top" TextWrapping="Wrap"
-                                           Margin="0,0,0,6" Foreground="#666" FontSize="12"/>
-                                <TextBlock DockPanel.Dock="Top" Text="题目描述" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                                <WebBrowser x:Name="DescBox"/>
-                            </DockPanel>
-                        </Border>
-
-                        <Border Grid.Row="2" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
-                            <DockPanel>
-                                <DockPanel DockPanel.Dock="Top" Margin="14,10,14,6">
-                                    <TextBlock Text="提交代码（C++）" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    <TextBlock Text="g++ -O2" HorizontalAlignment="Right"
-                                               Foreground="Gray" VerticalAlignment="Center"/>
+                                <TextBlock DockPanel.Dock="Top" Text="个人信息" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <DockPanel DockPanel.Dock="Top">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="EditNickBtn" Content="修改昵称" Width="80" Height="28"
+                                                Margin="0,0,8,0" Click="OnEditNickname" Visibility="Collapsed"/>
+                                        <Button x:Name="UploadAvatarBtn" Content="上传头像" Width="80" Height="28"
+                                                Click="OnUploadAvatar" Visibility="Collapsed"/>
+                                    </StackPanel>
+                                    <Border DockPanel.Dock="Left" Width="64" Height="64" CornerRadius="32"
+                                            Background="#2D7DF6" VerticalAlignment="Center">
+                                        <Border.Clip>
+                                            <EllipseGeometry Center="32,32" RadiusX="32" RadiusY="32"/>
+                                        </Border.Clip>
+                                        <Grid>
+                                            <TextBlock x:Name="AvatarFallback" Text="&#xE13D;"
+                                                       FontFamily="Segoe MDL2 Assets" Foreground="White"
+                                                       FontSize="32" HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                            <Image x:Name="AvatarImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                        </Grid>
+                                    </Border>
+                                    <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock x:Name="ProfileName" FontSize="18" FontWeight="Bold"/>
+                                        <TextBlock x:Name="ProfileRole" Foreground="#666" FontSize="12" Margin="0,3,0,0"/>
+                                    </StackPanel>
                                 </DockPanel>
-                                <Border Background="#1E1E1E" Margin="10,0,10,10">
-                                    <controls:CodeEditor x:Name="CodeBox" Text="#include &lt;iostream&gt;&#x0a;using namespace std;&#x0a;int main(){&#x0a;    int a, b;&#x0a;    cin &gt;&gt; a &gt;&gt; b;&#x0a;    cout &lt;&lt; a + b &lt;&lt; endl;&#x0a;    return 0;&#x0a;}"/>
+
+                                <Border DockPanel.Dock="Top" Background="#FFF7F9FC" CornerRadius="6"
+                                        Padding="10" Margin="0,14,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="StatSolved" FontSize="20" FontWeight="Bold"
+                                                       Foreground="#339966" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="已通过" Foreground="#666" FontSize="12"
+                                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="StatTotal" FontSize="20" FontWeight="Bold"
+                                                       HorizontalAlignment="Center"/>
+                                            <TextBlock Text="总题目" Foreground="#666" FontSize="12"
+                                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="StatRatio" FontSize="20" FontWeight="Bold"
+                                                       Foreground="#2D7DF6" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="通过率" Foreground="#666" FontSize="12"
+                                                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
                                 </Border>
+
+                                <ProgressBar x:Name="SolveProgress" DockPanel.Dock="Top" Height="8" Margin="0,14,0,0"
+                                             Foreground="#2D7DF6" Background="#FFE3E6EB"/>
+
+                                <TextBlock DockPanel.Dock="Top" Text="题目通过情况" FontWeight="SemiBold" Margin="0,14,0,4"/>
+                                <ListBox x:Name="ProfileStatusList" BorderThickness="0" Background="Transparent">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMark}"
+                                                           Foreground="{Binding StatusBrush}" FontWeight="Bold"
+                                                           Margin="0,0,6,0"/>
+                                                <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding StatusTip}"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </DockPanel>
                         </Border>
 
-                        <DockPanel Grid.Row="4">
-                            <Button x:Name="SubmitBtn" Content="提交判题" Style="{StaticResource ButtonPrimary}"
-                                    Width="120" Height="36" Click="SubmitBtn_OnClick"/>
-                            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="Gray"/>
-                        </DockPanel>
-
-                        <Border Grid.Row="6" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="14">
+                        <!-- 题目描述 -->
+                        <Border x:Name="ProblemDescPanel" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                CornerRadius="8" Padding="14" Visibility="Collapsed">
                             <DockPanel>
-                                <TextBlock x:Name="VerdictText" DockPanel.Dock="Top" Text="结果：等待提交"
-                                           FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
-                                <ListBox x:Name="CaseList" BorderThickness="0"/>
+                                <Button DockPanel.Dock="Top" Content="&#x2190; 返回个人信息" Width="130" Height="30"
+                                        HorizontalAlignment="Left" Click="OnBackToProfile"/>
+                                <TextBlock x:Name="HomeDescTitle" DockPanel.Dock="Top" FontWeight="Bold" FontSize="16"
+                                           Margin="0,10,0,6" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="HomeMetaText" DockPanel.Dock="Top" TextWrapping="Wrap"
+                                           Margin="0,0,0,6" Foreground="#666" FontSize="12"/>
+                                <WebBrowser x:Name="HomeDescBox"/>
                             </DockPanel>
                         </Border>
                     </Grid>
@@ -123,6 +196,8 @@
                                                Text="请选择左侧比赛" TextWrapping="Wrap"/>
                                     <TextBlock x:Name="ContestListMeta" Foreground="#666" FontSize="12"
                                                Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="CountdownText" Foreground="#2D7DF6" FontSize="13"
+                                               FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap"/>
                                     <TextBlock Text="比赛说明" FontWeight="SemiBold" Margin="0,12,0,4"/>
                                 </StackPanel>
                                 <Border DockPanel.Dock="Bottom" Background="#FFF7F9FC" CornerRadius="6"
@@ -175,71 +250,68 @@
                             </DockPanel>
                         </Border>
 
-                        <!-- 做题页：左题目、右代码 -->
+                        <!-- 做题页：左题目列表，右比赛信息/题目描述 -->
                         <Grid x:Name="RoomSolvePanel" Grid.Row="1">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="340"/>
                                 <ColumnDefinition Width="10"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <DockPanel Grid.Column="0">
-                                <TextBlock DockPanel.Dock="Top" Text="本场题目" FontWeight="SemiBold"
-                                           Margin="4,4,0,6"/>
-                                <ListBox x:Name="ContestProblemList" SelectionChanged="OnSelectContestProblem"/>
-                            </DockPanel>
 
+                            <!-- 左：本场题目列表，始终显示 -->
+                            <Border Grid.Column="0" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                    CornerRadius="8" Padding="8">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="本场题目" FontWeight="SemiBold"
+                                               Margin="4,2,0,6"/>
+                                    <ListBox x:Name="ContestProblemList"
+                                             SelectionChanged="OnSelectContestProblem"
+                                             MouseDoubleClick="ContestProblemList_OnDoubleClick">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMark}"
+                                                               Foreground="{Binding StatusBrush}" FontWeight="Bold"
+                                                               Margin="0,0,6,0"/>
+                                                    <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding StatusTip}"/>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+
+                            <!-- 右：比赛信息（默认）/ 题目描述（单击后）切换 -->
                             <Grid Grid.Column="2">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="1.6*"/>
-                                    <RowDefinition Height="6"/>
-                                    <RowDefinition Height="2.6*"/>
-                                    <RowDefinition Height="6"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="6"/>
-                                    <RowDefinition Height="140"/>
-                                </Grid.RowDefinitions>
-
-                                <Border Grid.Row="0" Background="#FFF0F4FB" CornerRadius="6"
-                                        Padding="10,8" Margin="0,0,0,6">
-                                    <TextBlock x:Name="ContestInfoText" VerticalAlignment="Center"
-                                               TextWrapping="Wrap" Foreground="#333"/>
-                                </Border>
-
-                                <Border Grid.Row="1" BorderBrush="#FFE3E6EB" BorderThickness="1"
-                                        CornerRadius="8" Padding="12">
+                                <!-- 比赛信息 -->
+                                <Border x:Name="ContestInfoPanel" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                        CornerRadius="8" Padding="16">
                                     <DockPanel>
-                                        <TextBlock x:Name="ContestMetaText" DockPanel.Dock="Top"
-                                                   Margin="0,0,0,4" Foreground="#666" FontSize="12"
-                                                   TextWrapping="Wrap"/>
-                                        <TextBlock DockPanel.Dock="Top" Text="题目描述" FontWeight="SemiBold"
-                                                   Margin="0,0,0,4"/>
-                                        <WebBrowser x:Name="ContestDescBox"/>
+                                        <TextBlock DockPanel.Dock="Top" Text="比赛信息" FontWeight="SemiBold"
+                                                   Margin="0,0,0,10"/>
+                                        <Border DockPanel.Dock="Top" Background="#FFF0F4FB" CornerRadius="6"
+                                                Padding="12,10">
+                                            <TextBlock x:Name="ContestInfoText" VerticalAlignment="Center"
+                                                       TextWrapping="Wrap" Foreground="#333"/>
+                                        </Border>
+                                        <TextBlock DockPanel.Dock="Top" Margin="0,12,0,0" TextWrapping="Wrap"
+                                                   Foreground="#666" FontSize="13"
+                                                   Text="· 单击题目查看题面&#x0a;· 双击题目进入做题页（左题面、右代码）&#x0a;· 返回时做题窗口关闭并释放内存，再次进入自动载入该题已保存代码"/>
                                     </DockPanel>
                                 </Border>
 
-                                <Border Grid.Row="3" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
-                                    <Border Background="#1E1E1E" CornerRadius="0" Margin="10">
-                                        <controls:CodeEditor x:Name="ContestCodeBox"
-                                                             Text="#include &lt;iostream&gt;&#x0a;using namespace std;&#x0a;int main(){&#x0a;    return 0;&#x0a;}"/>
-                                    </Border>
-                                </Border>
-
-                                <DockPanel Grid.Row="5">
-                                    <Button x:Name="ContestSubmitBtn" Content="提交判题"
-                                            Style="{StaticResource ButtonPrimary}"
-                                            Width="120" Height="34" Click="ContestSubmit_OnClick"/>
-                                    <TextBlock x:Name="ContestStatusText" VerticalAlignment="Center"
-                                               Margin="14,0,0,0" Foreground="Gray"/>
-                                </DockPanel>
-
-                                <Border Grid.Row="7" BorderBrush="#FFE3E6EB" BorderThickness="1"
-                                        CornerRadius="8" Padding="12">
+                                <!-- 比赛题目描述 -->
+                                <Border x:Name="ContestProblemDescPanel" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                                        CornerRadius="8" Padding="14" Visibility="Collapsed">
                                     <DockPanel>
-                                        <TextBlock x:Name="ContestVerdictText" DockPanel.Dock="Top"
-                                                   Text="结果：等待提交" FontSize="14" FontWeight="Bold"
-                                                   Margin="0,0,0,6"/>
-                                        <ListBox x:Name="ContestCaseList" BorderThickness="0"/>
+                                        <Button DockPanel.Dock="Top" Content="&#x2190; 返回比赛信息" Width="130" Height="30"
+                                                HorizontalAlignment="Left" Click="OnBackToContestInfo"/>
+                                        <TextBlock x:Name="ContestDescTitle" DockPanel.Dock="Top" FontWeight="Bold" FontSize="16"
+                                                   Margin="0,10,0,6" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="ContestMetaText" DockPanel.Dock="Top" TextWrapping="Wrap"
+                                                   Margin="0,0,0,6" Foreground="#666" FontSize="12"/>
+                                        <WebBrowser x:Name="ContestDescBox"/>
                                     </DockPanel>
                                 </Border>
                             </Grid>
@@ -277,7 +349,7 @@
                                 BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8" Padding="10">
                             <DockPanel>
                                 <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
+                                    <TextBlock x:Name="SubsHeaderText" VerticalAlignment="Center" FontWeight="SemiBold"
                                                Text="本场提交记录（每人每题保留最后一次提交结果，按时间倒序）"/>
                                     <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right"
                                             Click="OnRefreshSubmissions"/>

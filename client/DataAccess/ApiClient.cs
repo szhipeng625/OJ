@@ -66,6 +66,28 @@ public class ApiClient
     public Task<List<Problem>?> GetProblemsAsync()
         => Task.Run(() => JsonSerializer.Deserialize<List<Problem>>(OJInterop.GetProblemsJson(), Opt));
 
+    /// <summary>获取某用户在某题（某比赛，contestId=0 为练习）下的最近一次提交（含代码）。</summary>
+    public Task<UserSolution?> GetUserSolutionAsync(int problemId, string username, int contestId)
+        => Task.Run<UserSolution?>(() =>
+        {
+            var j = JsonDocument.Parse(OJInterop.GetUserSolutionJson(problemId, username, contestId)).RootElement;
+            return new UserSolution(
+                j.TryGetProperty("found", out var f) && f.GetBoolean(),
+                j.TryGetProperty("id", out var id) ? id.GetInt64() : 0,
+                j.TryGetProperty("verdict", out var v) ? v.GetString() ?? "" : "",
+                j.TryGetProperty("detail", out var d) ? d.GetString() ?? "" : "",
+                j.TryGetProperty("ts", out var t) ? t.GetString() ?? "" : "",
+                j.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "");
+        });
+
+    /// <summary>获取某用户练习模式（contestId=0）每题最近一次提交结果。</summary>
+    public Task<List<UserProgress>?> GetUserProgressAsync(string username)
+        => Task.Run(() => JsonSerializer.Deserialize<List<UserProgress>>(OJInterop.GetUserProgressJson(username), Opt));
+
+    /// <summary>获取某用户在某场比赛下每题最近一次提交结果。</summary>
+    public Task<List<UserProgress>?> GetUserContestProgressAsync(int contestId, string username)
+        => Task.Run(() => JsonSerializer.Deserialize<List<UserProgress>>(OJInterop.GetUserContestProgressJson(contestId, username), Opt));
+
     public Task<SubmitResult?> SubmitAsync(int problemId, string code)
         => Task.Run(() => JsonSerializer.Deserialize<SubmitResult>(OJInterop.SubmitJson(problemId, code), Opt));
 
@@ -109,10 +131,10 @@ public class ApiClient
             return new ContestRegistration(true, registered, v);
         });
 
-    /// <summary>比赛提交记录（时间倒序；每人每题保留最后一次结果）。</summary>
-    public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int cid)
+    /// <summary>比赛提交记录（时间倒序；每人每题保留最后一次结果）。viewAll=false 时只返回本人记录。</summary>
+    public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int cid, string username, bool viewAll)
         => Task.Run(() => JsonSerializer.Deserialize<List<ContestSubmission>>(
-            OJInterop.ContestSubmissionsJson(cid), Opt));
+            OJInterop.ContestSubmissionsJson(cid, username, viewAll), Opt));
 
     // ---------- 用户体系 ----------
 
@@ -126,6 +148,8 @@ public class ApiClient
                 j.TryGetProperty("userId", out var uid) ? uid.GetInt64() : 0,
                 j.TryGetProperty("role", out var r) ? r.GetString() ?? "user" : "user",
                 j.TryGetProperty("username", out var un) ? un.GetString() ?? "" : "",
+                j.TryGetProperty("nickname", out var nn) ? nn.GetString() ?? "" : "",
+                j.TryGetProperty("avatar", out var av) ? av.GetString() ?? "" : "",
                 j.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "");
         });
 
@@ -146,9 +170,19 @@ public class ApiClient
                 j.TryGetProperty("userId", out var uid) ? uid.GetInt64() : 0,
                 j.TryGetProperty("role", out var r) ? r.GetString() ?? "user" : "user",
                 j.TryGetProperty("username", out var un) ? un.GetString() ?? "" : "",
+                j.TryGetProperty("nickname", out var nn) ? nn.GetString() ?? "" : "",
+                j.TryGetProperty("avatar", out var av) ? av.GetString() ?? "" : "",
                 j.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "");
         });
 
     public Task LogoutAsync(string token)
         => Task.Run(() => OJInterop.LogoutJson(token));
+
+    /// <summary>更新当前用户资料（昵称 / 头像 data URL）。</summary>
+    public Task<bool> UpdateProfileAsync(string token, string nickname, string avatar)
+        => Task.Run(() =>
+        {
+            var j = JsonDocument.Parse(OJInterop.UpdateProfileJson(token, nickname, avatar)).RootElement;
+            return j.TryGetProperty("ok", out var o) && o.GetBoolean();
+        });
 }

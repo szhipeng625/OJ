@@ -68,6 +68,7 @@ namespace client.Presentation.Controls
             };
             Editor.TextArea.TextEntering += TextArea_TextEntering;
             Editor.TextArea.KeyDown += TextArea_KeyDown;
+            Editor.TextArea.PreviewKeyDown += TextArea_PreviewKeyDown;
         }
 
         // 高亮定义名称（XSHD 插件，见 Presentation/Highlighting/CppDarkPlus.xshd）
@@ -114,80 +115,56 @@ namespace client.Presentation.Controls
                 return HighlightingManager.Instance.GetDefinition("C++");
             }
         }
-        // C++ 补全项
-        private static readonly List<CompletionData> CompletionItems = new()
+        // 自动闭合括号 / 引号（基础语法补全）
+        private static readonly Dictionary<char, string> AutoClosePairs = new()
         {
-            // 关键字
-            new("int", "int 类型"), new("long", "long 类型"), new("double", "double 类型"),
-            new("float", "float 类型"), new("char", "char 类型"), new("bool", "bool 类型"),
-            new("void", "void 类型"), new("auto", "自动类型推导"), new("const", "常量修饰"),
-            new("static", "静态修饰"), new("virtual", "虚函数"), new("inline", "内联函数"),
-            new("namespace", "命名空间"), new("using", "using 声明"), new("class", "类定义"),
-            new("struct", "结构体"), new("enum", "枚举"), new("template", "模板"),
+            ['{'] = "}", ['('] = ")", ['['] = "]", ['"'] = "\"", ['\''] = "'"
+        };
+
+        // C++ 基础语法补全项（轻量：只保留基础关键字与常用语句）
+        private static readonly List<CompletionData> BasicKeywords = new()
+        {
+            // 基础类型 / 修饰
+            new("int", "整型"), new("long", "长整型"), new("short", "短整型"),
+            new("double", "双精度浮点"), new("float", "单精度浮点"),
+            new("char", "字符型"), new("bool", "布尔型"), new("void", "空类型"),
+            new("auto", "自动类型推导"), new("const", "常量修饰"), new("static", "静态修饰"),
+            // 控制流
             new("return", "返回"), new("if", "if 语句"), new("else", "else 分支"),
             new("for", "for 循环"), new("while", "while 循环"), new("do", "do-while 循环"),
-            new("switch", "switch 语句"), new("case", "case 分支"), new("break", "跳出循环"),
-            new("continue", "继续循环"), new("try", "异常捕获"), new("catch", "捕获异常"),
-            new("throw", "抛出异常"), new("new", "动态分配"), new("delete", "释放内存"),
-            new("sizeof", "大小运算符"), new("typedef", "类型别名"), new("typename", "类型名"),
-            new("this", "当前对象指针"), new("nullptr", "空指针"), new("true", "真"),
-            new("false", "假"), new("public", "公有"), new("private", "私有"),
-            new("protected", "保护"), new("friend", "友元"), new("explicit", "显式构造"),
-            new("operator", "运算符重载"), new("override", "重写"), new("final", "最终"),
-            new("default", "默认"), new("noexcept", "不抛异常"), new("constexpr", "常量表达式"),
-            new("decltype", "类型推导"), new("static_cast", "静态转换"), new("dynamic_cast", "动态转换"),
-            new("reinterpret_cast", "重解释转换"), new("const_cast", "常量转换"),
-            // STL 容器
-            new("vector", "std::vector 动态数组"), new("map", "std::map 有序映射"),
-            new("set", "std::set 有序集合"), new("unordered_map", "std::unordered_map 哈希映射"),
-            new("unordered_set", "std::unordered_set 哈希集合"), new("string", "std::string 字符串"),
-            new("queue", "std::queue 队列"), new("stack", "std::stack 栈"),
-            new("deque", "std::deque 双端队列"), new("list", "std::list 链表"),
-            new("pair", "std::pair 键值对"), new("tuple", "std::tuple 元组"),
-            new("array", "std::array 固定数组"), new("bitset", "std::bitset 位集"),
-            new("priority_queue", "std::priority_queue 优先队列"),
-            // 常用函数
+            new("switch", "switch 语句"), new("case", "case 分支"), new("default", "默认分支"),
+            new("break", "跳出循环"), new("continue", "继续循环"), new("goto", "跳转"),
+            // 结构
+            new("namespace", "命名空间"), new("using", "using 声明"),
+            new("class", "类定义"), new("struct", "结构体"), new("enum", "枚举"),
+            new("template", "模板"), new("typedef", "类型别名"), new("typename", "类型名"),
+            new("public", "公有"), new("private", "私有"), new("protected", "保护"),
+            // 表达式 / 内存
+            new("new", "动态分配"), new("delete", "释放内存"), new("sizeof", "大小运算符"),
+            new("this", "当前对象指针"), new("nullptr", "空指针"),
+            new("true", "真"), new("false", "假"),
+            // 常用
             new("cin", "std::cin 标准输入"), new("cout", "std::cout 标准输出"),
-            new("cerr", "std::cerr 标准错误"), new("endl", "std::endl 换行刷新"),
-            new("scanf", "scanf 格式化输入"), new("printf", "printf 格式化输出"),
-            new("memset", "memset 内存设置"), new("memcpy", "memcpy 内存拷贝"),
-            new("strlen", "strlen 字符串长度"), new("strcmp", "strcmp 字符串比较"),
-            new("strcpy", "strcpy 字符串拷贝"), new("atoi", "atoi 字符串转整数"),
-            new("atof", "atof 字符串转浮点"), new("malloc", "malloc 内存分配"),
-            new("free", "free 内存释放"), new("sort", "std::sort 排序"),
-            new("swap", "std::swap 交换"), new("min", "std::min 最小值"),
-            new("max", "std::max 最大值"), new("abs", "std::abs 绝对值"),
-            new("sqrt", "sqrt 平方根"), new("pow", "pow 幂运算"),
-            new("sin", "sin 正弦"), new("cos", "cos 余弦"),
-            new("floor", "floor 向下取整"), new("ceil", "ceil 向上取整"),
-            new("rand", "rand 随机数"), new("srand", "srand 设置随机种子"),
-            new("time", "time 获取时间"), new("clock", "clock 时钟"),
-            new("lower_bound", "std::lower_bound 下界"), new("upper_bound", "std::upper_bound 上界"),
-            new("binary_search", "std::binary_search 二分查找"), new("reverse", "std::reverse 反转"),
-            new("unique", "std::unique 去重"), new("count", "std::count 计数"),
-            new("find", "std::find 查找"), new("fill", "std::fill 填充"),
-            new("accumulate", "std::accumulate 累加"), new("push_back", "push_back 尾部添加"),
-            new("pop_back", "pop_back 尾部删除"), new("emplace_back", "emplace_back 尾部构造"),
-            // 头文件
-            new("#include <iostream>", "输入输出流"), new("#include <cstdio>", "C 标准输入输出"),
-            new("#include <cstring>", "C 字符串操作"), new("#include <cstdlib>", "C 标准库"),
-            new("#include <cmath>", "数学函数"), new("#include <algorithm>", "STL 算法"),
-            new("#include <vector>", "vector 容器"), new("#include <map>", "map 容器"),
-            new("#include <set>", "set 容器"), new("#include <string>", "string 字符串"),
-            new("#include <queue>", "queue 队列"), new("#include <stack>", "stack 栈"),
-            new("#include <bitset>", "bitset 位集"), new("#include <utility>", "pair 等工具"),
-            new("#include <tuple>", "tuple 元组"), new("#include <unordered_map>", "unordered_map"),
-            new("#include <unordered_set>", "unordered_set"), new("#include <fstream>", "文件流"),
-            new("#include <sstream>", "字符串流"), new("#include <iomanip>", "格式化输出"),
-            new("#include <ctime>", "时间函数"), new("#include <climits>", "整数极限"),
-            new("#include <cfloat>", "浮点极限"), new("#include <numeric>", "数值算法"),
-            new("#include <functional>", "函数对象"), new("#include <memory>", "智能指针"),
-            new("using namespace std;", "使用 std 命名空间"),
+            new("endl", "std::endl 换行"), new("std", "std 命名空间"),
         };
 
         private void TextArea_TextEntering(object sender, TextCompositionEventArgs e)
         {
-            if (e.Text.Length > 0 && _completionWindow != null)
+            if (e.Text.Length == 0) return;
+
+            // 基础语法补全：自动闭合括号 / 引号，光标留在中间
+            if (e.Text.Length == 1 && AutoClosePairs.TryGetValue(e.Text[0], out var closer))
+            {
+                _completionWindow?.Close();
+                var ta = Editor.TextArea;
+                int caret = ta.Caret.Offset;
+                ta.Document.Insert(caret, e.Text + closer);
+                ta.Caret.Offset = caret + 1;
+                e.Handled = true;
+                return;
+            }
+
+            if (_completionWindow != null)
             {
                 if (!char.IsLetterOrDigit(e.Text[0]) && e.Text[0] != '_')
                 {
@@ -211,6 +188,73 @@ namespace client.Presentation.Controls
             }
         }
 
+        private void TextArea_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            var ta = Editor.TextArea;
+            if (e.Key == Key.Back)
+            {
+                int off = ta.Caret.Offset;
+                if (off > 0 && off < ta.Document.TextLength)
+                {
+                    char prev = ta.Document.GetCharAt(off - 1);
+                    char next = ta.Document.GetCharAt(off);
+                    if (IsMatchingPair(prev, next))
+                    {
+                        ta.Document.Remove(off - 1, 2);
+                        e.Handled = true;
+                    }
+                }
+            }
+            else if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                HandleEnter(ta);
+            }
+        }
+
+        private static bool IsMatchingPair(char a, char b)
+        {
+            return (a, b) switch
+            {
+                ('{', '}') or ('(', ')') or ('[', ']') or ('"', '"') or ('\'', '\'') => true,
+                _ => false
+            };
+        }
+
+        private void HandleEnter(TextArea ta)
+        {
+            var doc = ta.Document;
+            int offset = ta.Caret.Offset;
+            var line = doc.GetLineByOffset(offset);
+            string lineText = doc.GetText(line.Offset, offset - line.Offset);
+
+            int indentLen = 0;
+            while (indentLen < lineText.Length && (lineText[indentLen] == ' ' || lineText[indentLen] == '\t'))
+                indentLen++;
+            string indent = new string(' ', indentLen);
+            string nl = Environment.NewLine;
+
+            // 光标夹在自动闭合的 {} 中间：拆成三行
+            if (offset > line.Offset && offset < doc.TextLength &&
+                doc.GetCharAt(offset - 1) == '{' && doc.GetCharAt(offset) == '}')
+            {
+                doc.Insert(offset, nl + indent + "    " + nl + indent);
+                ta.Caret.Offset = offset + nl.Length + indent.Length + 4;
+                return;
+            }
+
+            // 行尾是 { ：换行并缩进一级
+            if (offset > line.Offset && doc.GetCharAt(offset - 1) == '{')
+            {
+                doc.Insert(offset, nl + indent + "    ");
+                ta.Caret.Offset = offset + nl.Length + indent.Length + 4;
+                return;
+            }
+
+            doc.Insert(offset, nl + indent);
+            ta.Caret.Offset = offset + nl.Length + indent.Length;
+        }
+
         private void ShowCompletion()
         {
             var textArea = Editor.TextArea;
@@ -225,7 +269,7 @@ namespace client.Presentation.Controls
             var prefix = lineText.Substring(wordStart);
             if (prefix.Length == 0) return;
 
-            var matches = CompletionItems
+            var matches = BasicKeywords
                      .Where(c => c.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                      .Take(200)
                      .ToList();

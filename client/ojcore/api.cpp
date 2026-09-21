@@ -293,6 +293,7 @@ static const char* do_judge(int problem_id, const char* code,
         + ",\"verdict\":\"" + verdict + "\""
         + ",\"detail\":\"" + jsonEscape(detail) + "\""
         + ",\"ts\":\"" + tsBuf + "\""
+        + ",\"code\":\"" + jsonEscape(code ? code : "") + "\""
         + ",\"cases\":[";
     for (size_t i = 0; i < cases.size(); ++i) {
         auto& c = cases[i];
@@ -331,6 +332,63 @@ static const char* do_judge(int problem_id, const char* code,
     } catch (...) { /* MySQL 写入失败仅记录，判题结果照常返回 */ }
 
     return dup(json);
+}
+
+// 按 (username, problem_id, contest_id) 取最近一次提交（id 最大）。无则返回空串。
+std::string latestSubmission(const std::string& uname, int problem_id, int contest_id) {
+    std::string best;
+    long long bestId = -1;
+    try {
+        auto it = g_lsm->begin(0);
+        auto end = g_lsm->end();
+        for (; it != end; ++it) {
+            auto kv = *it;
+            if (kv.first.rfind("submission:", 0) != 0) continue;
+            const std::string& val = kv.second;
+            if (jsonInt(val, "problemId") != problem_id) continue;
+            if (jsonInt(val, "contestId", 0) != contest_id) continue;
+            if (jsonStr(val, "username") != uname) continue;
+            long long id = jsonInt(val, "id");
+            if (best.empty() || id > bestId) { best = val; bestId = id; }
+        }
+    } catch (...) { /* 遍历失败返回空 */ }
+    return best;
+}
+
+// 某用户在某比赛（0=练习）下每题最近一次提交结果，输出 JSON 数组
+std::string userProgressJson(const std::string& uname, int contest_id) {
+    std::map<int, std::string> latestVerdict;
+    std::map<int, long long> latestId;
+    try {
+        auto it = g_lsm->begin(0);
+        auto end = g_lsm->end();
+        for (; it != end; ++it) {
+            auto kv = *it;
+            if (kv.first.rfind("submission:", 0) != 0) continue;
+            const std::string& val = kv.second;
+            if (jsonStr(val, "username") != uname) continue;
+            if (jsonInt(val, "contestId", 0) != contest_id) continue;
+            int pid = (int)jsonInt(val, "problemId");
+            long long id = jsonInt(val, "id");
+            auto li = latestId.find(pid);
+            if (li == latestId.end() || id > li->second) {
+                latestId[pid] = id;
+                latestVerdict[pid] = jsonStr(val, "verdict");
+            }
+        }
+    } catch (...) { /* 遍历失败返回空 */ }
+    std::string json = "[";
+    bool first = true;
+    for (auto& kv : latestVerdict) {
+        if (!first) json += ",";
+        first = false;
+        bool ac = (kv.second == "AC");
+        json += "{\"problemId\":" + std::to_string(kv.first)
+             + ",\"verdict\":\"" + jsonEscape(kv.second) + "\""
+             + ",\"ac\":" + (ac ? "true" : "false") + "}";
+    }
+    json += "]";
+    return json;
 }
 
 } // namespace
@@ -401,6 +459,27 @@ OJ_API const char* oj_get_submissions(int problem_id) {
     } catch (...) { /* 遍历失败返回已收集部分 */ }
     json += "]";
     return dup(json);
+}
+
+// 获取某用户在某题（contest_id=0 为练习）下的最近一次提交（含 code）。
+// 无记录返回 {"found":false}；有则 {"found":true,"id":..,"verdict":"..","code":"..",...}
+OJ_API const char* oj_get_user_solution(int problem_id, const char* username, int contest_id) {
+    std::string uname = (username && *username) ? username : "anonymous";
+    std::string val = latestSubmission(uname, problem_id, contest_id);
+    if (val.empty()) return dup("{\"found\":false}");
+    return dup("{\"found\":true," + val.substr(1));
+}
+
+// 某用户练习模式（contest_id=0）每题最近一次提交结果，用于题库通过/未通过标记
+OJ_API const char* oj_get_user_progress(const char* username) {
+    std::string uname = (username && *username) ? username : "anonymous";
+    return dup(userProgressJson(uname, 0));
+}
+
+// 某用户在某场比赛下每题最近一次提交结果，用于比赛题目列表通过/未通过标记
+OJ_API const char* oj_get_user_contest_progress(int cid, const char* username) {
+    std::string uname = (username && *username) ? username : "anonymous";
+    return dup(userProgressJson(uname, cid));
 }
 
 OJ_API const char* oj_submit(int problem_id, const char* code) {
@@ -507,15 +586,33 @@ OJ_API const char* oj_get_board(int cid) {
     };
     std::map<std::string, UserStat> offUsers, virtUsers;
 
+    // 虚拟参赛者：从报名时间开始计时；先扫描本场报名凭证
+    std::map<std::string, time_t> virtRegTs;
+    try {
+        auto it = g_lsm->begin(0);
+        auto end = g_lsm->end();
+        std::string prefix = "reg:" + std::to_string(cid) + ":";
+        for (; it != end; ++it) {
+            auto kv = *it;
+            if (kv.first.rfind(prefix, 0) != 0) continue;
+            const std::string& val = kv.second;
+            std::string uname = jsonStr(val, "username");
+            if (uname.empty()) continue;
+            if (val.find("\"virtual\":true") == std::string::npos) continue;
+            time_t t = parseTime(jsonStr(val, "ts"));
+            if (t > 0) virtRegTs[uname] = t;
+        }
+    } catch (...) {}
+
     auto consider = [&](std::map<std::string, UserStat>& table,
                         const std::string& uname, int pid,
-                        bool ac, const std::string& ts) {
+                        bool ac, const std::string& ts, time_t baseline) {
         if (table.find(uname) == table.end()) table[uname].username = uname;
         Cell& c = table[uname].cells[pid];
         if (c.acMin >= 0) return;          // 已 AC 不再计分
         if (ac) {
             time_t t = parseTime(ts);
-            c.acMin = (startT > 0 && t > 0) ? (long long)difftime(t, startT) / 60 : 0;
+            c.acMin = (baseline > 0 && t > 0) ? (long long)difftime(t, baseline) / 60 : 0;
         } else {
             c.wrong++;
         }
@@ -544,7 +641,12 @@ OJ_API const char* oj_get_board(int cid) {
             if (uname.empty()) uname = "anonymous";
             std::string ts = jsonStr(val, "ts");
             bool virt = val.find("\"virtual\":true") != std::string::npos;
-            consider(virt ? virtUsers : offUsers, uname, (int)pid, ac, ts);
+            time_t baseline = startT;
+            if (virt) {
+                auto ri = virtRegTs.find(uname);
+                if (ri != virtRegTs.end()) baseline = ri->second;
+            }
+            consider(virt ? virtUsers : offUsers, uname, (int)pid, ac, ts, baseline);
         }
     } catch (...) {}
 
@@ -643,11 +745,13 @@ OJ_API const char* oj_contest_registration(int cid, const char* username) {
 }
 
 // 比赛提交记录（按 contestId 精确归属，老记录回退题目集合），时间倒序
-OJ_API const char* oj_contest_submissions(int cid) {
+// view_all=0 时只返回 username 本人记录（比赛进行中参赛者互不可见）
+OJ_API const char* oj_contest_submissions(int cid, const char* username, int view_all) {
+    std::string uname = (username && *username) ? username : "anonymous";
     // MySQL 可用时提交记录直接查库（每人每题最后一次结果），失败回退 LSM 全量历史
     if (oj::mysql_available()) {
         std::string out;
-        if (oj::mysql_contest_submissions(cid, out)) return dup(out);
+        if (oj::mysql_contest_submissions(cid, uname, view_all != 0, out)) return dup(out);
     }
     std::string craw = readFile(serverRoot() + "\\contests\\" + std::to_string(cid) + "\\contest.json");
     std::vector<int> pids;
@@ -672,6 +776,10 @@ OJ_API const char* oj_contest_submissions(int cid) {
                 for (int x : pids) if (x == pid) { inContest = true; break; }
             }
             if (!inContest) continue;
+            if (!view_all) {
+                std::string recUser = jsonStr(val, "username");
+                if (recUser != uname) continue;
+            }
             Rec r;
             r.id = jsonInt(val, "id");
             r.ts = jsonStr(val, "ts");
@@ -733,27 +841,43 @@ OJ_API const char* oj_register(const char* username, const char* password, const
 }
 
 OJ_API const char* oj_login(const char* username, const char* password) {
-    std::string token, role, uname, err;
+    std::string token, role, uname, nickname, avatar, err;
     long long uid = 0;
     if (oj::mysql_login(username ? username : "", password ? password : "",
-                        token, uid, role, uname, err)) {
+                        token, uid, role, uname, nickname, avatar, err)) {
         return dup(std::string("{\"ok\":true,\"token\":\"" + token + "\"")
                  + ",\"userId\":" + std::to_string(uid)
                  + ",\"role\":\"" + role + "\""
-                 + ",\"username\":\"" + uname + "\"}");
+                 + ",\"username\":\"" + jsonEscape(uname) + "\""
+                 + ",\"nickname\":\"" + jsonEscape(nickname) + "\""
+                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\"}");
     }
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
 OJ_API const char* oj_whoami(const char* token) {
-    std::string role, uname, err;
+    std::string role, uname, nickname, avatar, err;
     long long uid = 0;
-    if (oj::mysql_whoami(token ? token : "", uid, role, uname, err)) {
+    if (oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar, err)) {
         return dup(std::string("{\"ok\":true,\"userId\":" + std::to_string(uid))
                  + ",\"role\":\"" + role + "\""
-                 + ",\"username\":\"" + uname + "\"}");
+                 + ",\"username\":\"" + jsonEscape(uname) + "\""
+                 + ",\"nickname\":\"" + jsonEscape(nickname) + "\""
+                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\"}");
     }
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+// 更新当前用户资料（昵称 / 头像，头像为 data URL 或空串）
+OJ_API const char* oj_update_profile(const char* token, const char* nickname, const char* avatar) {
+    std::string role, uname, nk, av, err;
+    long long uid = 0;
+    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nk, av, err)) {
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err.empty() ? "会话无效或已过期" : err) + "\"}");
+    }
+    if (!oj::mysql_update_profile(uid, nickname ? nickname : "", avatar ? avatar : "", err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    return dup("{\"ok\":true}");
 }
 
 OJ_API const char* oj_logout(const char* token) {
@@ -762,9 +886,9 @@ OJ_API const char* oj_logout(const char* token) {
 }
 
 OJ_API const char* oj_list_users(const char* token) {
-    std::string role, uname, err;
+    std::string role, uname, nickname, avatar, err;
     long long uid = 0;
-    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, err) || role != "admin") {
+    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar, err) || role != "admin") {
         return dup("{\"ok\":false,\"error\":\"需要 admin 权限\"}");
     }
     std::string out;

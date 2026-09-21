@@ -18,6 +18,18 @@ public static class OJInterop
     private static extern IntPtr oj_get_problems();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_get_user_solution(int problem_id,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username, int contest_id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_get_user_progress(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_get_user_contest_progress(int cid,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_submit(int problem_id, [MarshalAs(UnmanagedType.LPUTF8Str)] string code);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -50,7 +62,8 @@ public static class OJInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string username);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_contest_submissions(int cid);
+    private static extern IntPtr oj_contest_submissions(int cid,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string username, int view_all);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern int oj_init_mysql([MarshalAs(UnmanagedType.LPUTF8Str)] string host, int port,
@@ -75,6 +88,11 @@ public static class OJInterop
     private static extern IntPtr oj_whoami([MarshalAs(UnmanagedType.LPUTF8Str)] string token);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_update_profile([MarshalAs(UnmanagedType.LPUTF8Str)] string token,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string nickname,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string avatar);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_logout([MarshalAs(UnmanagedType.LPUTF8Str)] string token);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -95,6 +113,15 @@ public static class OJInterop
         => oj_init(problemDir, dataDir);
 
     public static string GetProblemsJson() => PtrToString(oj_get_problems());
+
+    public static string GetUserSolutionJson(int problemId, string username, int contestId)
+        => PtrToString(oj_get_user_solution(problemId, username, contestId));
+
+    public static string GetUserProgressJson(string username)
+        => PtrToString(oj_get_user_progress(username));
+
+    public static string GetUserContestProgressJson(int contestId, string username)
+        => PtrToString(oj_get_user_contest_progress(contestId, username));
 
     public static string SubmitJson(int problemId, string code)
         => PtrToString(oj_submit(problemId, code));
@@ -117,8 +144,8 @@ public static class OJInterop
     public static string ContestRegistrationJson(int cid, string username)
         => PtrToString(oj_contest_registration(cid, username));
 
-    public static string ContestSubmissionsJson(int cid)
-        => PtrToString(oj_contest_submissions(cid));
+    public static string ContestSubmissionsJson(int cid, string username, bool viewAll)
+        => PtrToString(oj_contest_submissions(cid, username, viewAll ? 1 : 0));
 
     public static int InitMySQL(string host, int port, string user, string pass, string db, string problemDir)
         => oj_init_mysql(host, port, user, pass, db, problemDir);
@@ -127,6 +154,8 @@ public static class OJInterop
     public static string RegisterJson(string u, string p, string role) => PtrToString(oj_register(u, p, role));
     public static string LoginJson(string u, string p) => PtrToString(oj_login(u, p));
     public static string WhoamiJson(string token) => PtrToString(oj_whoami(token));
+    public static string UpdateProfileJson(string token, string nickname, string avatar)
+        => PtrToString(oj_update_profile(token, nickname, avatar));
     public static string LogoutJson(string token) => PtrToString(oj_logout(token));
     public static string ListUsersJson(string token) => PtrToString(oj_list_users(token));
 }

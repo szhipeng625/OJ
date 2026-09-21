@@ -23,6 +23,10 @@ public class AuthService
     public Task<bool> RegisterAsync(string username, string password, string role)
         => _api.RegisterAsync(username, password, role);
 
+    /// <summary>更新当前用户资料（昵称 / 头像 data URL）。</summary>
+    public Task<bool> UpdateProfileAsync(string token, string nickname, string avatar)
+        => _api.UpdateProfileAsync(token, nickname, avatar);
+
     /// <summary>用本地保存的 token 恢复登录态；无效/不存在返回 null。</summary>
     public async Task<LoginResult?> RestoreSessionAsync()
     {

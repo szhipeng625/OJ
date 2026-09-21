@@ -23,16 +23,22 @@ bool mysql_init_schema(std::string& err);
 bool mysql_register(const std::string& username, const std::string& password,
                     const std::string& role, std::string& err);
 
-// 登录。成功返回 true，out_token/out_user_id/out_role/out_username 填充。
+// 登录。成功返回 true，out_token/out_user_id/out_role/out_username/out_nickname/out_avatar 填充。
 bool mysql_login(const std::string& username, const std::string& password,
                  std::string& out_token, long long& out_user_id,
-                 std::string& out_role, std::string& out_username, std::string& err);
+                 std::string& out_role, std::string& out_username,
+                 std::string& out_nickname, std::string& out_avatar, std::string& err);
 
 // token 会话校验
 bool mysql_whoami(const std::string& token, long long& out_user_id,
-                  std::string& out_role, std::string& out_username, std::string& err);
+                  std::string& out_role, std::string& out_username,
+                  std::string& out_nickname, std::string& out_avatar, std::string& err);
 
 bool mysql_logout(const std::string& token);
+
+// 更新用户资料（昵称 / 头像，头像为 data URL 或空串）
+bool mysql_update_profile(long long user_id, const std::string& nickname,
+                          const std::string& avatar, std::string& err);
 
 // 写提交记录：唯一键 (user_id, problem_id, contest_id)，
 // 同一用户同一题重复提交时原地更新最后结果（upsert，不追加历史行）
@@ -51,7 +57,9 @@ bool mysql_contest_registration(long long user_id, int contest_id,
                                 bool& registered, bool& virt);
 
 // 比赛提交记录 JSON 数组（时间倒序；每人每题保留最后一次结果）
-bool mysql_contest_submissions(int cid, std::string& out_json);
+// view_all=false 时只返回 username 本人记录（比赛进行中参赛者互不可见）
+bool mysql_contest_submissions(int cid, const std::string& username, bool view_all,
+                               std::string& out_json);
 
 // 榜单聚合：official / virtual 两个 JSON 数组（ICPC 规则，20 分钟罚时）
 bool mysql_board(int cid, const std::string& start_str,

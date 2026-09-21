@@ -7,7 +7,7 @@ namespace client.Business.Services;
 /// </summary>
 public static class ContestPolicy
 {
-    /// <summary>比赛当前状态：未开始 / 进行中 / 已结束（可虚拟参赛）/ 时间未知。</summary>
+    /// <summary>比赛当前状态：未开始 / 进行中 / 查看比赛（已结束）/ 时间未知。</summary>
     public static string Status(string? start, string? end)
     {
         var now = DateTime.Now;
@@ -15,7 +15,18 @@ public static class ContestPolicy
             return "时间未知";
         if (now < st) return "未开始";
         if (now < et) return "进行中";
-        return "已结束（可虚拟参赛）";
+        return "查看比赛";
+    }
+
+    /// <summary>距开始时间的倒计时文本；已开始/已结束返回空串。</summary>
+    public static string Countdown(string? start)
+    {
+        if (!DateTime.TryParse(start, out var st)) return "";
+        var span = st - DateTime.Now;
+        if (span <= TimeSpan.Zero) return "";
+        return span.TotalDays >= 1
+            ? $"{span.Days} 天 {span.Hours} 小时 {span.Minutes} 分 {span.Seconds} 秒"
+            : $"{span.Hours} 小时 {span.Minutes} 分 {span.Seconds} 秒";
     }
 
     /// <summary>比赛是否已结束（用于默认勾选虚拟参赛）。</summary>

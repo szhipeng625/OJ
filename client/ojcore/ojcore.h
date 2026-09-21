@@ -26,6 +26,17 @@ OJ_API const char* oj_get_problems(void);
 //   "cases":[...],"ts":"2026-09-19 17:20:00"}]
 OJ_API const char* oj_get_submissions(int problem_id);
 
+// 获取某用户在某题（contest_id=0 为练习）下的最近一次提交（含 code）。
+// 无记录返回 {"found":false}；有则 {"found":true,"id":..,"verdict":"..","code":"..",...}
+OJ_API const char* oj_get_user_solution(int problem_id, const char* username, int contest_id);
+
+// 某用户练习模式（contest_id=0）每题最近一次提交结果。
+// 返回 [{"problemId":1,"verdict":"AC","ac":true}, ...]
+OJ_API const char* oj_get_user_progress(const char* username);
+
+// 某用户在某场比赛下每题最近一次提交结果（同上格式）。
+OJ_API const char* oj_get_user_contest_progress(int cid, const char* username);
+
 // 提交判题。problem_id 题目编号，code 用户 C++ 源码。
 // 返回 JSON 字符串，用完调 oj_free_string 释放。
 // {"id":1,"verdict":"AC","detail":"...","cases":[{"name":"#1","timeMs":12,"passed":true,"info":""}]}
@@ -58,7 +69,8 @@ OJ_API const char* oj_submit_contest(int problem_id, const char* code,
                                      int contest_id);
 OJ_API const char* oj_contest_register(int cid, const char* username, int virtual_);
 OJ_API const char* oj_contest_registration(int cid, const char* username);
-OJ_API const char* oj_contest_submissions(int cid);
+// view_all=0 时只返回 username 本人记录（比赛进行中参赛者互不可见）
+OJ_API const char* oj_contest_submissions(int cid, const char* username, int view_all);
 
 // ===== MySQL 用户体系（可选，未配置时回退本地 anonymous）=====
 
@@ -77,8 +89,11 @@ OJ_API const char* oj_register(const char* username, const char* password, const
 // 登录。成功返回 {"ok":true,"token":"...","userId":1,"role":"admin","username":"..."}
 OJ_API const char* oj_login(const char* username, const char* password);
 
-// 校验 token。成功返回 {"ok":true,"userId":1,"role":"...","username":"..."}
+// 校验 token。成功返回 {"ok":true,"userId":1,"role":"...","username":"...","nickname":"...","avatar":"..."}
 OJ_API const char* oj_whoami(const char* token);
+
+// 更新当前用户资料（昵称 / 头像，头像为 data URL 或空串）。返回 {"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_update_profile(const char* token, const char* nickname, const char* avatar);
 
 // 登出
 OJ_API const char* oj_logout(const char* token);
