@@ -29,24 +29,19 @@ AC_API const char* ac_save_meta(int id, int time_ms, int mem_mb, const char* tag
 // 读取题目元数据，返回 meta.json 内容（JSON 对象）
 AC_API const char* ac_get_meta(int id);
 
-// 编译源码（标程 std.cpp 或 spj.cpp），返回 {"ok":true} 或 {"ok":false,"error":"..."}
+// 编译源码（任意 .cpp 源），返回 {"ok":true} 或 {"ok":false,"error":"..."}
 AC_API const char* ac_compile(const char* src_file, const char* exe_file);
 
 // 运行标程对题目所有 *.in 生成 *.out（每个限时 2s / 内存 256MB）
 // 返回 {"ok":true,"results":[{"file":"1.in","status":"OK|TLE|RE|SE","ms":10}, ...]}
 AC_API const char* ac_gen_outputs(int id, const char* std_exe);
 
-// 完整性校验，返回 {"ok":bool,"inCount":n,"hasStd":bool,"hasSpj":bool,"missing":[...]}
+// 完整性校验，返回 {"ok":bool,"inCount":n,"genCount":m,"hasStd":bool,"missing":[...]}
 AC_API const char* ac_validate(int id);
 
-// 分发：先快照到题库 {id}\history\{v}（版本自增），再复制 {id} 到 target_root\{id}。
-// 注意：history 目录仅服务端可见，发布到客户端时会被跳过。
-// 返回 {"ok":true,"target":"...","version":N}
+// 分发：复制 {id} 到 target_root\{id}（history / gen_history 等历史目录不下发）。
+// 返回 {"ok":true,"target":"..."}
 AC_API const char* ac_publish(int id, const char* target_root);
-
-// 题目历史版本列表，返回 JSON：
-// [{"version":1,"title":"...","timeLimitMs":1000,"memLimitMB":256,"tags":[...],"updatedAt":"..."}]
-AC_API const char* ac_get_history(int id);
 
 // ===== 比赛管理 =====
 
@@ -74,40 +69,50 @@ AC_API void ac_free_string(const char* s);
 // ===== 数据生成器管理（存储全部在 C++ 端，前端只展示） =====
 
 // 设置临时目录（存放编译后的生成器 exe）
+// ===== 生成器（数据生成器，全部由 C++ 端负责存储，前端只展示） =====
+// 多生成器模型：每道题下有 N 个生成器，各自独立目录 {题根}/{id}/{genName}/
+//    gen.cpp   生成器源码
+//    desc.txt  自定义描述（如“菊花图生成器”）
+//    生成的 *.in/*.out 直接落在此目录（即判题数据源）
+
+// 设置生成器临时目录（编译生成 exe 用）
 AC_API void ac_gen_set_temp(const char* temp_dir);
 
-// 读取当前生成器代码（不存在则返回模板），同时返回路径
-// {"ok":true,"hasGen":bool,"code":"...","genPath":"...","outDir":"..."}
-AC_API const char* ac_gen_get_current(int id);
+// 列出题目下所有数据生成器，[{"name":"juhua","desc":"菊花图生成器","fileCount":N}]
+AC_API const char* ac_gen_list(int id);
 
-// 保存生成器代码并归档版本快照 vN_yyyyMMdd_HHmmss.cpp
-// {"ok":true,"version":N,"snapshot":"vN_....cpp"}
-AC_API const char* ac_gen_save(int id, const char* code);
+// 新建一个数据生成器，{"ok":true} / {"ok":false,"error":"..."}
+AC_API const char* ac_gen_create(int id, const char* name, const char* desc);
 
-// 版本列表（新版在前）：[{"version":1,"stamp":"...","fileName":"...","lines":N,"summary":"...","time":"..."}]
-AC_API const char* ac_gen_list_versions(int id);
+// 获取指定生成器的当前代码 + 描述 + 路径（无 gen.cpp 则返回模板）
+// {"ok":true,"name":"...","desc":"...","code":"...","genPath":"...","outDir":"..."}
+AC_API const char* ac_gen_get_current(int id, const char* name);
 
-// 读取某个版本的代码内容：{"ok":true,"code":"..."}
-AC_API const char* ac_gen_get_version(int id, int version);
+// 修改生成器描述，{"ok":true}
+AC_API const char* ac_gen_set_desc(int id, const char* name, const char* desc);
 
-// 编译已保存的生成器 → temp\{id}\{id}.exe：{"ok":true} / {"ok":false,"error":"..."}
-AC_API const char* ac_gen_compile(int id);
+// 保存生成器代码（直接覆盖 gen.cpp，不再保留历史版本）
+// {"ok":true}
+AC_API const char* ac_gen_save(int id, const char* name, const char* code);
 
-// 运行生成器产出 count 个数据文件（编号从 start 开始），每个限时 20s
-// {"ok":true,"generated":N,"total":M,"outDir":"...","fails":["#i 原因"]}
-AC_API const char* ac_gen_run(int id);
+// 编译指定生成器为 exe（temp\\{id}\\{name}.exe），{"ok":true} / {"ok":false,"error":"..."}
+AC_API const char* ac_gen_compile(int id, const char* name);
 
-// 生成的数据文件列表：[{"name":"100.in","size":165,"modified":"09-19 20:09"}]
-AC_API const char* ac_gen_list_files(int id);
+// 运行指定生成器，生成 n 组数据写入该生成器子目录（argv[1]=输出目录, argv[2]=种子, argv[3]=n）
+// {"ok":true,"generated":N,"total":N,"outDir":"...","fails":[]}
+AC_API const char* ac_gen_run(int id, const char* name, int n);
 
-// 读取某个生成的数据文件内容（限 200KB）：{"ok":true,"content":"...","truncated":bool}
-AC_API const char* ac_gen_get_file(int id, const char* name);
+// 指定生成器生成的数据文件列表，[{"name":"1.in","size":165,"modified":"09-19 20:09"}]
+AC_API const char* ac_gen_list_files(int id, const char* name);
 
-// 跨题查找生成器代码（大小写不敏感，每题最多 30 条）
+// 获取某个生成的数据文件内容（限 200KB），{"ok":true,"content":"...","truncated":bool}
+AC_API const char* ac_gen_get_file(int id, const char* name, const char* file);
+
+// 跨题目搜索生成器代码（大小写不敏感，每题目最多 30 个命中）
 // [{"pid":111,"title":"...","lineNo":5,"line":"...","keyword":"..."}]
 AC_API const char* ac_gen_search(const char* keyword);
 
-// 把生成的 .in 文件导入到题目测试数据目录：{"ok":true}
-AC_API const char* ac_gen_import_to_problem(int id, const char* name);
+// 把某生成器生成的 .in 文件导入到题目根目录，{"ok":true}
+AC_API const char* ac_gen_import_to_problem(int id, const char* name, const char* filename);
 
 }

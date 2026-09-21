@@ -78,6 +78,9 @@ store/
 xshd_dump/
 author/drain_test/
 author/smoke_concurrency/
+_test_gen/
+_test_judge/
+_jd/
 
 # ===== LSM 运行时数据 / 本地生成配置 =====
 **/ojdata/

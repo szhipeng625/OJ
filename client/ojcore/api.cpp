@@ -135,7 +135,6 @@ struct ProblemMeta {
     long long timeLimitMs = 1000;
     long long memLimitMB = 256;
     std::string tagsJson;     // JSON 数组原文（如 ["基础","模拟"]），空 = []
-    long long version = 0;
     std::string updatedAt;
 };
 
@@ -165,7 +164,6 @@ ProblemMeta readMeta(const std::string& dir) {
     std::string v;
     if (findVal("timeLimitMs", v), !v.empty()) m.timeLimitMs = atoll(v.c_str());
     if (findVal("memLimitMB", v), !v.empty()) m.memLimitMB = atoll(v.c_str());
-    if (findVal("version", v), !v.empty()) m.version = atoll(v.c_str());
     findVal("updatedAt", m.updatedAt);
     // tags 数组原文
     size_t tp = s.find("\"tags\"");
@@ -181,7 +179,7 @@ ProblemMeta readMeta(const std::string& dir) {
 
 struct ProblemInfo {
     int id; std::string title, desc, sampleIn, sampleOut;
-    long long timeLimitMs, memLimitMB, version;
+    long long timeLimitMs, memLimitMB;
     std::string tagsJson;
 };
 std::vector<ProblemInfo> scanProblems() {
@@ -208,7 +206,6 @@ std::vector<ProblemInfo> scanProblems() {
         auto meta = readMeta(dir);
         pi.timeLimitMs = meta.timeLimitMs;
         pi.memLimitMB = meta.memLimitMB;
-        pi.version = meta.version;
         pi.tagsJson = meta.tagsJson;
         res.push_back(pi);
     } while (FindNextFileA(h, &fd));
@@ -260,30 +257,22 @@ static const char* do_judge(int problem_id, const char* code,
     auto meta = readMeta(problemDir);
     jopt.timeoutMs = (DWORD)meta.timeLimitMs;
     jopt.memBytes = (SIZE_T)(meta.memLimitMB) * 1024 * 1024;
-    std::string spjSrc = problemDir + "\\spj.cpp";
     if (!oj::compile_cpp(src, exe, compileErr)) {
         verdict = "CE";
         detail = compileErr.empty() ? "编译失败" : compileErr;
     } else {
-        // 题目目录有 spj.cpp 则编译并启用 Special Judge
-        if (exists(spjSrc)) {
-            std::string spjExe = g_tempDir + "\\spj.exe";
-            std::string spjErr;
-            if (!oj::compile_cpp(spjSrc, spjExe, spjErr)) {
-                verdict = "CE";
-                detail = "spj 编译失败: " + (spjErr.empty() ? "未知错误" : spjErr);
-            } else {
-                jopt.spjExe = spjExe;
+        // 判题数据来源：题目目录下各数据生成器子目录（二级目录）的 *.in/*.out
+        cases = oj::run_tests(exe, problemDir, out, jopt);
+        verdict = oj::summarize(cases);
+        int acn = 0; for (auto& c : cases) if (c.passed) acn++;
+        detail = "通过 " + std::to_string(acn) + "/" + std::to_string(cases.size()) + " 组测试点";
+        // 未通过时，返回第一个失败测试点所属生成器的描述文本
+        if (verdict != "AC") {
+            for (auto& c : cases) {
+                if (!c.passed && !c.info.empty()) { detail = c.info; break; }
             }
         }
-        if (verdict.empty()) {
-            cases = oj::run_tests(exe, problemDir, out, jopt);
-            verdict = oj::summarize(cases);
-            int ac = 0; for (auto& c : cases) if (c.passed) ac++;
-            detail = "通过 " + std::to_string(ac) + "/" + std::to_string(cases.size()) + " 个测试点";
-        }
         DeleteFileA(exe.c_str());
-        if (!jopt.spjExe.empty()) DeleteFileA(jopt.spjExe.c_str());
     }
 
     long long sid = ++g_submitSeq;
@@ -381,8 +370,7 @@ OJ_API const char* oj_get_problems(void) {
              + ",\"sampleOut\":\"" + jsonEscape(p.sampleOut) + "\""
              + ",\"timeLimitMs\":" + std::to_string(p.timeLimitMs)
              + ",\"memLimitMB\":" + std::to_string(p.memLimitMB)
-             + ",\"tags\":" + (p.tagsJson.empty() ? "[]" : p.tagsJson)
-             + ",\"version\":" + std::to_string(p.version) + "}";
+             + ",\"tags\":" + (p.tagsJson.empty() ? "[]" : p.tagsJson) + "}";
     }
     json += "]";
     return dup(json);
@@ -782,304 +770,6 @@ OJ_API const char* oj_list_users(const char* token) {
     std::string out;
     if (oj::mysql_list_users(out, err)) return dup(out);
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
-}
-
-// ===== 题目数据生成器（LSM 历史版本 + MySQL 最新版本 upsert） =====
-
-static std::string genVersionKey(int pid, int version) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "gen_version:%d:%08d", pid, version);
-    return buf;
-}
-
-static std::string genSeqKey(int pid) {
-    return "gen_seq:" + std::to_string(pid);
-}
-
-static int genNextVersion(int pid) {
-    int cur = 0;
-    try {
-        auto v = g_lsm->get(genSeqKey(pid));
-        if (v.has_value()) cur = atoi(v->c_str());
-    } catch (...) {}
-    return cur + 1;
-}
-
-static std::string nowTs() {
-    SYSTEMTIME st; GetLocalTime(&st);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    return buf;
-}
-
-static int countLines(const std::string& s) {
-    int n = 1;
-    for (char c : s) if (c == '\n') n++;
-    return n;
-}
-
-static std::string firstLine(const std::string& s) {
-    size_t p = s.find('\n');
-    std::string line = (p == std::string::npos) ? s : s.substr(0, p);
-    if (line.size() > 80) line = line.substr(0, 80);
-    return line;
-}
-
-OJ_API const char* oj_gen_save(int problem_id, const char* code) {
-    std::string src = code ? code : "";
-    int version = genNextVersion(problem_id);
-    std::string ts = nowTs();
-    // 1. 写 LSM 历史版本
-    std::string val = "{\"pid\":" + std::to_string(problem_id)
-        + ",\"version\":" + std::to_string(version)
-        + ",\"ts\":\"" + ts + "\""
-        + ",\"code\":\"" + jsonEscape(src) + "\"}";
-    try {
-        g_lsm->put(genVersionKey(problem_id, version), val);
-        g_lsm->put(genSeqKey(problem_id), std::to_string(version));
-    } catch (...) { /* LSM 失败不阻塞 */ }
-    // 2. MySQL upsert 最新版本（重复 problem_id 原地替换）
-    std::string err;
-    bool mysqlOk = false;
-    try {
-        if (oj::mysql_available()) {
-            mysqlOk = oj::mysql_gen_upsert(problem_id, src, version, ts, err);
-        }
-    } catch (...) {}
-    (void)mysqlOk;
-    return dup(std::string("{\"ok\":true,\"version\":") + std::to_string(version) + "}");
-}
-
-OJ_API const char* oj_gen_get_current(int problem_id) {
-    // 优先 MySQL
-    std::string code, ua, err;
-    int ver = 0;
-    try {
-        if (oj::mysql_available() && oj::mysql_gen_get(problem_id, code, ver, ua, err)) {
-            return dup(std::string("{\"ok\":true,\"version\":") + std::to_string(ver)
-                     + ",\"updatedAt\":\"" + ua + "\""
-                     + ",\"code\":\"" + jsonEscape(code) + "\"}");
-        }
-    } catch (...) {}
-    // 回退 LSM：找最大版本号
-    int maxVer = 0;
-    std::string maxVal;
-    try {
-        std::string prefix = "gen_version:" + std::to_string(problem_id) + ":";
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind(prefix, 0) != 0) continue;
-            int v = atoi(kv.first.substr(prefix.size()).c_str());
-            if (v > maxVer) { maxVer = v; maxVal = kv.second; }
-        }
-    } catch (...) {}
-    if (maxVer == 0) return dup("{\"ok\":false}");
-    // 从 maxVal 提取 code 和 ts
-    std::string outCode, outTs;
-    size_t cp = maxVal.find("\"code\":\"");
-    if (cp != std::string::npos) {
-        cp += 8;
-        size_t ce = maxVal.find("\"", cp);
-        // 处理转义
-        std::string raw = maxVal.substr(cp, ce - cp);
-        for (size_t i = 0; i < raw.size(); ++i) {
-            if (raw[i] == '\\' && i + 1 < raw.size()) {
-                char n = raw[i + 1];
-                if (n == 'n') outCode += '\n';
-                else if (n == 'r') outCode += '\r';
-                else if (n == 't') outCode += '\t';
-                else if (n == '"') outCode += '"';
-                else if (n == '\\') outCode += '\\';
-                else outCode += n;
-                i++;
-            } else outCode += raw[i];
-        }
-    }
-    size_t tp = maxVal.find("\"ts\":\"");
-    if (tp != std::string::npos) {
-        tp += 6;
-        size_t te = maxVal.find("\"", tp);
-        outTs = maxVal.substr(tp, te - tp);
-    }
-    return dup(std::string("{\"ok\":true,\"version\":") + std::to_string(maxVer)
-             + ",\"updatedAt\":\"" + outTs + "\""
-             + ",\"code\":\"" + jsonEscape(outCode) + "\"}");
-}
-
-OJ_API const char* oj_gen_list_versions(int problem_id) {
-    struct Ver { int version; std::string ts; int lines; std::string summary; };
-    std::vector<Ver> vers;
-    try {
-        std::string prefix = "gen_version:" + std::to_string(problem_id) + ":";
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind(prefix, 0) != 0) continue;
-            int v = atoi(kv.first.substr(prefix.size()).c_str());
-            // 从 value 提取 code/ts
-            std::string code, ts;
-            size_t cp = kv.second.find("\"code\":\"");
-            if (cp != std::string::npos) {
-                cp += 8;
-                size_t ce = kv.second.find("\"", cp);
-                std::string raw = kv.second.substr(cp, ce - cp);
-                for (size_t i = 0; i < raw.size(); ++i) {
-                    if (raw[i] == '\\' && i + 1 < raw.size()) {
-                        char n = raw[i + 1];
-                        if (n == 'n') code += '\n';
-                        else if (n == 'r') code += '\r';
-                        else if (n == 't') code += '\t';
-                        else if (n == '"') code += '"';
-                        else if (n == '\\') code += '\\';
-                        else code += n;
-                        i++;
-                    } else code += raw[i];
-                }
-            }
-            size_t tp = kv.second.find("\"ts\":\"");
-            if (tp != std::string::npos) {
-                tp += 6;
-                size_t te = kv.second.find("\"", tp);
-                ts = kv.second.substr(tp, te - tp);
-            }
-            Ver vv; vv.version = v; vv.ts = ts;
-            vv.lines = countLines(code);
-            vv.summary = firstLine(code);
-            vers.push_back(vv);
-        }
-    } catch (...) {}
-    std::sort(vers.begin(), vers.end(), [](const Ver& a, const Ver& b) { return a.version > b.version; });
-    std::string json = "[";
-    for (size_t i = 0; i < vers.size(); ++i) {
-        if (i) json += ",";
-        json += "{\"version\":" + std::to_string(vers[i].version)
-             + ",\"ts\":\"" + vers[i].ts + "\""
-             + ",\"lines\":" + std::to_string(vers[i].lines)
-             + ",\"summary\":\"" + jsonEscape(vers[i].summary) + "\"}";
-    }
-    json += "]";
-    return dup(json);
-}
-
-OJ_API const char* oj_gen_get_version(int problem_id, int version) {
-    try {
-        auto v = g_lsm->get(genVersionKey(problem_id, version));
-        if (!v.has_value()) return dup("{\"ok\":false}");
-        std::string code, ts;
-        size_t cp = v->find("\"code\":\"");
-        if (cp != std::string::npos) {
-            cp += 8;
-            size_t ce = v->find("\"", cp);
-            std::string raw = v->substr(cp, ce - cp);
-            for (size_t i = 0; i < raw.size(); ++i) {
-                if (raw[i] == '\\' && i + 1 < raw.size()) {
-                    char n = raw[i + 1];
-                    if (n == 'n') code += '\n';
-                    else if (n == 'r') code += '\r';
-                    else if (n == 't') code += '\t';
-                    else if (n == '"') code += '"';
-                    else if (n == '\\') code += '\\';
-                    else code += n;
-                    i++;
-                } else code += raw[i];
-            }
-        }
-        size_t tp = v->find("\"ts\":\"");
-        if (tp != std::string::npos) {
-            tp += 6;
-            size_t te = v->find("\"", tp);
-            ts = v->substr(tp, te - tp);
-        }
-        return dup(std::string("{\"ok\":true,\"version\":") + std::to_string(version)
-                 + ",\"ts\":\"" + ts + "\""
-                 + ",\"code\":\"" + jsonEscape(code) + "\"}");
-    } catch (...) { return dup("{\"ok\":false}"); }
-}
-
-OJ_API const char* oj_gen_search(const char* keyword) {
-    std::string kw = keyword ? keyword : "";
-    // 优先 MySQL
-    std::string out, err;
-    try {
-        if (oj::mysql_available() && oj::mysql_gen_search(kw, out, err)) {
-            return dup(out);
-        }
-    } catch (...) {}
-    // 回退 LSM：遍历所有 gen_version:*，取每题最新版本匹配
-    std::string kwLow;
-    for (char c : kw) kwLow += (char)tolower((unsigned char)c);
-    std::map<int, std::pair<int, std::string>> latest; // pid -> (version, value)
-    try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind("gen_version:", 0) != 0) continue;
-            // 解析 pid
-            size_t colon1 = kv.first.find(':', 12);
-            size_t colon2 = kv.first.find(':', colon1 + 1);
-            int pid = atoi(kv.first.substr(colon1 + 1, colon2 - colon1 - 1).c_str());
-            int ver = atoi(kv.first.substr(colon2 + 1).c_str());
-            auto& cur = latest[pid];
-            if (ver > cur.first) { cur.first = ver; cur.second = kv.second; }
-        }
-    } catch (...) {}
-    std::string json = "[";
-    bool first = true;
-    for (auto& kv : latest) {
-        int pid = kv.first;
-        int ver = kv.second.first;
-        const std::string& val = kv.second.second;
-        // 提取 code
-        std::string code;
-        size_t cp = val.find("\"code\":\"");
-        if (cp != std::string::npos) {
-            cp += 8;
-            size_t ce = val.find("\"", cp);
-            std::string raw = val.substr(cp, ce - cp);
-            for (size_t i = 0; i < raw.size(); ++i) {
-                if (raw[i] == '\\' && i + 1 < raw.size()) {
-                    char n = raw[i + 1];
-                    if (n == 'n') code += '\n';
-                    else if (n == 'r') code += '\r';
-                    else if (n == 't') code += '\t';
-                    else if (n == '"') code += '"';
-                    else if (n == '\\') code += '\\';
-                    else code += n;
-                    i++;
-                } else code += raw[i];
-            }
-        }
-        std::string codeLow;
-        for (char c : code) codeLow += (char)tolower((unsigned char)c);
-        if (!kwLow.empty() && codeLow.find(kwLow) == std::string::npos) continue;
-        // 预览前 3 行
-        std::string preview;
-        int lines = 0;
-        for (char c : code) {
-            if (c == '\n') { lines++; if (lines >= 3) break; }
-            preview += c;
-        }
-        std::string ts;
-        size_t tp = val.find("\"ts\":\"");
-        if (tp != std::string::npos) {
-            tp += 6;
-            size_t te = val.find("\"", tp);
-            ts = val.substr(tp, te - tp);
-        }
-        if (!first) json += ",";
-        first = false;
-        json += "{\"problemId\":" + std::to_string(pid)
-             + ",\"version\":" + std::to_string(ver)
-             + ",\"updatedAt\":\"" + ts + "\""
-             + ",\"preview\":\"" + jsonEscape(preview) + "\"}";
-    }
-    json += "]";
-    return dup(json);
 }
 
 OJ_API void oj_free_string(const char* s) {

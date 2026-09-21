@@ -61,17 +61,4 @@ bool mysql_board(int cid, const std::string& start_str,
 // admin：列出全部用户（返回 JSON 数组）
 bool mysql_list_users(std::string& out_json, std::string& err);
 
-// ===== 题目数据生成器（最新版本存 MySQL，历史版本存 LSM） =====
-
-// 保存/更新某题的最新生成器代码（problem_id 主键，重复则原地替换）
-bool mysql_gen_upsert(int problem_id, const std::string& code, int version,
-                       const std::string& updated_at, std::string& err);
-
-// 读取某题的最新生成器代码；不存在返回 false
-bool mysql_gen_get(int problem_id, std::string& out_code, int& out_version,
-                    std::string& out_updated_at, std::string& err);
-
-// 跨题查找生成器代码（遍历全部题目的最新代码，大小写不敏感，每题最多 30 行）
-bool mysql_gen_search(const std::string& keyword, std::string& out_json, std::string& err);
-
 } // namespace oj

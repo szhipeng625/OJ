@@ -1,4 +1,4 @@
-﻿// test_meta.cpp — 验证：authorcore 保存 meta/发布快照 + ojcore 读限制判题/历史版本
+﻿// test_meta.cpp — 验证：authorcore 保存 meta/发布 + ojcore 读限制判题
 // test_meta.cpp — 独立测试程序（不参与 ojcore.dll 编译）
 // 需同时链接 authorcore.dll 和 ojcore.dll
 #include "authorcore.h"
@@ -18,13 +18,11 @@ int main() {
     printf("[ac_init] rc=%d\n", arc);
     show("save_meta", ac_save_meta(3, 2000, 64, "[\"基础\",\"求和\"]"));
     show("publish", ac_publish(3, "D:\\OJ\\server\\problems"));
-    show("ac_history", ac_get_history(3));
 
     // ---- 判题端 ----
     int rc = oj_init("D:\\OJ\\server\\problems", "D:\\OJ\\ojdata_t");
     printf("[oj_init] rc=%d\n", rc);
     show("oj_problems", oj_get_problems());
-    show("oj_history", oj_get_history(3));
 
     const char* code =
         "#include <iostream>\n"

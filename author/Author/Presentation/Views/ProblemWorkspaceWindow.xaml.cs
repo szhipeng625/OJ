@@ -20,6 +20,7 @@ public partial class ProblemWorkspaceWindow : Window
     private readonly Workbench _wb;
     private readonly WorkspaceManager _mgr;
     private string _genOutDir = "";
+    private string _genName = "";
 
     public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager)
     {
@@ -64,10 +65,8 @@ public partial class ProblemWorkspaceWindow : Window
             MemLimitBox.Text = c.Meta.MemLimitMB.ToString();
             TagsBox.Text = string.Join(",", c.Meta.Tags);
             StdBox.Text = c.StdCode;
-            SpjBox.Text = c.SpjCode;
-            StatementMsg.Text = StdMsg.Text = SpjMsg.Text = DataMsg.Text = PublishMsg.Text = "";
+            StatementMsg.Text = StdMsg.Text = DataMsg.Text = PublishMsg.Text = "";
             await RefreshDataList();
-            await RefreshHistory();
             await LoadGenAsync();
         });
     }
@@ -145,7 +144,7 @@ public partial class ProblemWorkspaceWindow : Window
         });
     }
 
-    // ---------- 标程 / spj ----------
+    // ---------- 标程 ----------
     private async void OnCompileStd(object sender, RoutedEventArgs e)
     {
         string code = StdBox.Text;
@@ -153,16 +152,6 @@ public partial class ProblemWorkspaceWindow : Window
         {
             var r = await _wb.Problems.CompileStdAsync(_id, code);
             if (IsLoaded) StdMsg.Text = r.Message;
-        });
-    }
-
-    private async void OnCompileSpj(object sender, RoutedEventArgs e)
-    {
-        string code = SpjBox.Text;
-        await RunBusy("正在编译 spj（g++）…", async () =>
-        {
-            var r = await _wb.Problems.CompileSpjAsync(_id, code);
-            if (IsLoaded) SpjMsg.Text = r.Message;
         });
     }
 
@@ -183,148 +172,181 @@ public partial class ProblemWorkspaceWindow : Window
         {
             var r = await _wb.Problems.PublishAsync(_id, target);
             if (IsLoaded) PublishMsg.Text = r.Message;
-            await RefreshHistory();
             _mgr.NotifyProblemListChanged();
         });
     }
 
-    private async Task RefreshHistory()
+    // ---------- 数据生成（多生成器） ----------
+    // 列出本课题下所有生成器；默认选中第一个并加载
+    private async Task LoadGenAsync(bool selectFirst = true)
     {
-        var items = await _wb.Problems.HistoryAsync(_id);
+        var gens = await _wb.Generators.ListAsync(_id);
         if (!IsLoaded) return;
-        HistoryList.ItemsSource = items;
-        HistoryList.DisplayMemberPath = nameof(HistoryItem.Display);
-        HistoryDetail.Text = "";
-    }
-
-    private async void OnSelectHistory(object sender, SelectionChangedEventArgs e)
-    {
-        if (HistoryList.SelectedItem is not HistoryItem h) return;
-        var text = await _wb.Problems.HistoryDetailAsync(_id, h.Version);
-        if (IsLoaded) HistoryDetail.Text = text;
-    }
-
-    // ---------- 数据生成 ----------
-    private async Task LoadGenAsync()
-    {
-        var ws = await _wb.Generators.LoadAsync(_id);
-        if (!IsLoaded) return;
-        GenMsg.Text = "";
-        GenVersionView.Text = "";
+        GenList.ItemsSource = gens;
+        GenList.DisplayMemberPath = nameof(GenSummary.Display);
         GenFileView.Text = "";
-        GenBox.Text = ws.Code;
-        _genOutDir = ws.OutDir;
-        GenPathText.Text = ws.PathText;
-        GenVersionList.ItemsSource = ws.Versions;
-        GenVersionList.DisplayMemberPath = nameof(GenVersion.Display);
-        GenFileList.ItemsSource = ws.Files;
-        GenFileList.DisplayMemberPath = nameof(GenFile.Display);
-        GenFileTitle.Text = $"生成的数据文件（{ws.OutDir}）  共 {ws.Files.Count} 个";
+        GenMsg.Text = "";
+        GenList.SelectedIndex = -1;
+        if (selectFirst && gens.Count > 0)
+        {
+            GenList.SelectedIndex = 0;              // 触发 OnSelectGenerator（_busy 中会被跳过）
+            if (_busy) await LoadSelectedGeneratorAsync();
+        }
+        else
+        {
+            _genName = "";
+            GenBox.Text = "";
+            GenDescBox.Text = "";
+            GenPathText.Text = "";
+            GenFileList.ItemsSource = null;
+            GenFileTitle.Text = "生成的数据文件";
+        }
     }
 
-    private async Task RefreshGenVersions()
+    // 选中某生成器后：加载其代码 / 描述 / 路径 / 版本 / 数据文件
+    private async Task LoadSelectedGeneratorAsync()
     {
-        var list = await _wb.Generators.VersionsAsync(_id);
+        if (GenList.SelectedItem is not GenSummary g)
+        {
+            _genName = "";
+            GenBox.Text = "";
+            GenDescBox.Text = "";
+            GenPathText.Text = "";
+            GenFileList.ItemsSource = null;
+            GenFileTitle.Text = "生成的数据文件";
+            return;
+        }
+        _genName = g.Name;
+        var ws = await _wb.Generators.LoadAsync(_id, _genName);
         if (!IsLoaded) return;
-        GenVersionList.ItemsSource = list;
-        GenVersionList.DisplayMemberPath = nameof(GenVersion.Display);
+        GenBox.Text = ws.Code;
+        GenDescBox.Text = ws.Desc;
+        _genOutDir = ws.OutDir;
+        GenPathText.Text = ws.GenPath;
+        await RefreshGenFiles();
     }
+
 
     private async Task RefreshGenFiles()
     {
-        var list = await _wb.Generators.FilesAsync(_id);
+        if (string.IsNullOrEmpty(_genName)) { GenFileList.ItemsSource = null; return; }
+        var list = await _wb.Generators.FilesAsync(_id, _genName);
         if (!IsLoaded) return;
         GenFileList.ItemsSource = list;
         GenFileList.DisplayMemberPath = nameof(GenFile.Display);
         GenFileTitle.Text = $"生成的数据文件（{_genOutDir}）  共 {list.Count} 个";
     }
 
+    // 新建生成器（名字 + 描述取自顶部两个输入框）
+    private async void OnNewGenerator(object sender, RoutedEventArgs e)
+    {
+        string name = GenNewNameBox.Text.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            GenMsg.Text = "请先在右侧输入生成器名称（如 juhua / lian，字母数字下划线）";
+            return;
+        }
+        string desc = GenNewDescBox.Text.Trim();
+        await RunBusy("正在创建生成器…", async () =>
+        {
+            var r = await _wb.Generators.CreateAsync(_id, name, desc);
+            if (IsLoaded) GenMsg.Text = r.Message;
+            await LoadGenAsync(selectFirst: false);
+            int idx = -1;
+            for (int i = 0; i < GenList.Items.Count; i++)
+                if (GenList.Items[i] is GenSummary gs && gs.Name == name) { idx = i; break; }
+            if (idx >= 0)
+            {
+                GenList.SelectedIndex = idx;       // _busy 中事件会被跳过
+                if (_busy) await LoadSelectedGeneratorAsync();
+            }
+        });
+    }
+
+    // 复刷生成器列表
+    private async void OnRefreshGenerators(object sender, RoutedEventArgs e) => await LoadGenAsync();
+
+    // 在列表中选中某个生成器
+    private async void OnSelectGenerator(object sender, SelectionChangedEventArgs e)
+    {
+        if (_busy) return;
+        await LoadSelectedGeneratorAsync();
+    }
+
+    // 保存生成器描述
+    private async void OnGenSaveDesc(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
+        string keep = _genName;
+        await RunBusy("正在保存描述…", async () =>
+        {
+            var r = await _wb.Generators.SetDescAsync(_id, keep, GenDescBox.Text.Trim());
+            if (IsLoaded) GenMsg.Text = r.Message;
+            await LoadGenAsync(selectFirst: false);
+            int idx = -1;
+            for (int i = 0; i < GenList.Items.Count; i++)
+                if (GenList.Items[i] is GenSummary gs && gs.Name == keep) { idx = i; break; }
+            if (idx >= 0)
+            {
+                GenList.SelectedIndex = idx;
+                if (_busy) await LoadSelectedGeneratorAsync();
+            }
+        });
+    }
+
     private async void OnGenSave(object sender, RoutedEventArgs e)
     {
+        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
         string code = GenBox.Text;
         await RunBusy("正在保存生成器代码…", async () =>
         {
-            int ver = await _wb.Generators.SaveAsync(_id, code);
-            if (IsLoaded)
-                GenMsg.Text = ver > 0
-                    ? "已保存生成器代码，归档为版本 v" + ver + "（LSM 历史版本 + MySQL 最新版本）"
-                    : "保存失败";
-            await RefreshGenVersions();
+            var r = await _wb.Generators.SaveAsync(_id, _genName, code);
+            if (IsLoaded) GenMsg.Text = r.Message;
         });
     }
 
     private async void OnGenCompile(object sender, RoutedEventArgs e)
     {
+        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
         string code = GenBox.Text;
         await RunBusy("正在编译生成器（g++）…", async () =>
         {
-            var r = await _wb.Generators.CompileAsync(_id, code);
+            var r = await _wb.Generators.CompileAsync(_id, _genName, code);
             if (IsLoaded) GenMsg.Text = r.Message;
-            await RefreshGenVersions();
         });
     }
 
     private async void OnGenRun(object sender, RoutedEventArgs e)
     {
-        await RunBusy("正在运行生成器产出数据…", async () =>
+        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
+        int n = int.TryParse(GenCountBox.Text.Trim(), out var g) && g > 0 ? g : 10;
+        await RunBusy("正在保存并运行生成器…", async () =>
         {
-            var r = await _wb.Generators.RunAsync(_id);
+            var sv = await _wb.Generators.SaveAsync(_id, _genName, GenBox.Text);
+            if (!sv.Ok) { if (IsLoaded) GenMsg.Text = sv.Message; return; }
+            var r = await _wb.Generators.RunAsync(_id, _genName, n);
             if (IsLoaded) GenMsg.Text = r.Message;
             await RefreshGenFiles();
         });
     }
 
-    private void OnGenImportFile(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog
-        {
-            Title = "导入生成器代码文件",
-            Filter = "C++ 源文件 (*.cpp;*.cc;*.cxx)|*.cpp;*.cc;*.cxx|所有文件 (*.*)|*.*",
-            CheckFileExists = true
-        };
-        if (dlg.ShowDialog() != true) return;
-        try
-        {
-            string code = File.ReadAllText(dlg.FileName);
-            GenBox.Text = code;
-            GenMsg.Text = "已导入：" + dlg.FileName + "（" + code.Length + " 字符）；点「保存代码」留版本";
-        }
-        catch (Exception ex) { GenMsg.Text = "导入失败：" + ex.Message; }
-    }
-
-    private async void OnSelectGenVersion(object sender, SelectionChangedEventArgs e)
-    {
-        if (GenVersionList.SelectedItem is not GenVersion v) return;
-        var code = await _wb.Generators.GetVersionCodeAsync(_id, v.Version);
-        if (IsLoaded && code is not null) GenVersionView.Text = code;
-    }
-
-    private async void OnGenRestore(object sender, RoutedEventArgs e)
-    {
-        if (GenVersionList.SelectedItem is not GenVersion v)
-        {
-            GenMsg.Text = "请先在版本列表中选择一个版本";
-            return;
-        }
-        var code = await _wb.Generators.GetVersionCodeAsync(_id, v.Version);
-        if (IsLoaded && code is not null)
-        {
-            GenBox.Text = code;
-            GenMsg.Text = "已把 v" + v.Version + "（" + v.Time + "）载入编辑器；点「保存代码」生效，会再产生一个新版本";
-        }
-    }
 
     private async void OnSelectGenFile(object sender, SelectionChangedEventArgs e)
     {
         if (GenFileList.SelectedItem is not GenFile gf) return;
-        var (text, truncated) = await _wb.Generators.GetFileAsync(_id, gf.Name);
+        if (string.IsNullOrEmpty(_genName)) return;
+        var (text, truncated) = await _wb.Generators.GetFileAsync(_id, _genName, gf.Name);
         if (!IsLoaded) return;
         GenFileView.Text = truncated
             ? text + "\n……（文件过大，仅显示前 200KB，请在资源管理器中查看完整文件）"
             : text;
     }
 
-    private async void OnRefreshGenFiles(object sender, RoutedEventArgs e) => await RefreshGenFiles();
+    private async void OnRefreshGenFiles(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
+        await RefreshGenFiles();
+    }
 
     private void OnOpenGenDir(object sender, RoutedEventArgs e)
     {
@@ -340,9 +362,10 @@ public partial class ProblemWorkspaceWindow : Window
             GenMsg.Text = "请先在右下数据文件列表中选择一个 .in 文件";
             return;
         }
+        if (string.IsNullOrEmpty(_genName)) return;
         await RunBusy("正在导入到题目测试数据…", async () =>
         {
-            var r = await _wb.Generators.ImportToProblemAsync(_id, gf.Name);
+            var r = await _wb.Generators.ImportToProblemAsync(_id, _genName, gf.Name);
             if (IsLoaded) GenMsg.Text = r.Message;
             await RefreshDataList();
             _mgr.NotifyProblemListChanged();

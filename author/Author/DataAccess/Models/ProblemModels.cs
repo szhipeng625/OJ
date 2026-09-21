@@ -7,13 +7,7 @@ public record ProblemInfo(int Id, string Title, int DataCount)
 }
 
 /// <summary>题目元数据 meta.json。</summary>
-public record ProblemMeta(bool Ok, int TimeLimitMs, int MemLimitMB, string[] Tags, int Version, string UpdatedAt);
-
-/// <summary>发布历史版本。</summary>
-public record HistoryItem(int Version, string Title, int TimeLimitMs, int MemLimitMB, string[] Tags, string UpdatedAt)
-{
-    public string Display => $"v{Version} · {UpdatedAt} · {Title}";
-}
+public record ProblemMeta(bool Ok, int TimeLimitMs, int MemLimitMB, string[] Tags, string UpdatedAt);
 
 /// <summary>测试数据配对（.in ⇄ .out）。</summary>
 public record DataPair(string BaseName, bool HasOut)
@@ -30,5 +24,6 @@ public record ProblemContent(
     string SampleIn,
     string SampleOut,
     ProblemMeta Meta,
-    string StdCode,
-    string SpjCode);
+    string StdCode
+    )
+{ }

@@ -50,8 +50,7 @@ public partial class App : Application
 
             // ---- 组合根：DAL → BLL ----
             var authClient = new AuthClient();
-            var generatorClient = new GeneratorClient();
-            var authorClient = new AuthorClient();
+                        var authorClient = new AuthorClient();
             var contestClient = new ContestClient();
 
             authorClient.Init(authorProblemDir, tempRoot);   // authorcore：题库根 + temp 目录
@@ -59,7 +58,7 @@ public partial class App : Application
             var build = new BuildService();
             var auth = new AuthService(authClient);
             var problems = new ProblemService(authorClient, build);
-            var generators = new GeneratorService(generatorClient, authorClient, build);
+            var generators = new GeneratorService(authorClient, build);
             var contests = new ContestService(contestClient, build);
             var workbench = new Workbench
             {

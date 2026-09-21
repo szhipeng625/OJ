@@ -1,4 +1,8 @@
-﻿// gen.cpp — 数据生成器管理（保存/版本/编译/运行/查找/文件查看）
+﻿// gen.cpp — 数据生成器管理（多生成器：每个生成器一个子目录）
+// 一个题目可有多个数据生成器，每个生成器独立目录：{题库}/{id}/{genName}/
+//   gen.cpp       生成器代码
+//   desc.txt      自定义描述（如"菊花图生成器"）
+//   *.in / *.out  生成的数据与标程答案（= 判题数据源）
 // 全部存储操作在 C++ 端完成，WPF 前端只调用导出函数并展示结果。
 #include "authorcore.h"
 #include "judge.h"
@@ -30,53 +34,48 @@ namespace {
 
 std::string g_temp;
 
-std::string genProblemDir(int id) { return g_root + "\\" + std::to_string(id); }
-// 生成器源码按题号命名：{题库}\{pid}\{pid}.cpp（不再统一叫 gen.cpp）
-std::string genSrcPath(int id) { return genProblemDir(id) + "\\" + std::to_string(id) + ".cpp"; }
-std::string genHistoryDir(int id) { return genProblemDir(id) + "\\gen_history"; }
-std::string genExePath(int id) { return g_temp + "\\" + std::to_string(id) + "\\" + std::to_string(id) + ".exe"; }
-
-// generated 根目录：题库父目录下的 generated 目录
-std::string generatedRoot() {
-    std::string r = g_root;
-    size_t p = r.find_last_of("\\/");
-    if (p != std::string::npos) r = r.substr(0, p);
-    return r + "\\generated";
+std::string genProblemRoot(int id) { return g_root + "\\" + std::to_string(id); }
+// 生成器子目录
+bool validGenName(const std::string& name) {
+    if (name.empty() || name == "." || name == "..") return false;
+    for (char c : name) {
+        if (!isalnum((unsigned char)c) && c != '_' && c != '-' && c != '.') return false;
+    }
+    // 不允许个别保留目录名（防止与系统目录冲突）
+    if (name == "history" || name == "gen_history" || name == "temp") return false;
+    return true;
 }
-std::string generatedDir(int id) { return generatedRoot() + "\\" + std::to_string(id); }
+std::string genDir(int id, const std::string& name) { return genProblemRoot(id) + "\\" + name; }
+std::string genSrcPath(int id, const std::string& name) { return genDir(id, name) + "\\gen.cpp"; }
+std::string genDescPath(int id, const std::string& name) { return genDir(id, name) + "\\desc.txt"; }
+std::string genExePath(int id, const std::string& name) {
+    return g_temp + "\\" + std::to_string(id) + "\\" + name + ".exe";
+}
+
+// 数据输出目录 = 生成器目录本身（即判题数据源）
+std::string genOutDir(int id, const std::string& name) { return genDir(id, name); }
 
 const char* kGenTemplate =
-    "// 数据生成器 {题号}.cpp\n"
-    "// 运行约定：本程序 <编号/种子>，把测试数据写到标准输出 stdout；\n"
-    "// 服务端点「生成数据」时会把 stdout 重定向保存为 generated/<题号>/<编号>.in\n"
+    "// 数据生成器 {name}.cpp\n"
+    "// 运行约定：argv[1] = 输出目录，argv[2] = 随机种子，argv[3] = 数据组数 n\n"
+    "// 将 1.in ~ n.in 写入输出目录（每行一个测试点内容，自行用 ofstream 写文件）。\n"
     "#include <bits/stdc++.h>\n"
-    "using namespace std;\n\n"
+    "using namespace std;\n"
     "int main(int argc, char** argv) {\n"
-    "    int seed = (argc > 1) ? atoi(argv[1]) : 1;\n"
+    "    string outDir = (argc > 1) ? argv[1] : \".\";\n"
+    "    int seed = (argc > 2) ? atoi(argv[2]) : 1;\n"
+    "    int n = (argc > 3) ? atoi(argv[3]) : 1;\n"
     "    mt19937 rng((unsigned)seed);\n"
-    "    uniform_int_distribution<int> dist(1, 100);\n\n"
-    "    int n = dist(rng);\n"
-    "    printf(\"%d\\n\", n);\n"
-    "    for (int i = 0; i < n; ++i)\n"
-    "        printf(\"%d%c\", dist(rng), i + 1 == n ? '\\n' : ' ');\n"
+    "    uniform_int_distribution<int> dist(1, 100);\n"
+    "    for (int i = 1; i <= n; ++i) {\n"
+    "        int m = dist(rng);\n"
+    "        ofstream f(outDir + \"/\" + to_string(i) + \".in\");\n"
+    "        f << m << \"\\n\";\n"
+    "        for (int j = 0; j < m; ++j) f << (j ? \" \" : \"\") << dist(rng);\n"
+    "        f << \"\\n\";\n"
+    "    }\n"
     "    return 0;\n"
     "}\n";
-
-std::string nowStamp() {
-    SYSTEMTIME st; GetLocalTime(&st);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d",
-             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    return buf;
-}
-
-std::string nowDisplay() {
-    SYSTEMTIME st; GetLocalTime(&st);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    return buf;
-}
 
 std::string fileModifiedDisplay(const std::string& path) {
     WIN32_FILE_ATTRIBUTE_DATA fad;
@@ -93,68 +92,6 @@ long long fileSize(const std::string& path) {
     if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad)) return 0;
     LARGE_INTEGER li; li.HighPart = fad.nFileSizeHigh; li.LowPart = fad.nFileSizeLow;
     return li.QuadPart;
-}
-
-int countLines(const std::string& s) {
-    if (s.empty()) return 0;
-    int n = 1;
-    for (char c : s) if (c == '\n') ++n;
-    return n;
-}
-
-std::string codeSummary(const std::string& s) {
-    std::istringstream iss(s);
-    std::string line;
-    while (std::getline(iss, line)) {
-        std::string t = line;
-        // trim
-        size_t a = t.find_first_not_of(" \t\r\n");
-        if (a == std::string::npos) continue;
-        t = t.substr(a);
-        if (t.rfind("//", 0) == 0) continue;
-        if (t.size() > 60) t = t.substr(0, 60) + "…";
-        return t;
-    }
-    return "";
-}
-
-std::vector<std::string> listGenHistory(int id) {
-    std::vector<std::string> res;
-    std::string dir = genHistoryDir(id);
-    std::string pattern = dir + "\\v*.cpp";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return res;
-    do {
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        res.push_back(fd.cFileName);
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
-    return res;
-}
-
-int parseVersion(const std::string& fileName) {
-    // vN_yyyyMMdd_HHmmss.cpp 或 vN.cpp
-    if (fileName.size() < 2 || fileName[0] != 'v') return 0;
-    int v = 0;
-    for (size_t i = 1; i < fileName.size() && isdigit((unsigned char)fileName[i]); ++i)
-        v = v * 10 + (fileName[i] - '0');
-    return v;
-}
-
-std::string parseStamp(const std::string& fileName) {
-    // vN_stamp.cpp → stamp
-    size_t us = fileName.find('_');
-    size_t dot = fileName.rfind('.');
-    if (us == std::string::npos || dot == std::string::npos || us >= dot) return "";
-    return fileName.substr(us + 1, dot - us - 1);
-}
-
-std::string stampToDisplay(const std::string& stamp) {
-    // yyyyMMdd_HHmmss → yyyy-MM-dd HH:mm:ss
-    if (stamp.size() != 15) return stamp;
-    return stamp.substr(0, 4) + "-" + stamp.substr(4, 2) + "-" + stamp.substr(6, 2)
-         + " " + stamp.substr(9, 2) + ":" + stamp.substr(11, 2) + ":" + stamp.substr(13, 2);
 }
 
 // 运行子进程并捕获 stdout（合并 stderr），超时毫秒
@@ -207,6 +144,41 @@ std::string toLower(const std::string& s) {
     return r;
 }
 
+// 枚举题目下所有生成器子目录名（按名字排序）
+std::vector<std::string> listGenerators(int id) {
+    std::vector<std::string> res;
+    std::string root = genProblemRoot(id);
+    std::string pattern = root + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return res;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        std::string name = fd.cFileName;
+        if (validGenName(name) && exists(genSrcPath(id, name))) res.push_back(name);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(res.begin(), res.end());
+    return res;
+}
+
+// 读取生成器文件数（该生成器目录下 .in 数量）
+int genFileCount(int id, const std::string& name) {
+    std::string dir = genDir(id, name);
+    std::string pattern = dir + "\\*.in";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    int n = 0;
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            ++n;
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    return n;
+}
+
 } // namespace
 
 extern "C" {
@@ -216,102 +188,116 @@ AC_API void ac_gen_set_temp(const char* temp_dir) {
     if (!g_temp.empty()) mkdirs(g_temp);
 }
 
-// 读取当前 gen.cpp（不存在则返回模板），同时返回路径信息
-AC_API const char* ac_gen_get_current(int id) {
-    std::string src = genSrcPath(id);
-    bool has = exists(src);
-    std::string code = has ? readFile(src) : std::string(kGenTemplate);
-    std::string json = "{\"ok\":true"
-        ",\"hasGen\":" + std::string(has ? "true" : "false") +
-        ",\"code\":\"" + jsonEscape(code) + "\"" +
-        ",\"genPath\":\"" + jsonEscape(src) + "\"" +
-        ",\"outDir\":\"" + jsonEscape(generatedDir(id)) + "\"}";
+// 列出该题全部数据生成器：[{"name":"juhua","desc":"菊花图生成器","fileCount":N}]
+AC_API const char* ac_gen_list(int id) {
+    auto names = listGenerators(id);
+    std::string json = "[";
+    for (size_t i = 0; i < names.size(); ++i) {
+        std::string desc = readFile(genDescPath(id, names[i]));
+        if (i) json += ",";
+        json += "{\"name\":\"" + jsonEscape(names[i]) + "\""
+             + ",\"desc\":\"" + jsonEscape(desc) + "\""
+             + ",\"fileCount\":" + std::to_string(genFileCount(id, names[i])) + "}";
+    }
+    json += "]";
+    g_lastError.clear();
     return dup(json);
 }
 
-// 保存 gen.cpp 并归档版本快照
-AC_API const char* ac_gen_save(int id, const char* code) {
-    std::string dir = genProblemDir(id);
+// 新建数据生成器：目录 + gen.cpp 模板 + desc.txt
+AC_API const char* ac_gen_create(int id, const char* name, const char* desc) {
+    std::string dir = genProblemRoot(id);
     if (!exists(dir)) {
         std::string err = "题目 " + std::to_string(id) + " 不存在";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string src = genSrcPath(id);
-    writeFile(src, code ? code : "");
-
-    std::string hdir = genHistoryDir(id);
-    mkdirs(hdir);
-    int next = 1;
-    for (auto& f : listGenHistory(id)) {
-        int v = parseVersion(f);
-        if (v >= next) next = v + 1;
-    }
-    std::string snapName = "v" + std::to_string(next) + "_" + nowStamp() + ".cpp";
-    std::string snap = hdir + "\\" + snapName;
-    if (!CopyFileA(src.c_str(), snap.c_str(), FALSE)) {
-        std::string err = "归档版本失败 (err=" + std::to_string(GetLastError()) + ")";
+    std::string gn = name ? name : "";
+    if (!validGenName(gn) || gn.find(".cpp") != std::string::npos) {
+        std::string err = "生成器名字只能包含字母/数字/下划线/横线（如 juhua）";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
+    std::string gdir = genDir(id, gn);
+    if (exists(gdir)) {
+        std::string err = "生成器 " + gn + " 已存在";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    mkdirs(gdir);
+    std::string tpl = kGenTemplate;
+    size_t p = tpl.find("{name}");
+    if (p != std::string::npos) tpl.replace(p, 6, gn);
+    writeFile(genSrcPath(id, gn), tpl);
+    writeFile(genDescPath(id, gn), desc ? desc : "");
     g_lastError.clear();
-    return dup("{\"ok\":true,\"version\":" + std::to_string(next)
-             + ",\"snapshot\":\"" + jsonEscape(snapName) + "\"}");
+    return dup("{\"ok\":true,\"name\":\"" + jsonEscape(gn) + "\"}");
 }
 
-// 版本列表（新版在前）
-AC_API const char* ac_gen_list_versions(int id) {
-    std::vector<std::string> files = listGenHistory(id);
-    std::sort(files.begin(), files.end(),
-              [](const std::string& a, const std::string& b) {
-                  return parseVersion(a) > parseVersion(b);
-              });
-    std::string json = "[";
-    bool first = true;
-    for (auto& f : files) {
-        int v = parseVersion(f);
-        std::string stamp = parseStamp(f);
-        std::string text = readFile(genHistoryDir(id) + "\\" + f);
-        int lines = countLines(text);
-        std::string summary = codeSummary(text);
-        if (!first) json += ",";
-        first = false;
-        json += "{\"version\":" + std::to_string(v)
-             + ",\"stamp\":\"" + jsonEscape(stamp) + "\""
-             + ",\"fileName\":\"" + jsonEscape(f) + "\""
-             + ",\"lines\":" + std::to_string(lines)
-             + ",\"summary\":\"" + jsonEscape(summary) + "\""
-             + ",\"time\":\"" + jsonEscape(stampToDisplay(stamp)) + "\"}";
+// 读取某个生成器当前代码 + 描述 + 路径（不存在返回 ok:false）
+AC_API const char* ac_gen_get_current(int id, const char* name) {
+    std::string gn = name ? name : "";
+    if (!validGenName(gn) || (!exists(genSrcPath(id, gn)))) {
+        std::string err = "生成器 " + gn + " 不存在";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    json += "]";
+    std::string src = genSrcPath(id, gn);
+    std::string code = readFile(src);
+    std::string desc = readFile(genDescPath(id, gn));
+    std::string json = "{\"ok\":true"
+        ",\"name\":\"" + jsonEscape(gn) + "\""
+        ",\"desc\":\"" + jsonEscape(desc) + "\""
+        ",\"code\":\"" + jsonEscape(code) + "\""
+        ",\"genPath\":\"" + jsonEscape(src) + "\""
+        ",\"outDir\":\"" + jsonEscape(genOutDir(id, gn)) + "\"}";
+    g_lastError.clear();
     return dup(json);
 }
 
-// 读取某个版本的代码内容
-AC_API const char* ac_gen_get_version(int id, int version) {
-    std::string target;
-    for (auto& f : listGenHistory(id)) {
-        if (parseVersion(f) == version) { target = f; break; }
-    }
-    if (target.empty()) {
-        std::string err = "版本 v" + std::to_string(version) + " 不存在";
+// 修改生成器描述
+AC_API const char* ac_gen_set_desc(int id, const char* name, const char* desc) {
+    std::string gn = name ? name : "";
+    if (!validGenName(gn) || !exists(genSrcPath(id, gn))) {
+        std::string err = "生成器 " + gn + " 不存在";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string code = readFile(genHistoryDir(id) + "\\" + target);
+    writeFile(genDescPath(id, gn), desc ? desc : "");
     g_lastError.clear();
-    return dup("{\"ok\":true,\"code\":\"" + jsonEscape(code) + "\"}");
+    return dup("{\"ok\":true}");
 }
 
-// 编译已保存的 gen.cpp → temp\{id}\gen.exe
-AC_API const char* ac_gen_compile(int id) {
-    std::string src = genSrcPath(id);
+// 保存生成器代码（直接覆盖 gen.cpp，不再保留历史版本）
+AC_API const char* ac_gen_save(int id, const char* name, const char* code) {
+    std::string gn = name ? name : "";
+    std::string dir = genProblemRoot(id);
+    if (!exists(dir)) {
+        std::string err = "题目 " + std::to_string(id) + " 不存在";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    if (!validGenName(gn)) {
+        std::string err = "生成器名字不合法";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    mkdirs(genDir(id, gn));
+    writeFile(genSrcPath(id, gn), code ? code : "");
+    g_lastError.clear();
+    return dup("{\"ok\":true}");
+}
+
+// 编译某个生成器 → temp\{id}\{name}.exe
+AC_API const char* ac_gen_compile(int id, const char* name) {
+    std::string gn = name ? name : "";
+    std::string src = genSrcPath(id, gn);
     if (!exists(src)) {
         std::string err = "请先保存生成器代码";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string exe = genExePath(id);
+    std::string exe = genExePath(id, gn);
     mkdirs(g_temp + "\\" + std::to_string(id));
     std::string err;
     bool ok = oj::compile_cpp(src, exe, err);
@@ -320,11 +306,13 @@ AC_API const char* ac_gen_compile(int id) {
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
-// 运行 gen.exe，gen.exe 接受输出目录作为 argv[1]，自行生成 n 个 .in 文件写入该目录
-AC_API const char* ac_gen_run(int id) {
-    std::string exe = genExePath(id);
+// 运行生成器：生成 n 组数据写入 {题目}/{生成器}/ 下的 1.in 2.in ... n.in
+AC_API const char* ac_gen_run(int id, const char* name, int n) {
+    std::string gn = name ? name : "";
+    if (n <= 0) n = 1;
+    std::string exe = genExePath(id, gn);
     if (!exists(exe)) {
-        std::string src = genSrcPath(id);
+        std::string src = genSrcPath(id, gn);
         if (!exists(src)) {
             std::string err = "请先保存并编译生成器代码";
             g_lastError = err;
@@ -337,9 +325,30 @@ AC_API const char* ac_gen_run(int id) {
             return dup("{\"ok\":false,\"error\":\"生成器编译失败：" + jsonEscape(cerr) + "\"}");
         }
     }
-    std::string outDir = generatedDir(id);
+    std::string outDir = genOutDir(id, gn);
     mkdirs(outDir);
-    RunCap r = runCapture(exe, outDir, outDir, 60000);
+
+    // 清空旧的 .in / .out（避免上次残留），保证判题数据与本次生成一致
+    {
+        for (const char* ext : { ".in", ".out" }) {
+            std::string pat = outDir + "\\*" + ext;
+            WIN32_FIND_DATAA fd;
+            HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                        remove((outDir + "\\" + fd.cFileName).c_str());
+                } while (FindNextFileA(h, &fd));
+                FindClose(h);
+            }
+        }
+    }
+
+    // 生成器协议：argv[1]=输出目录, argv[2]=随机种子, argv[3]=组数 n
+    // 生成器自行把 1.in ~ n.in 写到输出目录（见 ac_gen_create 的模板）。
+    DWORD seed = GetTickCount();
+    std::string args = "\"" + outDir + "\" " + std::to_string(seed) + " " + std::to_string(n);
+    RunCap r = runCapture(exe, args, outDir, 60000);
     if (r.timeout) {
         g_lastError = "生成器运行超时（60s）";
         return dup("{\"ok\":false,\"error\":\"生成器运行超时（60s）\"}");
@@ -350,37 +359,34 @@ AC_API const char* ac_gen_run(int id) {
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    int cnt = 0;
-    std::string pattern = outDir + "\\*.in";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-            ++cnt;
-        } while (FindNextFileA(h, &fd));
-        FindClose(h);
+
+    int cnt = genFileCount(id, gn);
+    if (cnt == 0) {
+        g_lastError = "生成器没有产出数据（请把 1.in ~ n.in 写入 argv[1] 指定的输出目录）";
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(g_lastError) + "\"}");
     }
     std::string json = "{\"ok\":true,\"generated\":" + std::to_string(cnt)
-        + ",\"total\":" + std::to_string(cnt)
+        + ",\"total\":" + std::to_string(n)
         + ",\"outDir\":\"" + jsonEscape(outDir) + "\",\"fails\":[]}";
     g_lastError.clear();
     return dup(json);
 }
-// 生成的数据文件列表
-AC_API const char* ac_gen_list_files(int id) {
-    std::string dir = generatedDir(id);
-    std::vector<std::pair<int, std::string>> items; // (编号, 文件名)
+
+// 生成器目录下的数据文件列表
+AC_API const char* ac_gen_list_files(int id, const char* name) {
+    std::string gn = name ? name : "";
+    std::string dir = genDir(id, gn);
+    std::vector<std::pair<int, std::string>> items;
     std::string pattern = dir + "\\*.in";
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do {
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-            std::string name = fd.cFileName;
-            std::string base = name.substr(0, name.size() - 3);
+            std::string fname = fd.cFileName;
+            std::string base = fname.substr(0, fname.size() - 3);
             int num = atoi(base.c_str());
-            items.push_back({num, name});
+            items.push_back({num, fname});
         } while (FindNextFileA(h, &fd));
         FindClose(h);
     }
@@ -397,19 +403,21 @@ AC_API const char* ac_gen_list_files(int id) {
              + ",\"modified\":\"" + jsonEscape(fileModifiedDisplay(path)) + "\"}";
     }
     json += "]";
+    g_lastError.clear();
     return dup(json);
 }
 
-// 读取某个生成的数据文件内容（限 200KB）
-AC_API const char* ac_gen_get_file(int id, const char* name) {
-    if (!name || !*name) {
+// 读取某个生成器目录下数据文件内容（限 200KB）
+AC_API const char* ac_gen_get_file(int id, const char* name, const char* file) {
+    if (!file || !*file) {
         std::string err = "文件名为空";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string path = generatedDir(id) + "\\" + name;
+    std::string gn = name ? name : "";
+    std::string path = genDir(id, gn) + "\\" + file;
     if (!exists(path)) {
-        std::string err = "文件不存在: " + std::string(name);
+        std::string err = "文件不存在: " + std::string(file);
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
@@ -421,7 +429,7 @@ AC_API const char* ac_gen_get_file(int id, const char* name) {
              + ",\"truncated\":" + std::string(truncated ? "true" : "false") + "}");
 }
 
-// 跨题查找生成器代码（大小写不敏感，每题最多 30 条）
+// 跨题查找生成器代码（大小写不敏感，最多 30 条）
 AC_API const char* ac_gen_search(const char* keyword) {
     if (!keyword || !*keyword) {
         std::string err = "关键字为空";
@@ -431,7 +439,6 @@ AC_API const char* ac_gen_search(const char* keyword) {
     std::string kw = toLower(keyword);
     std::string json = "[";
     bool first = true;
-    // 遍历题库下所有数字目录
     std::string pattern = g_root + "\\*";
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
@@ -448,32 +455,34 @@ AC_API const char* ac_gen_search(const char* keyword) {
     std::sort(dirs.begin(), dirs.end(),
               [](const std::string& a, const std::string& b) { return atoi(a.c_str()) < atoi(b.c_str()); });
     for (auto& d : dirs) {
-        std::string genPath = g_root + "\\" + d + "\\" + d + ".cpp";
-        if (!exists(genPath)) continue;
+        int pid = atoi(d.c_str());
         std::string st = readFile(g_root + "\\" + d + "\\statement.txt");
         size_t nl = st.find('\n');
         std::string title = (nl == std::string::npos) ? st : st.substr(0, nl);
-        std::string content = readFile(genPath);
-        std::istringstream iss(content);
-        std::string line;
-        int lineNo = 0;
-        int n = 0;
-        while (std::getline(iss, line) && n < 30) {
-            ++lineNo;
-            if (toLower(line).find(kw) != std::string::npos) {
-                std::string trimmed = line;
-                size_t a = trimmed.find_first_not_of(" \t\r\n");
-                if (a != std::string::npos) trimmed = trimmed.substr(a);
-                size_t b = trimmed.find_last_not_of(" \t\r\n");
-                if (b != std::string::npos) trimmed = trimmed.substr(0, b + 1);
-                if (!first) json += ",";
-                first = false;
-                json += "{\"pid\":" + d
-                     + ",\"title\":\"" + jsonEscape(title) + "\""
-                     + ",\"lineNo\":" + std::to_string(lineNo)
-                     + ",\"line\":\"" + jsonEscape(trimmed) + "\""
-                     + ",\"keyword\":\"" + jsonEscape(keyword) + "\"}";
-                ++n;
+        for (auto& gn : listGenerators(pid)) {
+            std::string content = readFile(genSrcPath(pid, gn));
+            std::istringstream iss(content);
+            std::string line;
+            int lineNo = 0;
+            int n = 0;
+            while (std::getline(iss, line) && n < 30) {
+                ++lineNo;
+                if (toLower(line).find(kw) != std::string::npos) {
+                    std::string trimmed = line;
+                    size_t a = trimmed.find_first_not_of(" \t\r\n");
+                    if (a != std::string::npos) trimmed = trimmed.substr(a);
+                    size_t b = trimmed.find_last_not_of(" \t\r\n");
+                    if (b != std::string::npos) trimmed = trimmed.substr(0, b + 1);
+                    if (!first) json += ",";
+                    first = false;
+                    json += "{\"pid\":" + std::to_string(pid)
+                         + ",\"gen\":\"" + jsonEscape(gn) + "\""
+                         + ",\"title\":\"" + jsonEscape(title) + "\""
+                         + ",\"lineNo\":" + std::to_string(lineNo)
+                         + ",\"line\":\"" + jsonEscape(trimmed) + "\""
+                         + ",\"keyword\":\"" + jsonEscape(keyword) + "\"}";
+                    ++n;
+                }
             }
         }
     }
@@ -482,20 +491,21 @@ AC_API const char* ac_gen_search(const char* keyword) {
     return dup(json);
 }
 
-// 把生成的 .in 文件导入到题目测试数据目录
-AC_API const char* ac_gen_import_to_problem(int id, const char* name) {
-    if (!name || !*name) {
+// 把某生成器某个 .in 复制到题目测试数据目录根（兼容旧流程；新流程生成器目录即数据源）
+AC_API const char* ac_gen_import_to_problem(int id, const char* name, const char* filename) {
+    if (!filename || !*filename) {
         std::string err = "文件名为空";
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string src = generatedDir(id) + "\\" + name;
+    std::string gn = name ? name : "";
+    std::string src = genDir(id, gn) + "\\" + filename;
     if (!exists(src)) {
-        std::string err = "文件不存在: " + std::string(name);
+        std::string err = "文件不存在: " + std::string(filename);
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
-    std::string dst = genProblemDir(id) + "\\" + name;
+    std::string dst = genProblemRoot(id) + "\\" + filename;
     if (!CopyFileA(src.c_str(), dst.c_str(), FALSE)) {
         std::string err = "复制失败 (err=" + std::to_string(GetLastError()) + ")";
         g_lastError = err;

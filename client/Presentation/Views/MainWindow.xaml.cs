@@ -108,7 +108,7 @@ public partial class MainWindow : Window
                     {
                         Content = $"[{p.Id}] {p.Title}{tags}",
                         Tag = p,
-                        ToolTip = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 版本 v{p.Version}"
+                        ToolTip = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB"
                     });
                 }
                 ProblemList.SelectedIndex = 0;
@@ -142,7 +142,7 @@ public partial class MainWindow : Window
     {
         MarkdownRenderer.Render(DescBox, p.Description);
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
-        MetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 版本 v{p.Version} · 标签：{tags}";
+        MetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
     }
 
     private async void SubmitBtn_OnClick(object sender, RoutedEventArgs e)

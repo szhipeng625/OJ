@@ -207,13 +207,6 @@ bool mysql_init_schema(std::string& err) {
   UNIQUE KEY uq_user_problem (user_id, problem_id, contest_id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 ))SQL",
-        R"SQL(CREATE TABLE IF NOT EXISTS problem_generators (
-  problem_id INT PRIMARY KEY,
-  code MEDIUMTEXT NOT NULL,
-  version INT NOT NULL DEFAULT 1,
-  updated_at DATETIME NOT NULL,
-  INDEX idx_gen_updated (updated_at)
-))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS contest_registrations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
@@ -495,79 +488,6 @@ bool mysql_list_users(std::string& out_json, std::string& err) {
                   + ",\"username\":\"" + (row[1] ? row[1] : "") + "\""
                   + ",\"role\":\"" + (row[2] ? row[2] : "user") + "\""
                   + ",\"createdAt\":\"" + (row[3] ? row[3] : "") + "\"}";
-    }
-    g_sql.mysql_free_result(res);
-    out_json += "]";
-    return true;
-}
-
-// ===== 题目数据生成器 =====
-
-bool mysql_gen_upsert(int problem_id, const std::string& code, int version,
-                       const std::string& updated_at, std::string& err) {
-    std::string sql =
-        "INSERT INTO problem_generators(problem_id,code,version,updated_at) VALUES("
-        + std::to_string(problem_id) + ",'" + SqlEscape(code) + "',"
-        + std::to_string(version) + ",'" + SqlEscape(updated_at) + "') "
-        "ON DUPLICATE KEY UPDATE code=VALUES(code), version=VALUES(version), updated_at=VALUES(updated_at)";
-    return ExecSQL(sql, &err);
-}
-
-bool mysql_gen_get(int problem_id, std::string& out_code, int& out_version,
-                    std::string& out_updated_at, std::string& err) {
-    std::string sql = "SELECT code, version, updated_at FROM problem_generators WHERE problem_id="
-        + std::to_string(problem_id);
-    if (!ExecSQL(sql, &err)) return false;
-    void* res = g_sql.mysql_store_result(g_conn);
-    if (!res) { err = "no result"; return false; }
-    char** row = g_sql.mysql_fetch_row(res);
-    if (!row) { g_sql.mysql_free_result(res); return false; }
-    out_code = row[0] ? row[0] : "";
-    out_version = atoi(row[1] ? row[1] : "0");
-    out_updated_at = row[2] ? row[2] : "";
-    g_sql.mysql_free_result(res);
-    return true;
-}
-
-bool mysql_gen_search(const std::string& keyword, std::string& out_json, std::string& err) {
-    std::string sql = "SELECT problem_id, code, version, updated_at FROM problem_generators ORDER BY problem_id";
-    if (!ExecSQL(sql, &err)) return false;
-    void* res = g_sql.mysql_store_result(g_conn);
-    if (!res) { err = "no result"; return false; }
-    // 大小写不敏感匹配
-    std::string kw;
-    for (char c : keyword) kw += (char)tolower((unsigned char)c);
-    out_json = "[";
-    bool first = true;
-    char** row;
-    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
-        int pid = atoi(row[0] ? row[0] : "0");
-        std::string code = row[1] ? row[1] : "";
-        int ver = atoi(row[2] ? row[2] : "0");
-        std::string ua = row[3] ? row[3] : "";
-        std::string codeLow;
-        for (char c : code) codeLow += (char)tolower((unsigned char)c);
-        if (kw.empty() || codeLow.find(kw) != std::string::npos) {
-            // 预览：取前 3 行
-            std::string preview;
-            int lines = 0;
-            for (char c : code) {
-                if (c == '\n') { lines++; if (lines >= 3) break; }
-                preview += c;
-            }
-            if (!first) out_json += ",";
-            first = false;
-            out_json += "{\"problemId\":" + std::to_string(pid)
-                      + ",\"version\":" + std::to_string(ver)
-                      + ",\"updatedAt\":\"" + ua + "\""
-                      + ",\"preview\":\"" + [](const std::string& s){
-                            std::string o; for (char c : s) {
-                                if (c=='"') o+="\\\""; else if(c=='\\') o+="\\\\";
-                                else if(c=='\n') o+="\\n"; else if(c=='\r') o+="\\r";
-                                else if(c=='\t') o+="\\t"; else o+=c;
-                            } return o;
-                        }(preview) + "\"}";
-        }
     }
     g_sql.mysql_free_result(res);
     out_json += "]";

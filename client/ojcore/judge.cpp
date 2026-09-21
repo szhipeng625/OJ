@@ -179,70 +179,68 @@ bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::st
     return GetFileAttributesA(exeFile.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
-// 运行 spj：spjExe userOut ansFile inFile，退出码 0 = 通过
-static RunOutcome run_spj_one(const std::string& spjExe, const std::string& userOut,
-                              const std::string& ansFile, const std::string& inFile,
-                              DWORD timeoutMs) {
-    RunOutcome r = {0, 0, 0};
-    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
-
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" \"%s\" \"%s\"",
-             spjExe.c_str(), userOut.c_str(), ansFile.c_str(), inFile.c_str());
-
-    LARGE_INTEGER t0, t1, freq;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t0);
-
-    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        r.status = 3; return r;
-    }
-    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
-    QueryPerformanceCounter(&t1);
-    r.ms = (long long)((t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart);
-    if (wr == WAIT_TIMEOUT) {
-        TerminateProcess(pi.hProcess, 1);
-        r.status = 1;
-    } else {
-        GetExitCodeProcess(pi.hProcess, &r.exitCode);
-        if (r.exitCode != 0) r.status = 2;
-    }
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    return r;
+// 去掉字符串首尾空白（空格 / 制表 / 回车换行）
+static std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
 }
 
+// 收集 testDir 下各数据生成器子目录（含 gen.cpp 的二级目录）的所有 *.in。
+// 返回 {相对路径（如 "juhua/1.in"）, 生成器目录名}；不再读取题目根目录下的 .in。
+static std::vector<std::pair<std::string, std::string>> collectAllIn(const std::string& testDir) {
+    std::vector<std::pair<std::string, std::string>> res;
+
+    std::string pat = testDir + "\\*";
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return res;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        std::string n = fd.cFileName;
+        if (n == "." || n == "..") continue;
+        if (n == "history" || n == "gen_history") continue;
+        std::string sub = testDir + "\\" + n;
+        // 只有数据生成器目录（含 gen.cpp）才作为判题数据源
+        if (GetFileAttributesA((sub + "\\gen.cpp").c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+        auto subIns = listInFiles(sub);
+        for (auto& f : subIns) res.push_back({n + "/" + f, n});
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(res.begin(), res.end());
+    return res;
+}
 std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string& testDir,
                                   const std::string& tempOut, const JudgeOptions& opt) {
     std::vector<CaseResult> out;
-    auto ins = listInFiles(testDir);
+    auto ins = collectAllIn(testDir);
     int idx = 0;
-    for (auto& f : ins) {
+    for (auto& item : ins) {
         idx++;
-        std::string base = f.substr(0, f.size() - 3);
-        std::string inFile  = testDir + "\\" + f;
+        const std::string& inp = item.first;
+        const std::string& genName = item.second;
+        // 该生成器目录下的描述文本（desc.txt），未通过时返回给用户
+        std::string genDesc = trim(readAll(testDir + "\\" + genName + "\\desc.txt"));
+
+        std::string slash = inp;
+        for (auto& ch : slash) if (ch == '/') ch = '\\';
+        std::string base = slash.substr(0, slash.size() - 3);
+        std::string inFile  = testDir + "\\" + slash;
         std::string ansFile = testDir + "\\" + base + ".out";
         RunOutcome r = run_one(exeFile, inFile, tempOut, opt.timeoutMs, opt.memBytes);
 
         CaseResult c;
-        c.name = "#" + std::to_string(idx);
+        c.name = inp.substr(0, inp.size() - 3);   // 如 "juhua/1"
         c.timeMs = r.ms;
-        if (r.status == 3)      { c.verdict = "SE"; c.passed = false; }
-        else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; }
-        else if (r.status == 2) { c.verdict = "RE"; c.passed = false; }
-        else if (!opt.spjExe.empty()) {
-            // Special Judge：spj user.out ans.out in，退出码 0 = AC
-            RunOutcome sp = run_spj_one(opt.spjExe, tempOut, ansFile, inFile, 5000);
-            if (sp.status == 3)      { c.verdict = "SE"; c.passed = false; c.info = "spj 启动失败"; }
-            else if (sp.status == 1) { c.verdict = "WA"; c.passed = false; c.info = "spj 超时"; }
-            else if (sp.exitCode != 0) { c.verdict = "WA"; c.passed = false; c.info = "special judge 未通过"; }
-            else { c.verdict = "AC"; c.passed = true; }
-        } else {
+        if (r.status == 3)      { c.verdict = "SE";  c.passed = false; c.info = genDesc; }
+        else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; c.info = genDesc; }
+        else if (r.status == 2) { c.verdict = "RE";  c.passed = false; c.info = genDesc; }
+        else {
             std::string u = normalize(readAll(tempOut));
             std::string a = normalize(readAll(ansFile));
             if (u == a) { c.verdict = "AC"; c.passed = true; }
-            else        { c.verdict = "WA"; c.passed = false; c.info = "输出与标准答案不一致"; }
+            else        { c.verdict = "WA"; c.passed = false;
+                          c.info = genDesc.empty() ? "输出与标准答案不一致" : genDesc; }
         }
         out.push_back(c);
     }

@@ -163,7 +163,7 @@
                                         HorizontalAlignment="Left" Click="OnExitContest"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                                             DockPanel.Dock="Right">
-                                    <Button x:Name="NavSolveBtn" Content="做题" Width="90" Height="32"
+                                    <Button x:Name="NavSolveBtn" Content="比赛首页" Width="90" Height="32"
                                             Margin="4,0" Click="OnNavSolve"/>
                                     <Button x:Name="NavBoardBtn" Content="排行榜" Width="90" Height="32"
                                             Margin="4,0" Click="OnNavBoard"/>

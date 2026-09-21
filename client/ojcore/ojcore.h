@@ -18,15 +18,8 @@ OJ_API int oj_init(const char* problem_dir, const char* data_dir);
 
 // 获取题目列表，返回 JSON 字符串。调用方用完调 oj_free_string 释放。
 // [{"id":1,"title":"A+B","description":"...","sampleIn":"...","sampleOut":"...",
-//   "timeLimitMs":1000,"memLimitMB":256,"tags":["基础"],"version":3}]
+//   "timeLimitMs":1000,"memLimitMB":256,"tags":["基础"]}]
 OJ_API const char* oj_get_problems(void);
-
-// 获取题目历史版本列表（读 {id}/history/* 每版题面+元数据），返回 JSON 字符串。
-// [{"version":1,"title":"...","description":"...","timeLimitMs":1000,"memLimitMB":256,
-//   "tags":[...],"updatedAt":"2026-09-19 12:00:00"}]
-//
-// 注意：题目历史版本仅服务端（author）可见，客户端不提供此接口，
-//       发布到客户端题目目录时也不会携带 history 目录。
 
 // 获取某道题的全部历史提交记录（从 LSM 存储扫描），返回 JSON 字符串。
 // [{"id":1,"problemId":3,"verdict":"AC","detail":"...","timeMs":52,
@@ -92,28 +85,6 @@ OJ_API const char* oj_logout(const char* token);
 
 // 列出全部用户（admin 用）。返回 JSON 数组。
 OJ_API const char* oj_list_users(const char* token);
-
-// ===== 题目数据生成器（LSM 存历史版本，MySQL 存最新版本，重复保存原地替换） =====
-
-// 保存生成器代码：自动分配新版本号，写入 LSM 历史版本，同时 upsert 到 MySQL 最新版本。
-// 返回 {"ok":true,"version":N}；MySQL 未连接时仅写 LSM，仍返回 ok。
-OJ_API const char* oj_gen_save(int problem_id, const char* code);
-
-// 读取某题最新生成器代码（优先 MySQL，回退 LSM 最新版本）。
-// 返回 {"ok":true,"code":"...","version":N,"updatedAt":"..."}；无记录返回 {"ok":false}。
-OJ_API const char* oj_gen_get_current(int problem_id);
-
-// 列出某题的全部历史版本（从 LSM 扫描），按版本号降序。
-// 返回 [{"version":1,"ts":"2026-09-19 12:00:00","lines":18,"summary":"#include..."}, ...]
-OJ_API const char* oj_gen_list_versions(int problem_id);
-
-// 读取某题指定历史版本的代码（从 LSM）。
-// 返回 {"ok":true,"code":"...","version":N,"ts":"..."}；不存在返回 {"ok":false}。
-OJ_API const char* oj_gen_get_version(int problem_id, int version);
-
-// 跨题查找生成器代码（遍历 MySQL 全部题目的最新代码，大小写不敏感）。
-// 返回 [{"problemId":111,"version":3,"updatedAt":"...","preview":"前3行..."}, ...]
-OJ_API const char* oj_gen_search(const char* keyword);
 
 // 释放 oj_get_problems / oj_submit 返回的字符串。
 OJ_API void oj_free_string(const char* s);

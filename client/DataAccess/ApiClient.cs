@@ -8,7 +8,6 @@ namespace client.DataAccess;
 /// <summary>
 /// 数据访问层（DAL）：封装对 C++ ojcore.dll 的 P/Invoke 调用，
 /// 负责连接初始化、JSON 反序列化，返回强类型模型；不含界面与业务规则。
-/// 注意：题目历史版本仅服务端（author）可见，客户端不提供查看接口。
 /// </summary>
 public class ApiClient
 {

@@ -177,40 +177,6 @@ bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::st
     return GetFileAttributesA(exeFile.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
-// 运行 spj：spjExe userOut ansFile inFile，退出码 0 = 通过
-static RunOutcome run_spj_one(const std::string& spjExe, const std::string& userOut,
-                              const std::string& ansFile, const std::string& inFile,
-                              DWORD timeoutMs) {
-    RunOutcome r = {0, 0, 0};
-    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
-
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" \"%s\" \"%s\"",
-             spjExe.c_str(), userOut.c_str(), ansFile.c_str(), inFile.c_str());
-
-    LARGE_INTEGER t0, t1, freq;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t0);
-
-    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        r.status = 3; return r;
-    }
-    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
-    QueryPerformanceCounter(&t1);
-    r.ms = (long long)((t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart);
-    if (wr == WAIT_TIMEOUT) {
-        TerminateProcess(pi.hProcess, 1);
-        r.status = 1;
-    } else {
-        GetExitCodeProcess(pi.hProcess, &r.exitCode);
-        if (r.exitCode != 0) r.status = 2;
-    }
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    return r;
-}
-
 std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string& testDir,
                                   const std::string& tempOut, const JudgeOptions& opt) {
     std::vector<CaseResult> out;
@@ -229,14 +195,7 @@ std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string&
         if (r.status == 3)      { c.verdict = "SE"; c.passed = false; }
         else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; }
         else if (r.status == 2) { c.verdict = "RE"; c.passed = false; }
-        else if (!opt.spjExe.empty()) {
-            // Special Judge：spj user.out ans.out in，退出码 0 = AC
-            RunOutcome sp = run_spj_one(opt.spjExe, tempOut, ansFile, inFile, 5000);
-            if (sp.status == 3)      { c.verdict = "SE"; c.passed = false; c.info = "spj 启动失败"; }
-            else if (sp.status == 1) { c.verdict = "WA"; c.passed = false; c.info = "spj 超时"; }
-            else if (sp.exitCode != 0) { c.verdict = "WA"; c.passed = false; c.info = "special judge 未通过"; }
-            else { c.verdict = "AC"; c.passed = true; }
-        } else {
+        else {
             std::string u = normalize(readAll(tempOut));
             std::string a = normalize(readAll(ansFile));
             if (u == a) { c.verdict = "AC"; c.passed = true; }

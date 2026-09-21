@@ -21,8 +21,7 @@ bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::st
 struct JudgeOptions {
     DWORD timeoutMs = 1000;                              // 单测时间限制
     SIZE_T memBytes = 256ull * 1024 * 1024;              // 内存限制（0 不限）
-    std::string spjExe;                                  // 非空则启用 Special Judge
-};
+    };
 
 // 运行一个 exe，重定向 stdin/stdout，限时/限内存。
 // status: 0=正常 1=TLE 2=崩溃/非零退出 3=启动失败
@@ -31,9 +30,7 @@ struct RunOutcome { int status; DWORD exitCode; long long ms; };
 RunOutcome run_one(const std::string& exe, const std::string& inFile,
                    const std::string& userOut, DWORD timeoutMs, SIZE_T memBytes);
 
-// 对 testDir 下每个 *.in 运行 exe，返回逐测试点结果。
-// spjExe 非空时，每个测试点调用 spj user.out ans.out in 判定；
-// 否则按文本比对（normalize 后逐行）。
+// 对 testDir 下每个 *.in 运行 exe，返回逐测试点结果（文本比对）。
 std::vector<CaseResult> run_tests(const std::string& exeFile,
                                   const std::string& testDir,
                                   const std::string& tempOut,

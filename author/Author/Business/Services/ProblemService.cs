@@ -9,7 +9,7 @@ namespace author.Business.Services;
 public record JobResult(bool Ok, string Message);
 
 /// <summary>
-/// 题目业务：题面/元数据/测试数据/标程/spj/校验/发布的编排。
+/// 题目业务：题面/元数据/测试数据/标程/校验/发布的编排。
 /// 所有涉及文件与子进程的操作都经 <see cref="BuildService"/> 调度：
 /// 同一题目串行、不同题目并行，且退出时会被统一等待。
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class ProblemService
     public string Root => _author.Root;
     public string ProblemDir(int id) => _author.ProblemDir(id);
     public string StdExePath(int id) => _author.StdExePath(id);
-    public string GenOutDir(int id) => _author.GenOutDir(id);
+    public string GenOutDir(int id, string name) => _author.GenOutDir(id, name);
 
     private static string Gate(int id) => "p" + id;
 
@@ -71,10 +71,6 @@ public sealed class ProblemService
     public Task<JobResult> CompileStdAsync(int id, string code)
         => CompileAsync(id, "std.cpp", _author.StdExePath(id), code,
             "编译成功 ✓（可去「测试数据」页运行生成答案）");
-
-    /// <summary>保存并编译特判。</summary>
-    public Task<JobResult> CompileSpjAsync(int id, string code)
-        => CompileAsync(id, "spj.cpp", _author.SpjExePath(id), code, "编译成功 ✓");
 
     private Task<JobResult> CompileAsync(int id, string srcName, string exe, string code, string okMessage)
         => _build.RunAsync(Gate(id), () =>
@@ -119,13 +115,13 @@ public sealed class ProblemService
                     .Select(m => m.GetString()).ToList();
                 return root.GetProperty("inCount").GetInt32() + " 组数据"
                      + (root.GetProperty("hasStd").GetBoolean() ? "，有标程" : "，无标程")
-                     + (root.GetProperty("hasSpj").GetBoolean() ? "，有 spj" : "")
+                     + " (生成器 " + root.GetProperty("genCount").GetInt32() + "个)"
                      + (miss!.Count > 0 ? "；缺失：" + string.Join("、", miss) : "；完整 ✓");
             }
             catch { return r; }
         });
 
-    /// <summary>发布题目到客户端题目目录（含快照，目录复制较慢，走后台任务）。</summary>
+    /// <summary>发布题目到客户端题目目录（目录复制较慢，走后台任务）。</summary>
     public Task<JobResult> PublishAsync(int id, string target)
         => _build.RunAsync(Gate(id), () =>
         {
@@ -133,31 +129,7 @@ public sealed class ProblemService
                 return new JobResult(false, "请填写目标目录");
             string r = _author.Publish(id, target.Trim());
             if (r.Contains("\"ok\":true"))
-            {
-                int ver = 0;
-                try { using var doc = JsonDocument.Parse(r); ver = doc.RootElement.GetProperty("version").GetInt32(); } catch { }
-                return new JobResult(true, $"已发布到 {target.Trim()}\\{id} ✓（版本 v{ver}，客户端启动后即可看到新题）");
-            }
+                return new JobResult(true, $"已发布到 {target.Trim()}\\{id} ✓（客户端启动后即可看到新题）");
             return new JobResult(false, "发布失败：" + AuthorClient.ParseError(r));
-        });
-
-    public Task<List<HistoryItem>> HistoryAsync(int id)
-        => _build.RunAsync(Gate(id), () => _author.ListHistory(id));
-
-    /// <summary>读取某次发布快照并拼成展示文本。</summary>
-    public Task<string> HistoryDetailAsync(int id, int version)
-        => _build.RunAsync(Gate(id), () =>
-        {
-            var h = _author.ReadHistorySnapshot(id, version, out var title, out var desc,
-                out var sampleIn, out var sampleOut);
-            return $"【历史版本 v{h.Version} · {h.UpdatedAt}】\n"
-                 + $"标题：{title}\n"
-                 + $"限制：{h.TimeLimitMs}ms / {h.MemLimitMB}MB\n"
-                 + $"标签：{string.Join(", ", h.Tags)}\n"
-                 + "──────────────────────────\n"
-                 + desc
-                 + "\n──────────────────────────\n"
-                 + $"样例输入：\n{sampleIn}\n"
-                 + $"样例输出：\n{sampleOut}";
         });
 }

@@ -32,21 +32,6 @@ public static class OjCoreInterop
     private static extern IntPtr oj_mysql_init_schema();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_gen_save(int problem_id, [MarshalAs(UnmanagedType.LPUTF8Str)] string code);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_gen_get_current(int problem_id);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_gen_list_versions(int problem_id);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_gen_get_version(int problem_id, int version);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_gen_search([MarshalAs(UnmanagedType.LPUTF8Str)] string keyword);
-
-    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void oj_free_string(IntPtr s);
 
     internal static string Take(IntPtr p)
@@ -76,31 +61,5 @@ public static class OjCoreInterop
     public static string WhoamiJson(string token)
     {
         lock (Lock) return Take(oj_whoami(token));
-    }
-
-    // ===== 生成器存储 =====
-    public static string GenSave(int problemId, string code)
-    {
-        lock (Lock) return Take(oj_gen_save(problemId, code));
-    }
-
-    public static string GenGetCurrent(int problemId)
-    {
-        lock (Lock) return Take(oj_gen_get_current(problemId));
-    }
-
-    public static string GenListVersions(int problemId)
-    {
-        lock (Lock) return Take(oj_gen_list_versions(problemId));
-    }
-
-    public static string GenGetVersion(int problemId, int version)
-    {
-        lock (Lock) return Take(oj_gen_get_version(problemId, version));
-    }
-
-    public static string GenSearch(string keyword)
-    {
-        lock (Lock) return Take(oj_gen_search(keyword));
     }
 }

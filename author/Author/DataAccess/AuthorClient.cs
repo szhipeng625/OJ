@@ -16,8 +16,6 @@ public sealed class AuthorClient
 
     private const string StdTemplate =
         "// 标准程序（用于生成答案 / 本地验证）\n#include <iostream>\nusing namespace std;\nint main() {\n    return 0;\n}\n";
-    private const string SpjTemplate =
-        "// 特判程序：spj.exe <用户输出> <标准输出> <输入>，退出码 0=通过\n";
 
     /// <summary>服务端题库根目录（author/problems）。</summary>
     public string Root { get; private set; } = "";
@@ -34,10 +32,11 @@ public sealed class AuthorClient
     }
 
     public string ProblemDir(int id) => Path.Combine(Root, id.ToString());
-    public string GenSrcPath(int id) => Path.Combine(ProblemDir(id), id + ".cpp");
-    public string GenOutDir(int id) => Path.GetFullPath(Path.Combine(Root, "..", "generated", id.ToString()));
+    public string GenDir(int id, string name) => Path.Combine(ProblemDir(id), name);
+    public string GenSrcPath(int id, string name) => Path.Combine(GenDir(id, name), "gen.cpp");
+    public string GenOutDir(int id, string name) => Path.GetFullPath(Path.Combine(ProblemDir(id), name));
+    public string GenExePath(int id, string name) => Path.Combine(TempRoot, id.ToString(), name + ".exe");
     public string StdExePath(int id) => Path.Combine(TempRoot, id.ToString(), "std.exe");
-    public string SpjExePath(int id) => Path.Combine(TempRoot, id.ToString(), "spj.exe");
 
     // ===== 题目列表 / 创建 =====
     public List<ProblemInfo> List()
@@ -70,7 +69,7 @@ public sealed class AuthorClient
             using var doc = JsonDocument.Parse(AuthorCoreInterop.GetMeta(id));
             var r = doc.RootElement;
             if (!r.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
-                return new ProblemMeta(false, 1000, 256, Array.Empty<string>(), 0, "");
+                return new ProblemMeta(false, 1000, 256, Array.Empty<string>(), "");
             var tags = r.TryGetProperty("tags", out var ta)
                 ? ta.EnumerateArray().Select(t => t.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToArray()
                 : Array.Empty<string>();
@@ -78,13 +77,12 @@ public sealed class AuthorClient
                 r.GetProperty("timeLimitMs").GetInt32(),
                 r.GetProperty("memLimitMB").GetInt32(),
                 tags,
-                r.TryGetProperty("version", out var v) ? v.GetInt32() : 0,
                 r.TryGetProperty("updatedAt", out var u) ? u.GetString() ?? "" : "");
         }
-        catch { return new ProblemMeta(false, 1000, 256, Array.Empty<string>(), 0, ""); }
+        catch { return new ProblemMeta(false, 1000, 256, Array.Empty<string>(), ""); }
     }
 
-    /// <summary>读取一道题的题面、样例、元数据、标程/spj 全文。</summary>
+    /// <summary>读取一道题的题面、样例、元数据、标程全文。</summary>
     public ProblemContent LoadContent(int id)
     {
         string dir = ProblemDir(id);
@@ -100,13 +98,11 @@ public sealed class AuthorClient
         string desc = nl < 0 ? "" : st[(nl + 1)..];
 
         string stdPath = Path.Combine(dir, "std.cpp");
-        string spjPath = Path.Combine(dir, "spj.cpp");
         return new ProblemContent(
             title, desc,
             ReadFile("sample.in"), ReadFile("sample.out"),
             GetMeta(id),
-            File.Exists(stdPath) ? File.ReadAllText(stdPath) : StdTemplate,
-            File.Exists(spjPath) ? File.ReadAllText(spjPath) : SpjTemplate);
+            File.Exists(stdPath) ? File.ReadAllText(stdPath) : StdTemplate);
     }
 
     public void WriteProblemFile(int id, string name, string content)
@@ -117,57 +113,6 @@ public sealed class AuthorClient
     public string GenOutputs(int id, string stdExe) => AuthorCoreInterop.GenOutputs(id, stdExe);
     public string Validate(int id) => AuthorCoreInterop.Validate(id);
     public string Publish(int id, string targetRoot) => AuthorCoreInterop.Publish(id, targetRoot);
-
-    // ===== 发布历史 =====
-    public List<HistoryItem> ListHistory(int id)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<List<HistoryItem>>(AuthorCoreInterop.GetHistory(id), JsonOpts) ?? new();
-        }
-        catch { return new(); }
-    }
-
-    /// <summary>读取某次发布快照的题面/样例（供历史查看）。</summary>
-    public HistoryItem ReadHistorySnapshot(int id, int version, out string title, out string desc,
-        out string sampleIn, out string sampleOut)
-    {
-        string vdir = Path.Combine(ProblemDir(id), "history", version.ToString());
-        string Read(string name)
-        {
-            string p = Path.Combine(vdir, name);
-            return File.Exists(p) ? File.ReadAllText(p) : "";
-        }
-        string st = Read("statement.txt");
-        int nl = st.IndexOf('\n');
-        title = nl < 0 ? st : st[..nl];
-        desc = nl < 0 ? "" : st[(nl + 1)..];
-        sampleIn = Read("sample.in");
-        sampleOut = Read("sample.out");
-        var meta = GetMetaForDir(vdir);
-        return new HistoryItem(version, title, meta.TimeLimitMs, meta.MemLimitMB, meta.Tags, meta.UpdatedAt);
-    }
-
-    private ProblemMeta GetMetaForDir(string dir)
-    {
-        try
-        {
-            string p = Path.Combine(dir, "meta.json");
-            if (!File.Exists(p)) return new ProblemMeta(true, 1000, 256, Array.Empty<string>(), 0, "");
-            using var doc = JsonDocument.Parse(File.ReadAllText(p));
-            var r = doc.RootElement;
-            var tags = r.TryGetProperty("tags", out var ta)
-                ? ta.EnumerateArray().Select(t => t.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToArray()
-                : Array.Empty<string>();
-            return new ProblemMeta(true,
-                r.TryGetProperty("timeLimitMs", out var t) ? t.GetInt32() : 1000,
-                r.TryGetProperty("memLimitMB", out var m) ? m.GetInt32() : 256,
-                tags,
-                r.TryGetProperty("version", out var v) ? v.GetInt32() : 0,
-                r.TryGetProperty("updatedAt", out var u) ? u.GetString() ?? "" : "");
-        }
-        catch { return new ProblemMeta(true, 1000, 256, Array.Empty<string>(), 0, ""); }
-    }
 
     // ===== 测试数据文件 =====
     public List<DataPair> ListDataPairs(int id)
@@ -206,56 +151,57 @@ public sealed class AuthorClient
         if (File.Exists(outF)) File.Delete(outF);
     }
 
-    // ===== 生成器本地文件（authorcore） =====
-    public void WriteGenSource(int id, string code)
-    {
-        string p = GenSrcPath(id);
-        Directory.CreateDirectory(Path.GetDirectoryName(p)!);
-        File.WriteAllText(p, code);
-    }
-
-    public string ReadGenSource(int id)
-    {
-        string p = GenSrcPath(id);
-        return File.Exists(p) ? File.ReadAllText(p) : "";
-    }
-
-    public List<GenVersion> ListGenVersions(int id)
-    {
-        var list = new List<GenVersion>();
-        try
-        {
-            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenListVersions(id));
-            foreach (var el in doc.RootElement.EnumerateArray())
-            {
-                list.Add(new GenVersion(
-                    el.TryGetProperty("version", out var v) ? v.GetInt32() : 0,
-                    el.TryGetProperty("time", out var t) ? t.GetString() ?? "" : "",
-                    el.TryGetProperty("lines", out var l) ? l.GetInt32() : 0,
-                    el.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : ""));
-            }
-        }
-        catch { }
-        return list;
-    }
-
-    public string GenCompile(int id) => AuthorCoreInterop.GenCompile(id);
-    public string GenRun(int id) => AuthorCoreInterop.GenRun(id);
-
-    public List<GenFile> ListGenFiles(int id)
+    // ===== 生成器本地文件（authorcore，多生成器编程） =====
+    /// <summary>列出题目下所有数据生成器。</summary>
+    public List<GenSummary> ListGenerators(int id)
     {
         try
         {
-            return JsonSerializer.Deserialize<List<GenFile>>(AuthorCoreInterop.GenListFiles(id), JsonOpts) ?? new();
+            return JsonSerializer.Deserialize<List<GenSummary>>(AuthorCoreInterop.GenList(id), JsonOpts) ?? new();
         }
         catch { return new(); }
     }
 
-    public (string text, bool truncated) GetGenFile(int id, string name)
+    public string GenCreate(int id, string name, string desc) => AuthorCoreInterop.GenCreate(id, name, desc);
+
+    public string GenSave(int id, string name, string code) => AuthorCoreInterop.GenSave(id, name, code);
+
+    public string GenSetDesc(int id, string name, string desc) => AuthorCoreInterop.GenSetDesc(id, name, desc);
+
+    /// <summary>获取某生成器当前代码+描述+路径（无 gen.cpp 则返回模板）。</summary>
+    public (string name, string desc, string code, string genPath, string outDir) GetGenCurrent(int id, string name)
     {
         try
         {
-            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenGetFile(id, name));
+            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenGetCurrent(id, name));
+            var r = doc.RootElement;
+            return (
+                r.TryGetProperty("name", out var nm) ? nm.GetString() ?? name : name,
+                r.TryGetProperty("desc", out var d) ? d.GetString() ?? "" : "",
+                r.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "",
+                r.TryGetProperty("genPath", out var g) ? g.GetString() ?? "" : "",
+                r.TryGetProperty("outDir", out var o) ? o.GetString() ?? "" : "");
+        }
+        catch { return (name, "", "", "", ""); }
+    }
+
+    public string GenCompile(int id, string name) => AuthorCoreInterop.GenCompile(id, name);
+    public string GenRun(int id, string name, int n) => AuthorCoreInterop.GenRun(id, name, n);
+
+    public List<GenFile> ListGenFiles(int id, string name)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<GenFile>>(AuthorCoreInterop.GenListFiles(id, name), JsonOpts) ?? new();
+        }
+        catch { return new(); }
+    }
+
+    public (string text, bool truncated) GetGenFile(int id, string name, string file)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenGetFile(id, name, file));
             var r = doc.RootElement;
             string text = r.TryGetProperty("content", out var c) ? c.GetString() ?? "" : "";
             bool truncated = r.TryGetProperty("truncated", out var tr) && tr.GetBoolean();
@@ -264,7 +210,17 @@ public sealed class AuthorClient
         catch { return ("", false); }
     }
 
-    public string GenImportToProblem(int id, string name) => AuthorCoreInterop.GenImportToProblem(id, name);
+    public string GenImportToProblem(int id, string name, string filename) => AuthorCoreInterop.GenImportToProblem(id, name, filename);
+
+    /// <summary>跨题在所有题目的生成器代码中查找关键字（大小写不敏感，C++ 上限 30 条）。</summary>
+    public List<GenSearchResult> SearchGenerators(string keyword)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<GenSearchResult>>(AuthorCoreInterop.GenSearch(keyword), JsonOpts) ?? new();
+        }
+        catch { return new(); }
+    }
 
     /// <summary>从原生 JSON 中提取 error 字段，取不到时回显原文。</summary>
     public static string ParseError(string json)
