@@ -72,6 +72,7 @@ public partial class App : Application
                 Build = build,
                 TestDataDir = testDataDir,
                 ServerRoot = serverRoot,
+                ServerProblemDir = serverProblemDir,
             };
 
             // ---- MySQL 认证（服务端强制要求） ----

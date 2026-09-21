@@ -226,6 +226,17 @@ public sealed class AuthorClient
         if (File.Exists(outF)) File.Delete(outF);
     }
 
+    /// <summary>读取指定组别下某个数据文件内容（超 200KB 截断）。</summary>
+    public (string Text, bool Truncated) ReadDataFile(int id, string group, string fileName)
+    {
+        string dir = string.IsNullOrEmpty(group) ? ProblemDir(id) : GenOutDir(id, group);
+        string path = Path.Combine(dir, fileName);
+        if (!File.Exists(path)) return ("", false);
+        string text = File.ReadAllText(path);
+        if (text.Length > 200000) return (text[..200000], true);
+        return (text, false);
+    }
+
     // ===== 生成器本地文件（authorcore，多生成器编程） =====
     /// <summary>列出题目下所有数据生成器。</summary>
     public List<GenSummary> ListGenerators(int id)

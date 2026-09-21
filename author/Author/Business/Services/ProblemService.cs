@@ -79,6 +79,10 @@ public sealed class ProblemService
     public Task<List<DataRow>> ListGroupedRowsAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.ListGroupedRows(id));
 
+    /// <summary>读取指定组别下某个数据文件内容（用于对比窗口，超 200KB 截断）。</summary>
+    public Task<(string Text, bool Truncated)> ReadDataFileAsync(int id, string group, string fileName)
+        => _build.RunAsync(Gate(id), () => _author.ReadDataFile(id, group, fileName));
+
     public Task<int> ImportDataAsync(int id, IEnumerable<string> files)
         => _build.RunAsync(Gate(id), () => _author.ImportFiles(id, files));
 

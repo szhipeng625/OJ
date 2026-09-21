@@ -57,10 +57,58 @@ namespace author.Presentation.Controls
             editor.Editor.ShowLineNumbers = !(bool)e.NewValue;
         }
 
+        // IsLight：true 时为白色背景的纯文本编辑（用于题目描述 Markdown，无 C++ 高亮与补全）
+        public static readonly DependencyProperty IsLightProperty =
+            DependencyProperty.Register("IsLight", typeof(bool), typeof(CodeEditor),
+                new PropertyMetadata(false, OnIsLightChanged));
+
+        public bool IsLight
+        {
+            get => (bool)GetValue(IsLightProperty);
+            set => SetValue(IsLightProperty, value);
+        }
+
+        private static void OnIsLightChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            ((CodeEditor)d).ApplyTheme((bool)e.NewValue);
+        }
+
+        // ShowLineNumbers：是否显示行号（题目描述默认关闭）
+        public static readonly DependencyProperty ShowLineNumbersProperty =
+            DependencyProperty.Register("ShowLineNumbers", typeof(bool), typeof(CodeEditor),
+                new PropertyMetadata(true, OnShowLineNumbersChanged));
+
+        public bool ShowLineNumbers
+        {
+            get => (bool)GetValue(ShowLineNumbersProperty);
+            set => SetValue(ShowLineNumbersProperty, value);
+        }
+
+        private static void OnShowLineNumbersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            ((CodeEditor)d).Editor.ShowLineNumbers = (bool)e.NewValue;
+        }
+
+        // WordWrap：是否自动换行（题目描述默认开启）
+        public static readonly DependencyProperty WordWrapProperty =
+            DependencyProperty.Register("WordWrap", typeof(bool), typeof(CodeEditor),
+                new PropertyMetadata(false, OnWordWrapChanged));
+
+        public bool WordWrap
+        {
+            get => (bool)GetValue(WordWrapProperty);
+            set => SetValue(WordWrapProperty, value);
+        }
+
+        private static void OnWordWrapChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            ((CodeEditor)d).Editor.WordWrap = (bool)e.NewValue;
+        }
+
         public CodeEditor()
         {
             InitializeComponent();
-            SetupCppHighlighting();
+            ApplyTheme(IsLight);
             Editor.TextChanged += (s, e) =>
             {
                 if (Text != Editor.Text)
@@ -74,9 +122,26 @@ namespace author.Presentation.Controls
         private const string DarkDefinitionName = "C++ Dark+";
         private static readonly object HighlightInitLock = new();
 
-        private void SetupCppHighlighting()
+        private void ApplyTheme(bool light)
         {
-            Editor.SyntaxHighlighting = LoadDarkPlusDefinition();
+            if (light)
+            {
+                RootBorder.Background = Brushes.White;
+                RootBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(0xE3, 0xE6, 0xEB));
+                Editor.Background = Brushes.White;
+                Editor.Foreground = Brushes.Black;
+                Editor.LineNumbersForeground = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E));
+                Editor.SyntaxHighlighting = null;
+            }
+            else
+            {
+                RootBorder.Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
+                RootBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C));
+                Editor.Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
+                Editor.Foreground = new SolidColorBrush(Color.FromRgb(0xD4, 0xD4, 0xD4));
+                Editor.LineNumbersForeground = new SolidColorBrush(Color.FromRgb(0x85, 0x85, 0x85));
+                Editor.SyntaxHighlighting = LoadDarkPlusDefinition();
+            }
         }
 
         /// <summary>
@@ -187,6 +252,8 @@ namespace author.Presentation.Controls
 
         private void TextArea_TextEntering(object sender, TextCompositionEventArgs e)
         {
+            if (IsLight) return;   // 纯文本（Markdown）模式：不触发 C++ 补全
+
             if (e.Text.Length > 0 && _completionWindow != null)
             {
                 if (!char.IsLetterOrDigit(e.Text[0]) && e.Text[0] != '_')

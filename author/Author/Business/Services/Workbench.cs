@@ -16,4 +16,7 @@ public sealed class Workbench
 
     /// <summary>客户端服务端根目录（serverRoot，其下为 problems/contests），比赛自动发布到此。</summary>
     public string ServerRoot { get; init; } = "";
+
+    /// <summary>题目发布目标目录（serverRoot\problems），固定不可修改。</summary>
+    public string ServerProblemDir { get; init; } = "";
 }

@@ -21,17 +21,21 @@ public partial class ProblemWorkspaceWindow : Window
     private readonly Workbench _wb;
     private readonly WorkspaceManager _mgr;
     private readonly string _testDataDir;
+    private readonly string _serverProblemDir;
     private string _genOutDir = "";
     private string _genName = "";
 
-    public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager, string testDataDir = "")
+    public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager,
+        string testDataDir = "", string serverProblemDir = "")
     {
         InitializeComponent();
         _id = problemId;
         _wb = workbench;
         _mgr = manager;
         _testDataDir = testDataDir;
+        _serverProblemDir = serverProblemDir;
         Title = $"P{problemId} 题目工作台";
+        TargetBox.Text = string.IsNullOrWhiteSpace(serverProblemDir) ? @"D:\OJ\server\problems" : serverProblemDir;
         Loaded += async (_, _) => await LoadAllAsync();
     }
 
@@ -149,6 +153,16 @@ public partial class ProblemWorkspaceWindow : Window
             await RefreshDataList();
             _mgr.NotifyProblemListChanged();
         });
+    }
+
+    private async void OnDataRowDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DataGroupView.SelectedItem is not DataRow row) return;
+        var (inText, inTrunc) = await _wb.Problems.ReadDataFileAsync(_id, row.GroupKey, row.InFile);
+        var (outText, outTrunc) = await _wb.Problems.ReadDataFileAsync(_id, row.GroupKey, row.OutFile);
+        if (!IsLoaded) return;
+        var win = new DataCompareWindow(row, inText, inTrunc, outText, outTrunc) { Owner = this };
+        win.Show();
     }
 
     private async void OnDeleteData(object sender, RoutedEventArgs e)

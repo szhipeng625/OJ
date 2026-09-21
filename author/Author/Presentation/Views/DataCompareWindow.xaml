@@ -1,0 +1,33 @@
+<Window x:Class="author.Presentation.Views.DataCompareWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:author.Presentation.Controls"
+        Title="数据对比" Height="640" Width="1000"
+        WindowStartupLocation="CenterOwner" FontSize="13">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TitleText" Grid.Row="0" FontWeight="Bold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Grid.Column="0">
+                <TextBlock x:Name="InTitle" DockPanel.Dock="Top" Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                <controls:CodeEditor x:Name="InBox" IsReadOnly="True"/>
+            </DockPanel>
+
+            <DockPanel Grid.Column="2">
+                <TextBlock x:Name="OutTitle" DockPanel.Dock="Top" Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                <controls:CodeEditor x:Name="OutBox" IsReadOnly="True"/>
+            </DockPanel>
+        </Grid>
+    </Grid>
+</Window>

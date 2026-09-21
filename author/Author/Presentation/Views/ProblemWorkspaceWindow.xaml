@@ -41,9 +41,8 @@
                         <TextBlock Grid.Column="4" Text="标签(逗号分隔)：" VerticalAlignment="Center" Margin="10,0,4,0"/>
                         <TextBox x:Name="TagsBox" Grid.Column="5" VerticalContentAlignment="Center" ToolTip="如：基础,模拟,字符串"/>
                     </Grid>
-                    <TextBlock Grid.Row="2" Text="题目描述（支持多行，样例说明写在这里）：" Margin="0,4"/>
-                    <TextBox x:Name="DescBox" Grid.Row="3" AcceptsReturn="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                    <TextBlock Grid.Row="2" Text="题目描述（支持 Markdown 格式，Tab 缩进，客户端将按 Markdown 渲染）：" Margin="0,4"/>
+                    <controls:CodeEditor x:Name="DescBox" Grid.Row="3" IsLight="True" ShowLineNumbers="False" WordWrap="True"/>
                     <Grid Grid.Row="4" Margin="0,6,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -99,7 +98,8 @@
                             <Button Content="删除选中" Click="OnDeleteData" Width="90"/>
                         </WrapPanel>
                         <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                        <ListView x:Name="DataGroupView" BorderThickness="1" BorderBrush="#FFE3E6EB">
+                        <ListView x:Name="DataGroupView" BorderThickness="1" BorderBrush="#FFE3E6EB"
+                                  MouseDoubleClick="OnDataRowDoubleClick">
                             <ListView.View>
                                 <GridView>
                                     <GridViewColumn Header="输入数据 (.in)" Width="190" DisplayMemberBinding="{Binding InDisplay}"/>
@@ -158,8 +158,10 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ③ 状态条 -->
-                    <TextBlock Grid.Row="2" x:Name="GenMsg" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <!-- ③ 状态条（固定高度，不挤压下方生成器界面） -->
+                    <TextBox Grid.Row="2" x:Name="GenMsg" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                             Foreground="#2d8cf0" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                             Height="48" Margin="0,0,0,6"/>
 
                     <!-- ④ 主工作区：三栏 -->
                     <Grid Grid.Row="3">
@@ -256,7 +258,8 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="目标目录：" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="TargetBox" Grid.Column="1" Text="D:\OJ\server\problems"/>
+                        <TextBox x:Name="TargetBox" Grid.Column="1" Text="D:\OJ\server\problems"
+                                 IsReadOnly="True" Background="#F5F7FA" ToolTip="发布目标目录固定为客户端题目目录，不可修改"/>
                     </Grid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="校验题目完整性" Width="130" Click="OnValidate"/>
