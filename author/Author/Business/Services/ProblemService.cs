@@ -34,13 +34,27 @@ public sealed class ProblemService
 
     public Task<List<ProblemInfo>> ListAsync() => _build.RunAsync("list", () => _author.List());
 
-    public Task<(bool Ok, string Message)> CreateAsync(int id)
+    /// <summary>给出下一个可用的题目编号（现有最大编号 + 1，空题库时为 1）。</summary>
+    public Task<int> SuggestIdAsync()
         => _build.RunAsync("list", () =>
         {
-            string r = _author.Create(id);
-            bool ok = r.Contains("\"ok\":true");
-            return (ok, ok ? $"已创建题目 P{id}" : AuthorClient.ParseError(r));
+            int max = 0;
+            foreach (var it in _author.List())
+                if (it.Id > max) max = it.Id;
+            return max + 1;
         });
+
+    public Task<(bool Ok, string Message)> CreateAsync(int id, string title)
+        => _build.RunAsync("list", () =>
+        {
+            string r = _author.Create(id, title);
+            bool ok = r.Contains("\"ok\":true");
+            return (ok, ok ? $"已创建题目 P{id}：{title}" : AuthorClient.ParseError(r));
+        });
+
+    /// <summary>从测试数据目录自动搜索 .in/.out 填充到题目，返回 (in 数量, out 数量)。</summary>
+    public Task<(int InCount, int OutCount)> AutoFillDataAsync(int id, string sourceDir)
+        => _build.RunAsync(Gate(id), () => _author.AutoFillData(id, sourceDir));
 
     public Task<ProblemContent> LoadAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.LoadContent(id));

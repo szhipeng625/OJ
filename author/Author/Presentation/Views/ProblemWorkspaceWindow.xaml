@@ -70,6 +70,8 @@
             <TabItem Header="测试数据">
                 <DockPanel Margin="8">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="自动搜索填充" Click="OnAutoFill" Width="120" Margin="0,0,6,0"
+                                ToolTip="从测试数据目录自动搜索 .in/.out 并填充到本题"/>
                         <Button Content="导入 .in 文件" Click="OnImportIn" Width="110" Margin="0,0,6,0"/>
                         <Button Content="导入 .out 文件" Click="OnImportOut" Width="110" Margin="0,0,6,0"/>
                         <Button Content="运行标程生成答案" Click="OnGenOutputs" Width="150" Margin="0,0,6,0" ToolTip="用已编译的 std.exe 对所有 *.in 生成 *.out"/>

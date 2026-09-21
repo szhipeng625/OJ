@@ -30,6 +30,7 @@ public partial class App : Application
                 Path.GetFullPath(Path.Combine(baseDir, "server", "problems")),
             };
             string serverProblemDir = serverCandidates.FirstOrDefault(Directory.Exists) ?? serverCandidates[0];
+            string serverRoot = Path.GetDirectoryName(serverProblemDir) ?? serverProblemDir;
 
             // 服务端自有题库 / 编译临时目录（dev：Author\problems、Author\temp）
             string[] authorCandidates =
@@ -39,6 +40,8 @@ public partial class App : Application
                 Path.GetFullPath(Path.Combine(baseDir, "problems")),
             };
             string authorProblemDir = authorCandidates.FirstOrDefault(Directory.Exists) ?? authorCandidates[0];
+            string testDataDir = Path.GetFullPath(Path.Combine(authorProblemDir, "..", "testdata"));
+            try { Directory.CreateDirectory(testDataDir); } catch { /* 创建测试数据目录失败不阻塞启动 */ }
 
             string[] tempCandidates =
             {
@@ -67,6 +70,8 @@ public partial class App : Application
                 Generators = generators,
                 Contests = contests,
                 Build = build,
+                TestDataDir = testDataDir,
+                ServerRoot = serverRoot,
             };
 
             // ---- MySQL 认证（服务端强制要求） ----

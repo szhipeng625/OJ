@@ -48,8 +48,9 @@ public sealed class AuthorClient
         catch { return new(); }
     }
 
-    public string Create(int id)
-        => AuthorCoreInterop.Create(id, "新题目",
+    public string Create(int id, string? title)
+        => AuthorCoreInterop.Create(id,
+            string.IsNullOrWhiteSpace(title) ? "新题目" : title,
             "题目描述……\n\n输入格式：\n\n输出格式：\n\n样例说明：", "", "");
 
     // ===== 题面 / 元数据 =====
@@ -140,6 +141,42 @@ public sealed class AuthorClient
             n++;
         }
         return n;
+    }
+
+    /// <summary>
+    /// 从测试数据目录自动搜索 *.in / *.out 并填充到题目目录（同名文件以先搜到者为准）。
+    /// 返回 (导入的 .in 数量, 导入的 .out 数量)。
+    /// </summary>
+    public (int InCount, int OutCount) AutoFillData(int id, string sourceDir)
+    {
+        string dir = ProblemDir(id);
+        Directory.CreateDirectory(dir);
+        if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+            return (0, 0);
+
+        int inCnt = 0, outCnt = 0;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Directory.GetFiles(sourceDir, "*.in", SearchOption.AllDirectories)
+                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            string fileName = Path.GetFileName(f);
+            if (!seen.Add(fileName)) continue;
+            File.Copy(f, Path.Combine(dir, fileName), true);
+            inCnt++;
+
+            string baseName = Path.GetFileNameWithoutExtension(f);
+            string outSrc = Path.Combine(Path.GetDirectoryName(f)!, baseName + ".out");
+            if (File.Exists(outSrc))
+            {
+                string outName = Path.GetFileName(outSrc);
+                if (seen.Add(outName))
+                {
+                    File.Copy(outSrc, Path.Combine(dir, outName), true);
+                    outCnt++;
+                }
+            }
+        }
+        return (inCnt, outCnt);
     }
 
     public void DeleteDataPair(int id, string baseName)

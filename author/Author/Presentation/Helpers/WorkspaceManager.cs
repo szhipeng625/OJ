@@ -60,7 +60,7 @@ public sealed class WorkspaceManager
                     existing2.Activate();
                     return;
                 }
-                win = new ProblemWorkspaceWindow(problemId, _workbench, this);
+                win = new ProblemWorkspaceWindow(problemId, _workbench, this, _workbench.TestDataDir);
                 _open[problemId] = win;
             }
             win.Closed += (_, _) => { lock (_open) _open.Remove(problemId); };

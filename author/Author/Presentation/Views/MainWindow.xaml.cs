@@ -9,7 +9,8 @@ using author.Presentation.Helpers;
 namespace author.Presentation.Views;
 
 /// <summary>
-/// 启动器窗口：题目列表（多窗口入口）+ 比赛管理 + 全局后台任务状态。
+/// 启动器窗口：题库列表（多窗口入口）+ 新建题目（输入标题自动编号 + 自动填充测试数据）。
+/// 比赛管理不再直接展示，而是通过右上角「比赛管理」按钮打开独立窗口。
 /// 关闭本窗口即退出程序；若仍有后台编译/评测任务，必须等待全部线程结束后才真正退出。
 /// </summary>
 public partial class MainWindow : Window
@@ -30,12 +31,12 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         RootText.Text = "题库目录：" + _wb.Problems.Root;
+        DataDirBox.Text = _wb.TestDataDir;
 
         _wb.Build.PendingChanged += OnPendingChanged;
         _workspaces.ProblemListChanged += () => Dispatcher.InvokeAsync(RefreshProblems);
 
         await RefreshProblems();
-        await RefreshContests();
     }
 
     private void OnPendingChanged(int n)
@@ -48,7 +49,7 @@ public partial class MainWindow : Window
         });
     }
 
-    // ---------- 题目列表 ----------
+    // ---------- 题库列表 ----------
     private async Task RefreshProblems()
     {
         _problems = await _wb.Problems.ListAsync();
@@ -58,23 +59,34 @@ public partial class MainWindow : Window
         StatusText.Text = $"共 {_problems.Count} 道题";
     }
 
+    // ---------- 新建题目：输入标题 → 自动编号 → 自动填充测试数据 ----------
     private async void OnNewProblem(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(NewIdBox.Text.Trim(), out int id) || id <= 0)
+        string title = NewTitleBox.Text.Trim();
+        if (string.IsNullOrEmpty(title))
         {
-            StatusText.Text = "请输入合法的题目编号（正整数）";
+            StatusText.Text = "请输入题目标题";
             return;
         }
+
         IsEnabled = false;
         try
         {
-            var (ok, msg) = await _wb.Problems.CreateAsync(id);
+            int id = await _wb.Problems.SuggestIdAsync();
+            var (ok, msg) = await _wb.Problems.CreateAsync(id, title);
             StatusText.Text = msg;
-            if (ok)
-            {
-                await RefreshProblems();
-                _workspaces.Open(id);   // 新建后直接打开工作台
-            }
+            if (!ok) return;
+
+            // 自动搜索填充测试数据（.in/.out）
+            string dataDir = DataDirBox.Text.Trim();
+            var (inCnt, outCnt) = await _wb.Problems.AutoFillDataAsync(id, dataDir);
+            StatusText.Text = inCnt > 0
+                ? $"已创建 P{id}「{title}」，并自动填充 {inCnt} 个 .in / {outCnt} 个 .out 测试数据"
+                : $"已创建 P{id}「{title}」（测试数据目录 {dataDir} 中未找到 .in/.out）";
+
+            NewTitleBox.Text = "";
+            await RefreshProblems();
+            _workspaces.Open(id);   // 新建后直接打开工作台
         }
         catch (Exception ex) { StatusText.Text = "创建失败：" + ex.Message; }
         finally { IsEnabled = true; }
@@ -86,72 +98,23 @@ public partial class MainWindow : Window
             _workspaces.Open(p.Id);
     }
 
-    // ---------- 比赛 ----------
-    private async Task RefreshContests()
+    // ---------- 比赛管理（独立窗口） ----------
+    private void OnOpenContestManagement(object sender, RoutedEventArgs e)
     {
-        var items = await _wb.Contests.ListAsync();
-        if (!IsLoaded) return;
-        ContestList.ItemsSource = null;
-        ContestList.ItemsSource = items;
-        ContestList.DisplayMemberPath = nameof(ContestInfo.Display);
+        var win = new ContestManagementWindow(_wb) { Owner = this };
+        win.ShowDialog();
     }
 
-    private async void OnContestSave(object sender, RoutedEventArgs e)
+    // ---------- 测试数据目录 ----------
+    private void OnBrowseDataDir(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(ContestIdBox.Text.Trim(), out int cid) || cid <= 0)
+        var dlg = new Microsoft.Win32.OpenFolderDialog
         {
-            MessageBox.Show("请输入合法的比赛编号（正整数）");
-            return;
-        }
-        string name = ContestNameBox.Text.Trim();
-        if (string.IsNullOrEmpty(name))
-        {
-            MessageBox.Show("请输入比赛名称");
-            return;
-        }
-        var ids = ContestProblemsBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Where(s => int.TryParse(s, out _)).Select(int.Parse).ToArray();
-        var draft = new ContestDraft(cid, name, ContestStartBox.Text.Trim(), ContestEndBox.Text.Trim(), ids);
-        IsEnabled = false;
-        try
-        {
-            var r = await _wb.Contests.SaveAsync(draft);
-            ContestDetailBox.Text = r.Message;
-            if (r.Ok) await RefreshContests();
-            else MessageBox.Show(r.Message);
-        }
-        finally { IsEnabled = true; }
-    }
-
-    private async void OnContestPublish(object sender, RoutedEventArgs e)
-    {
-        if (ContestList.SelectedItem is not ContestInfo c)
-        {
-            MessageBox.Show("请先在左侧选择要发布的比赛");
-            return;
-        }
-        string target = ContestTargetBox.Text.Trim();
-        if (string.IsNullOrEmpty(target))
-        {
-            MessageBox.Show("请填写目标目录");
-            return;
-        }
-        IsEnabled = false;
-        StatusText.Text = $"正在发布比赛 C{c.Id} …";
-        try
-        {
-            var r = await _wb.Contests.PublishAsync(c.Id, target);
-            ContestDetailBox.Text = r.Message;
-            StatusText.Text = r.Ok ? $"比赛 C{c.Id} 已发布" : r.Message;
-        }
-        finally { IsEnabled = true; }
-    }
-
-    private async void OnSelectContest(object sender, SelectionChangedEventArgs e)
-    {
-        if (ContestList.SelectedItem is not ContestInfo c) return;
-        var text = await _wb.Contests.GetDetailAsync(c.Id);
-        if (IsLoaded && text is not null) ContestDetailBox.Text = text;
+            Title = "选择测试数据目录（自动搜索其中的 .in / .out 文件）",
+            InitialDirectory = DataDirBox.Text.Trim()
+        };
+        if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(dlg.FolderName))
+            DataDirBox.Text = dlg.FolderName;
     }
 
     // ---------- 退出：等待所有后台线程/任务结束 ----------

@@ -19,15 +19,17 @@ public partial class ProblemWorkspaceWindow : Window
     private readonly int _id;
     private readonly Workbench _wb;
     private readonly WorkspaceManager _mgr;
+    private readonly string _testDataDir;
     private string _genOutDir = "";
     private string _genName = "";
 
-    public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager)
+    public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager, string testDataDir = "")
     {
         InitializeComponent();
         _id = problemId;
         _wb = workbench;
         _mgr = manager;
+        _testDataDir = testDataDir;
         Title = $"P{problemId} 题目工作台";
         Loaded += async (_, _) => await LoadAllAsync();
     }
@@ -94,6 +96,20 @@ public partial class ProblemWorkspaceWindow : Window
         if (!IsLoaded) return;
         DataList.ItemsSource = pairs;
         DataList.DisplayMemberPath = nameof(DataPair.Display);
+    }
+
+    private async void OnAutoFill(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在自动搜索填充测试数据…", async () =>
+        {
+            var (inCnt, outCnt) = await _wb.Problems.AutoFillDataAsync(_id, _testDataDir);
+            if (IsLoaded)
+                DataMsg.Text = inCnt > 0
+                    ? $"自动填充完成：{inCnt} 个 .in / {outCnt} 个 .out（源目录：{_testDataDir}）"
+                    : $"未在测试数据目录找到 .in/.out：{_testDataDir}";
+            await RefreshDataList();
+            _mgr.NotifyProblemListChanged();
+        });
     }
 
     private async void OnImportIn(object sender, RoutedEventArgs e)
