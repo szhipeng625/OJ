@@ -223,3 +223,81 @@ git 历史版源码中 100% 复现定位——很可能 Ubuntu 上实际运行�
 
 > 客户端侧已彻底规避该问题：比赛提交的 sid 改用 MySQL `submissions.id`（AUTO_INCREMENT），
 > 不再依赖服务器 `INCR`。因此本 bug 不影响 OJ 正常运行，仅影响「直接在 LSM 上用 INCR」的场景。
+
+---
+
+## 六、客户端异常断连导致 lsm_server 进程崩溃（已修复）
+
+> 修复时间：2026-09-23
+> 修复文件：`server/src/server.cpp`
+> 影响面：远端 LSM 服务进程稳定性（6380 端口）
+
+### 现象
+
+1. 2026-09-22 23:59:48，`lsm.service` 进程退出（`inactive (dead)`），6380 端口不再监听。
+2. 崩溃前日志为：
+
+```
+23:54:45  [INFO] Connection from 36.21.1.178:28749
+23:59:48  [INFO] Connection closed from Exception: remote_endpoint: Transport endpoint is not connected
+23:59:48  systemd[1]: lsm.service: Deactivated successfully.
+```
+
+3. 一个客户端连接异常断开后，**整个 lsm_server 进程随之退出**（单个连接异常被放大为进程崩溃）。
+
+### 根因
+
+`server/src/server.cpp` 中 `RedisSession` 的 `do_read()` / `do_write()` / `start()` 在连接
+断开分支（`ec == eof || ec == connection_reset`）里直接调用 `socket_.remote_endpoint()`：
+
+```cpp
+if (ec == asio::error::eof || ec == asio::error::connection_reset) {
+    ASYNC_REDIS_SERVER_LOG_INFO("Connection closed from "
+        << socket_.remote_endpoint().address().to_string() << ":"   // ← 崩溃点
+        << socket_.remote_endpoint().port());
+}
+```
+
+当连接已断开/被 RST 时，`remote_endpoint()` 会抛出 `asio::system_error`
+（"Transport endpoint is not connected"）。该调用**没有 try-catch 保护**，异常从
+`asio` 异步回调一路逃逸到 `main()` 的 `try` 块，被捕获后打印
+`Exception: ...` 并直接 `return 0` —— 整个服务进程退出。
+
+本质：**单个连接的异常断连未被隔离，异常逃逸导致守护进程崩溃**。
+
+### 修复
+
+1. 新增安全获取对端地址的辅助函数，捕获异常、先判 `is_open()`：
+
+```cpp
+static std::string safe_peer(const tcp::socket &socket) {
+  try {
+    if (!socket.is_open()) return "<closed>";
+    std::error_code ec;
+    auto ep = socket.remote_endpoint(ec);
+    if (ec) return "<unavailable>";
+    return ep.address().to_string() + ":" + std::to_string(ep.port());
+  } catch (...) {
+    return "<unavailable>";
+  }
+}
+```
+
+2. `start()` / `do_read()` / `do_write()` 三处 `remote_endpoint()` 全部替换为 `safe_peer(socket_)`。
+3. `read_rest()` 中对 `handleRequest()` 的调用加 try-catch，命令处理异常返回
+   `-ERR internal error\r\n` 而非让异常逃逸。
+4. `handleRequest()` 增加 `args` 空检查，避免空请求越界访问 `args[0]`。
+
+### 验证
+
+- `make lsm_server` 编译通过。
+- 重启后 6380 正常监听。
+- 20 次 `SO_LINGER=0` RST 粗暴断连 + 残缺请求测试后，进程仍存活。
+- 异常后 `PING` 仍返回 `+PONG`，服务正常响应。
+
+### 备注
+
+- 该修复目前仅存在于 oj 服务器本地 `/home/ubuntu/lsm/lsm/server/src/server.cpp`，
+  原文件已备份为 `server.cpp.bak.*`。
+- **tiny-lsm 项目本身未纳入 git 版本管理**（`/home/ubuntu/lsm/lsm` 无 `.git`），
+  建议将 LSM 源码接入独立仓库，避免重装/重编译后丢失修复。
