@@ -42,7 +42,8 @@ public partial class App : Application
             var build = new BuildService();
             var auth = new AuthService(authClient);
             var problems = new ProblemService(authorClient, build);
-            var generators = new GeneratorService(authorClient, build);
+            var generatorClient = new GeneratorClient();
+            var generators = new GeneratorService(generatorClient, authorClient, build);
             var contests = new ContestService(contestClient, build);
             var workbench = new Workbench
             {

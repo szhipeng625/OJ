@@ -22,8 +22,9 @@ public partial class ProblemWorkspaceWindow : Window
     private readonly WorkspaceManager _mgr;
     private readonly string _testDataDir;
     private readonly string _serverProblemDir;
-    private string _genOutDir = "";
+    private int _genId;
     private string _genName = "";
+    private List<GenCheckItem> _genItems = new();
 
     public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager,
         string testDataDir = "", string serverProblemDir = "")
@@ -233,219 +234,167 @@ public partial class ProblemWorkspaceWindow : Window
         });
     }
 
-    // ---------- 数据生成（多生成器） ----------
-    // 列出本课题下所有生成器；默认选中第一个并加载
-    private async Task LoadGenAsync(bool selectFirst = true)
+    // ---------- 数据生成器（全局库） ----------
+    // 进入页面：从库加载全部生成器（勾选=本题使用），右侧为本题已绑定的生成器
+    private async Task LoadGenAsync()
     {
-        var gens = await _wb.Generators.ListAsync(_id);
+        var lib = await _wb.Generators.ListAsync();
+        var used = await _wb.Generators.ListUsedAsync(_id);
         if (!IsLoaded) return;
-        GenList.ItemsSource = gens;
-        GenList.DisplayMemberPath = nameof(GenSummary.Display);
-        GenFileView.Text = "";
+
+        var usedIds = new HashSet<int>(used.Select(u => u.Id));
+        _genItems = lib
+            .Select(g => new GenCheckItem(g.Id, g.Name, g.Desc, usedIds.Contains(g.Id)))
+            .ToList();
+        foreach (var it in _genItems)
+        {
+            it.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(GenCheckItem.IsUsed)) OnGenItemToggled(it);
+            };
+        }
+        GenList.ItemsSource = _genItems;
+        UpdateUsedList();
         GenMsg.Text = "";
-        GenList.SelectedIndex = -1;
-        if (selectFirst && gens.Count > 0)
-        {
-            GenList.SelectedIndex = 0;              // 触发 OnSelectGenerator（_busy 中会被跳过）
-            if (_busy) await LoadSelectedGeneratorAsync();
-        }
-        else
-        {
-            _genName = "";
-            GenBox.Text = "";
-            GenDescBox.Text = "";
-            GenPathText.Text = "";
-            GenFileList.ItemsSource = null;
-            GenFileTitle.Text = "生成的数据文件";
-        }
+        CloseGenEditor();
     }
 
-    // 选中某生成器后：加载其代码 / 描述 / 路径 / 版本 / 数据文件
-    private async Task LoadSelectedGeneratorAsync()
+    private void UpdateUsedList()
     {
-        if (GenList.SelectedItem is not GenSummary g)
-        {
-            _genName = "";
-            GenBox.Text = "";
-            GenDescBox.Text = "";
-            GenPathText.Text = "";
-            GenFileList.ItemsSource = null;
-            GenFileTitle.Text = "生成的数据文件";
-            return;
-        }
-        _genName = g.Name;
-        var ws = await _wb.Generators.LoadAsync(_id, _genName);
-        if (!IsLoaded) return;
-        GenBox.Text = ws.Code;
-        GenDescBox.Text = ws.Desc;
-        _genOutDir = ws.OutDir;
-        GenPathText.Text = ws.GenPath;
-        await RefreshGenFiles();
+        var used = _genItems.Where(x => x.IsUsed).ToList();
+        UsedGenList.ItemsSource = used;
+        GenUsedTitle.Text = used.Count > 0 ? $"本题使用的数据生成器（{used.Count} 个）" : "本题使用的数据生成器";
     }
 
-
-    private async Task RefreshGenFiles()
+    // 勾选变化：刷新右侧列表并绑定/解绑到本题
+    private async void OnGenItemToggled(GenCheckItem item)
     {
-        if (string.IsNullOrEmpty(_genName)) { GenFileList.ItemsSource = null; return; }
-        var list = await _wb.Generators.FilesAsync(_id, _genName);
-        if (!IsLoaded) return;
-        GenFileList.ItemsSource = list;
-        GenFileList.DisplayMemberPath = nameof(GenFile.Display);
-        GenFileTitle.Text = $"生成的数据文件（{_genOutDir}）  共 {list.Count} 个";
+        UpdateUsedList();
+        int n = int.TryParse(GenCountBox.Text.Trim(), out var g) && g > 0 ? g : 10;
+        var r = item.IsUsed
+            ? await _wb.Generators.BindAsync(_id, item.Id, n)
+            : await _wb.Generators.UnbindAsync(_id, item.Id);
+        if (IsLoaded) GenMsg.Text = r.Message;
     }
 
-    // 新建生成器（名字 + 描述取自顶部两个输入框）
+    // 打开某生成器的代码编辑器
+    private async Task OpenGenEditorAsync(int id, string name)
+    {
+        _genId = id;
+        _genName = name;
+        var d = await _wb.Generators.LoadAsync(id);
+        if (!IsLoaded || d == null) return;
+        GenBox.Text = d.Code;
+        GenDescBox.Text = d.Desc;
+        GenPathText.Text = d.Name;
+        GenEditPanel.Visibility = Visibility.Visible;
+    }
+
+    private void CloseGenEditor()
+    {
+        _genId = 0;
+        _genName = "";
+        GenBox.Text = "";
+        GenDescBox.Text = "";
+        GenPathText.Text = "";
+        GenEditPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnCloseGenEdit(object sender, RoutedEventArgs e) => CloseGenEditor();
+
+    // 双击左侧条目打开编辑器
+    private async void OnGenListDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (GenList.SelectedItem is GenCheckItem g)
+            await OpenGenEditorAsync(g.Id, g.Name);
+    }
+
+    // 新建生成器：弹窗命名+描述，保存后关闭；自动勾选并打开编辑器
     private async void OnNewGenerator(object sender, RoutedEventArgs e)
     {
-        string name = GenNewNameBox.Text.Trim();
-        if (string.IsNullOrEmpty(name))
-        {
-            GenMsg.Text = "请先在右侧输入生成器名称（如 juhua / lian，字母数字下划线）";
-            return;
-        }
-        string desc = GenNewDescBox.Text.Trim();
+        var win = new NewGeneratorWindow(name => _genItems.Any(x =>
+            string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))) { Owner = this };
+        if (win.ShowDialog() != true || win.GenName is not { } name) return;
+
+        string desc = win.GenDesc ?? "";
         await RunBusy("正在创建生成器…", async () =>
         {
-            var r = await _wb.Generators.CreateAsync(_id, name, desc);
-            if (IsLoaded) GenMsg.Text = r.Message;
-            await LoadGenAsync(selectFirst: false);
-            int idx = -1;
-            for (int i = 0; i < GenList.Items.Count; i++)
-                if (GenList.Items[i] is GenSummary gs && gs.Name == name) { idx = i; break; }
-            if (idx >= 0)
+            var r = await _wb.Generators.CreateAsync(name, desc);
+            if (!r.Ok)
             {
-                GenList.SelectedIndex = idx;       // _busy 中事件会被跳过
-                if (_busy) await LoadSelectedGeneratorAsync();
+                if (IsLoaded) GenMsg.Text = r.Message;
+                return;
             }
+            await LoadGenAsync();
+            var item = _genItems.FirstOrDefault(x => x.Id == r.Id);
+            if (item != null) item.IsUsed = true;   // 触发 OnGenItemToggled：绑定到本题
+            await OpenGenEditorAsync(r.Id, name);
+            if (IsLoaded) GenMsg.Text = r.Message;
         });
     }
 
     // 复刷生成器列表
     private async void OnRefreshGenerators(object sender, RoutedEventArgs e) => await LoadGenAsync();
 
-    // 在列表中选中某个生成器
-    private async void OnSelectGenerator(object sender, SelectionChangedEventArgs e)
-    {
-        if (_busy) return;
-        await LoadSelectedGeneratorAsync();
-    }
-
     // 保存生成器描述
     private async void OnGenSaveDesc(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
-        string keep = _genName;
+        if (_genId <= 0) { GenMsg.Text = "请先双击一个生成器打开编辑器"; return; }
+        int keepId = _genId;
+        string keepName = _genName;
         await RunBusy("正在保存描述…", async () =>
         {
-            var r = await _wb.Generators.SetDescAsync(_id, keep, GenDescBox.Text.Trim());
+            var r = await _wb.Generators.SetDescAsync(keepId, GenDescBox.Text.Trim());
             if (IsLoaded) GenMsg.Text = r.Message;
-            await LoadGenAsync(selectFirst: false);
-            int idx = -1;
-            for (int i = 0; i < GenList.Items.Count; i++)
-                if (GenList.Items[i] is GenSummary gs && gs.Name == keep) { idx = i; break; }
-            if (idx >= 0)
-            {
-                GenList.SelectedIndex = idx;
-                if (_busy) await LoadSelectedGeneratorAsync();
-            }
+            await LoadGenAsync();
+            await OpenGenEditorAsync(keepId, keepName);
         });
     }
 
     private async void OnGenSave(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
+        if (_genId <= 0) { GenMsg.Text = "请先双击一个生成器打开编辑器"; return; }
         string code = GenBox.Text;
         await RunBusy("正在保存生成器代码…", async () =>
         {
-            var r = await _wb.Generators.SaveAsync(_id, _genName, code);
+            var r = await _wb.Generators.SaveAsync(_genId, code);
             if (IsLoaded) GenMsg.Text = r.Message;
         });
     }
 
     private async void OnGenCompile(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
+        if (_genId <= 0) { GenMsg.Text = "请先双击一个生成器打开编辑器"; return; }
         string code = GenBox.Text;
         await RunBusy("正在编译生成器（g++）…", async () =>
         {
-            var r = await _wb.Generators.CompileAsync(_id, _genName, code);
+            var r = await _wb.Generators.CompileAsync(_genId, _genName, code);
             if (IsLoaded) GenMsg.Text = r.Message;
         });
     }
 
+    // 生成数据：对勾选的全部生成器运行，弹出窗口展示各生成器的生成情况
     private async void OnGenRun(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
-        int n = int.TryParse(GenCountBox.Text.Trim(), out var g) && g > 0 ? g : 10;
-        await RunBusy("正在保存并运行生成器…", async () =>
+        var used = _genItems.Where(x => x.IsUsed).ToList();
+        if (used.Count == 0)
         {
-            var sv = await _wb.Generators.SaveAsync(_id, _genName, GenBox.Text);
-            if (!sv.Ok) { if (IsLoaded) GenMsg.Text = sv.Message; return; }
-            var r = await _wb.Generators.RunAsync(_id, _genName, n);
-            if (!r.Ok)
-            {
-                if (IsLoaded) GenMsg.Text = r.Message;
-                await RefreshGenFiles();
-                return;
-            }
-            await RefreshGenFiles();
-
-            // 后台自动运行标程，把标准程序输出重定向到对应的 .out 文件位置
-            string ans;
-            if (File.Exists(_wb.Problems.StdExePath(_id)))
-            {
-                var gr = await _wb.Problems.GenOutputsAsync(_id);
-                ans = gr.Message;
-            }
-            else
-            {
-                ans = "（标程尚未编译，未自动生成 .out；可到「生成标准答案」页一键生成）";
-            }
-            if (IsLoaded) GenMsg.Text = r.Message + "\n" + ans;
-            _mgr.NotifyProblemListChanged();
-        });
-    }
-
-
-    private async void OnSelectGenFile(object sender, SelectionChangedEventArgs e)
-    {
-        if (GenFileList.SelectedItem is not GenFile gf) return;
-        if (string.IsNullOrEmpty(_genName)) return;
-        var (text, truncated) = await _wb.Generators.GetFileAsync(_id, _genName, gf.Name);
-        if (!IsLoaded) return;
-        GenFileView.Text = truncated
-            ? text + "\n……（文件过大，仅显示前 200KB，请在资源管理器中查看完整文件）"
-            : text;
-    }
-
-    private async void OnRefreshGenFiles(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrEmpty(_genName)) { GenMsg.Text = "请先选择一个生成器"; return; }
-        await RefreshGenFiles();
-    }
-
-    private void OnOpenGenDir(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrEmpty(_genOutDir)) return;
-        Directory.CreateDirectory(_genOutDir);
-        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_genOutDir}\"") { UseShellExecute = true });
-    }
-
-    private async void OnGenImportToProblem(object sender, RoutedEventArgs e)
-    {
-        if (GenFileList.SelectedItem is not GenFile gf)
-        {
-            GenMsg.Text = "请先在右下数据文件列表中选择一个 .in 文件";
+            GenMsg.Text = "请先在左侧勾选本题要使用的数据生成器";
             return;
         }
-        if (string.IsNullOrEmpty(_genName)) return;
-        await RunBusy("正在导入到题目测试数据…", async () =>
+        int n = int.TryParse(GenCountBox.Text.Trim(), out var g) && g > 0 ? g : 10;
+        // 确保本题绑定的组数与当前输入一致
+        foreach (var it in used) await _wb.Generators.BindAsync(_id, it.Id, n);
+
+        var win = new GeneratorRunWindow(_wb, _id, used.Select(x => (x.Id, x.Name)).ToList(), n) { Owner = this };
+        win.Closed += async (_, _) =>
         {
-            var r = await _wb.Generators.ImportToProblemAsync(_id, _genName, gf.Name);
-            if (IsLoaded) GenMsg.Text = r.Message;
+            if (!IsLoaded) return;
+            await LoadGenAsync();          // 刷新列表
             await RefreshDataList();
             _mgr.NotifyProblemListChanged();
-        });
+        };
+        win.Show();
     }
 
     // ---------- 跨题查找 ----------
@@ -463,11 +412,10 @@ public partial class ProblemWorkspaceWindow : Window
             MessageBox.Show("请输入要查找的关键字（函数名、变量名、注释内容等）", "查找生成器代码");
             return;
         }
-        List<SearchHit> hits;
+        List<GenSearchHit> hits;
         try
         {
-            var problems = await _wb.Problems.ListAsync();
-            hits = await _wb.Generators.SearchAsync(kw, problems);
+            hits = await _wb.Generators.SearchAsync(kw);
         }
         catch (Exception ex)
         {
@@ -476,13 +424,13 @@ public partial class ProblemWorkspaceWindow : Window
         }
         if (hits.Count == 0)
         {
-            MessageBox.Show("没有任何题目的生成器代码包含 " + kw, "查找结果");
+            MessageBox.Show("没有生成器代码包含 " + kw, "查找结果");
             return;
         }
         var w = new GenSearchWindow(hits, kw) { Owner = this };
-        if (w.ShowDialog() == true && w.Selected is SearchHit h)
+        if (w.ShowDialog() == true && w.Selected is GenSearchHit h)
         {
-            _mgr.Open(h.Pid);   // 多窗口：跳转到对应题目的工作台（已打开则激活）
+            await OpenGenEditorAsync(h.Id, h.Name);
         }
     }
 }

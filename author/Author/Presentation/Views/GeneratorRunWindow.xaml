@@ -1,0 +1,37 @@
+<Window x:Class="author.Presentation.Views.GeneratorRunWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="生成数据" Height="620" Width="880"
+        WindowStartupLocation="CenterOwner" FontSize="13">
+    <DockPanel Margin="10">
+        <TextBlock DockPanel.Dock="Top" x:Name="SummaryText" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="#2d8cf0"/>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button Content="关闭" Width="90" IsCancel="True" Click="OnClose"/>
+        </StackPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="0.85*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：生成情况 + 目录（懒加载：点击展开才读取目录） -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="生成情况（点击生成器展开文件目录，点击文件右侧预览）："
+                           Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                <TreeView x:Name="GenTree" BorderThickness="1" BorderBrush="#FFE3E6EB"
+                          SelectedItemChanged="OnTreeSelected"/>
+            </DockPanel>
+
+            <!-- 右：文件内容预览 -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" x:Name="PreviewTitle" Text="文件内容（只读，超 200KB 截断）"
+                           Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                <TextBox x:Name="PreviewBox" AcceptsReturn="True" FontFamily="Consolas" FontSize="12"
+                         IsReadOnly="True" Background="#FFF7F9FC"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         TextWrapping="NoWrap"/>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

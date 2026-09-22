@@ -6,7 +6,7 @@
     <DockPanel Margin="10">
         <TextBlock DockPanel.Dock="Top" x:Name="SummaryText" TextWrapping="Wrap" Margin="0,0,0,8"/>
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-            <Button Content="转到该题" Width="100" IsDefault="True" Click="OnGo"/>
+            <Button Content="打开该生成器" Width="110" IsDefault="True" Click="OnGo"/>
             <Button Content="关闭" Width="80" Margin="8,0,0,0" IsCancel="True"/>
         </StackPanel>
         <ListBox x:Name="HitList" MouseDoubleClick="OnGo">
@@ -14,7 +14,7 @@
                 <DataTemplate>
                     <StackPanel Margin="2">
                         <TextBlock FontWeight="Bold">
-                            <Run Text="P"/><Run Text="{Binding Pid, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Title, Mode=OneWay}"/>
+                            <Run Text="{Binding Name, Mode=OneWay}"/>
                             <Run Text="  · 第 "/><Run Text="{Binding LineNo, Mode=OneWay}"/><Run Text=" 行"/>
                         </TextBlock>
                         <TextBlock FontFamily="Consolas" FontSize="11" Foreground="#555"

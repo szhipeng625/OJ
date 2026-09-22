@@ -128,17 +128,15 @@
                 </Grid>
             </TabItem>
 
-            <!-- 数据生成 -->
-            <TabItem Header="数据生成" x:Name="GenTab">
+            <!-- 数据生成器 -->
+            <TabItem Header="数据生成器" x:Name="GenTab">
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- ① 跨题查找 -->
+                    <!-- 跨题查找 -->
                     <Border Grid.Row="0" Background="#F5F7FA" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -153,103 +151,87 @@
                         </Grid>
                     </Border>
 
-                    <!-- ② 新建生成器 -->
-                    <Border Grid.Row="1" Background="#FAFAFA" BorderBrush="#E5E7EB" BorderThickness="1"
-                            CornerRadius="4" Padding="8" Margin="0,0,0,8">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="新建：" VerticalAlignment="Center" FontWeight="SemiBold"/>
-                            <TextBox x:Name="GenNewNameBox" Width="130" VerticalContentAlignment="Center"
-                                     ToolTip="生成器名称（如 juhua / lian），字母数字下划线" Margin="4,0,0,0"/>
-                            <TextBox x:Name="GenNewDescBox" Width="220" VerticalContentAlignment="Center"
-                                     ToolTip="自定义描述（如「菊花图生成器」）" Margin="6,0,0,0"/>
-                            <Button Content="新建生成器" Width="110" Margin="8,0,0,0" Click="OnNewGenerator"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- ③ 状态条（固定高度，不挤压下方生成器界面） -->
-                    <TextBox Grid.Row="2" x:Name="GenMsg" IsReadOnly="True" BorderThickness="0" Background="Transparent"
-                             Foreground="#2d8cf0" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                             Height="48" Margin="0,0,0,6"/>
-
-                    <!-- ④ 主工作区：三栏 -->
-                    <Grid Grid.Row="3">
+                    <!-- 主工作区：左=生成器库（勾选），右=本题使用 + 代码编辑 -->
+                    <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="310"/>
+                            <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="300"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- 左：生成器列表 -->
+                        <!-- 左：数据生成器库 -->
                         <DockPanel Grid.Column="0">
                             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                                <TextBlock Text="生成器" Foreground="#888" FontWeight="SemiBold"
+                                <TextBlock Text="数据生成器（勾选=本题使用）" Foreground="#888" FontWeight="SemiBold"
                                            VerticalAlignment="Center"/>
-                                <Button DockPanel.Dock="Right" Content="复刷" Width="58" HorizontalAlignment="Right"
-                                        Click="OnRefreshGenerators"/>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="刷新" Width="58" Click="OnRefreshGenerators"/>
+                                    <Button Content="新建生成器" Width="96" Margin="6,0,0,0" Click="OnNewGenerator"/>
+                                </StackPanel>
                             </DockPanel>
-                            <ListBox x:Name="GenList" SelectionChanged="OnSelectGenerator"/>
+                            <ListBox x:Name="GenList" MouseDoubleClick="OnGenListDoubleClick">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsUsed, Mode=TwoWay}" Content="{Binding Display}"
+                                                  VerticalAlignment="Center" Margin="2"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </DockPanel>
 
-                        <!-- 中：代码编辑 -->
-                        <Grid Grid.Column="1" Margin="12,0,0,0">
+                        <!-- 右：本题使用的生成器 + 代码编辑 -->
+                        <Grid Grid.Column="2">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-                            <!-- 按钮行 -->
-                            <DockPanel Grid.Row="0" Margin="0,0,0,6">
-                                <TextBlock x:Name="GenPathText" Foreground="#888" TextWrapping="Wrap"
-                                           VerticalAlignment="Center"/>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button Content="保存代码" Width="90" Click="OnGenSave"/>
-                                    <Button Content="编译" Width="70" Margin="6,0,0,0" Click="OnGenCompile"/>
-                                    <TextBlock Text="组数" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                    <TextBox x:Name="GenCountBox" Width="48" VerticalContentAlignment="Center"
-                                             Text="10" Margin="4,0,0,0"
-                                             ToolTip="本次生成的数据组数 n（生成器 argv[3]）"/>
-                                    <Button Content="生成数据" Width="90" Margin="6,0,0,0" Click="OnGenRun"
-                 ToolTip="每个测试点运行一次生成器，stdout 自动重定向到 1.in~n.in；生成器直接 cout 即可"/>
-                                    <Button Content="打开目录" Width="80" Margin="6,0,0,0" Click="OnOpenGenDir"/>
-                                </StackPanel>
-                            </DockPanel>
-
-                            <!-- 代码主编辑区 -->
-                            <controls:CodeEditor x:Name="GenBox" Grid.Row="1"/>
-
-                            <!-- 描述行 -->
-                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,6">
-                                <TextBlock Text="描述：" VerticalAlignment="Center"/>
-                                <TextBox x:Name="GenDescBox" Width="280" VerticalContentAlignment="Center"/>
-                                <Button Content="保存描述" Width="80" Margin="6,0,0,0" Click="OnGenSaveDesc"/>
-                            </StackPanel>
-
-                        </Grid>
-
-                        <!-- 右：数据文件列表 + 文件内容预览 -->
-                        <Grid Grid.Column="2" Margin="12,0,0,0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="180"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
+                            <!-- 右顶：本题使用 + 生成数据 -->
                             <DockPanel Grid.Row="0" Margin="0,0,0,4">
-                                <TextBlock x:Name="GenFileTitle" Foreground="#888" TextWrapping="Wrap"
+                                <TextBlock x:Name="GenUsedTitle" Text="本题使用的数据生成器" FontWeight="SemiBold"
                                            VerticalAlignment="Center"/>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button Content="导入.in" Width="70" Click="OnGenImportToProblem"/>
-                                    <Button Content="刷新" Width="58" Margin="6,0,0,0" Click="OnRefreshGenFiles"/>
+                                    <TextBlock Text="组数" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <TextBox x:Name="GenCountBox" Width="48" VerticalContentAlignment="Center"
+                                             Text="10" Margin="0,0,6,0"
+                                             ToolTip="每个生成器生成的数据组数 n（生成器 argv[3]）"/>
+                                    <Button Content="生成数据" Width="110" Click="OnGenRun"
+                                            ToolTip="对勾选的全部生成器运行，弹出窗口展示各生成器的生成情况"/>
                                 </StackPanel>
                             </DockPanel>
 
-                            <ListBox x:Name="GenFileList" Grid.Row="1" SelectionChanged="OnSelectGenFile"/>
+                            <ListBox x:Name="UsedGenList" Grid.Row="1" Height="150" Margin="0,0,0,6"
+                                     DisplayMemberPath="Display"/>
 
-                            <TextBlock Grid.Row="2" Text="文件内容（只读）" Foreground="#888" Margin="0,6,0,2"/>
+                            <TextBox Grid.Row="2" x:Name="GenMsg" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                     Foreground="#2d8cf0" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                     Height="40" Margin="0,0,0,6"/>
 
-                            <controls:CodeEditor x:Name="GenFileView" Grid.Row="3" IsReadOnly="True"/>
+                            <!-- 代码编辑区（双击生成器或新建后出现） -->
+                            <Grid Grid.Row="3" x:Name="GenEditPanel" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                                    <TextBlock x:Name="GenPathText" Foreground="#888" TextWrapping="Wrap"
+                                               VerticalAlignment="Center"/>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Content="保存代码" Width="90" Click="OnGenSave"/>
+                                        <Button Content="编译" Width="70" Margin="6,0,0,0" Click="OnGenCompile"/>
+                                        <Button Content="关闭编辑器" Width="96" Margin="6,0,0,0" Click="OnCloseGenEdit"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <controls:CodeEditor x:Name="GenBox" Grid.Row="1"/>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
+                                    <TextBlock Text="描述：" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="GenDescBox" Width="280" VerticalContentAlignment="Center"/>
+                                    <Button Content="保存描述" Width="80" Margin="6,0,0,0" Click="OnGenSaveDesc"/>
+                                </StackPanel>
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Grid>

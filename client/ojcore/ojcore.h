@@ -119,6 +119,32 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int
 // 全部题目的公开状态：{"id":true/false,...}（服务端展示未公开标记用）
 OJ_API const char* oj_mysql_problem_visibility(void);
 
+// ===== 生成器库（全局 generators 表：出题端增删改查 + 题↔生成器绑定） =====
+
+// 全部生成器：[{"id":1,"name":"juhua","description":"...","createdAt":"..."}, ...]
+OJ_API const char* oj_mysql_list_generators(void);
+
+// 单个生成器：{"ok":true,"id":1,"name":"...","code":"...","description":"..."} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_get_generator(int id);
+
+// 新建生成器（name 全局唯一，code 明文传入内部加密）：{"ok":true,"id":123} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_create_generator(const char* name, const char* code, const char* description);
+
+// 更新生成器代码/描述：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_update_generator(int id, const char* code, const char* description);
+
+// 某题已绑定的生成器：[{"id":1,"name":"juhua","genCount":10}, ...]
+OJ_API const char* oj_mysql_problem_generators(int problem_id);
+
+// 绑定（勾选）题目↔生成器，gen_count 为测试点组数：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_bind_generator(int problem_id, int generator_id, int gen_count);
+
+// 解绑（取消勾选）题目↔生成器：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_unbind_generator(int problem_id, int generator_id);
+
+// 跨生成器搜索代码（解密后扫描）：[{"id":1,"name":"juhua","lineNo":5,"line":"...","keyword":"..."}, ...]
+OJ_API const char* oj_mysql_search_generators(const char* keyword);
+
 // 发布比赛到 MySQL：contest_json 为比赛 JSON（含 name/description/startTime/endTime/problems）。
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json);

@@ -102,6 +102,17 @@ long long mysql_add_problem_generator(int problem_id, const std::string& name,
 // 清理不再被任何题目引用的孤儿生成器（发布后调用）
 void mysql_purge_orphan_generators();
 
+// ===== 生成器库（全局 generators 表：出题端增删改查 + 题↔生成器绑定） =====
+bool mysql_list_generators(std::string& out_json);
+bool mysql_get_generator(int id, std::string& out_name, std::string& out_code, std::string& out_desc);
+bool mysql_create_generator(const std::string& name, const std::string& code, const std::string& desc,
+                            long long& out_id, std::string& err);
+bool mysql_update_generator(int id, const std::string& code, const std::string& desc, std::string& err);
+bool mysql_problem_generators(int problem_id, std::string& out_json);
+bool mysql_bind_generator(int problem_id, int generator_id, int gen_count, std::string& err);
+bool mysql_unbind_generator(int problem_id, int generator_id);
+bool mysql_search_generators(const std::string& keyword, std::string& out_json);
+
 // upsert 一场比赛的 contest.json 原文
 bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err);
 

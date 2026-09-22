@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <cctype>
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "advapi32.lib")
 
@@ -424,6 +425,81 @@ bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& g
     return true;
 }
 
+// 生成器库 schema 迁移：
+//   generators 增加 name/updated_at 并加唯一名；problem_generators 删除 name 列（旧列数据先备份到 generators.name）。
+bool migrate_generator_schema(std::string& err) {
+    // 1) generators.name
+    {
+        std::string has;
+        QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE table_schema=DATABASE() AND table_name='generators' AND column_name='name'", has);
+        if (has != "1" && !ExecSQL("ALTER TABLE generators ADD COLUMN name VARCHAR(64) NOT NULL DEFAULT ''", &err))
+            return false;
+    }
+    // 2) generators.updated_at
+    {
+        std::string has;
+        QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE table_schema=DATABASE() AND table_name='generators' AND column_name='updated_at'", has);
+        if (has != "1" && !ExecSQL("ALTER TABLE generators ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", &err))
+            return false;
+    }
+    // 3) 回填 name：优先取旧 problem_generators.name，否则 gen_<id>
+    {
+        std::string hasPgName;
+        QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE table_schema=DATABASE() AND table_name='problem_generators' AND column_name='name'", hasPgName);
+        if (hasPgName == "1") {
+            ExecSQL("UPDATE generators g JOIN problem_generators pg ON pg.generator_id=g.id "
+                    "SET g.name=pg.name WHERE (g.name='' OR g.name IS NULL) AND pg.name IS NOT NULL AND pg.name<>''");
+        }
+        ExecSQL("UPDATE generators SET name=CONCAT('gen_', id) WHERE name='' OR name IS NULL");
+    }
+    // 4) 去重：同名保留最小 id，其余改名为 name_id
+    {
+        std::string dup;
+        QueryScalar("SELECT COUNT(*) FROM (SELECT name FROM generators WHERE name<>'' GROUP BY name HAVING COUNT(*)>1) t", dup);
+        if (dup == "1" || (dup != "0" && !dup.empty())) {
+            if (g_sql.mysql_query(g_conn, "SELECT id,name FROM generators WHERE name<>'' ORDER BY id") == 0) {
+                void* res = g_sql.mysql_store_result(g_conn);
+                if (res) {
+                    std::map<std::string, int> seen;
+                    std::vector<std::pair<int, std::string>> renames;
+                    char** row;
+                    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+                        int id = atoi(row[0]);
+                        std::string nm = row[1] ? row[1] : "";
+                        if (nm.empty()) continue;
+                        int& c = seen[nm];
+                        ++c;
+                        if (c > 1) renames.push_back({ id, nm + "_" + std::to_string(id) });
+                    }
+                    g_sql.mysql_free_result(res);
+                    for (auto& r : renames)
+                        ExecSQL("UPDATE generators SET name='" + SqlEscape(r.second) + "' WHERE id=" + std::to_string(r.first));
+                }
+            }
+        }
+    }
+    // 5) 唯一键
+    {
+        std::string has;
+        QueryScalar("SELECT COUNT(*) FROM information_schema.STATISTICS "
+                    "WHERE table_schema=DATABASE() AND table_name='generators' AND index_name='uq_generator_name'", has);
+        if (has != "1" && !ExecSQL("ALTER TABLE generators ADD UNIQUE KEY uq_generator_name (name)", &err))
+            return false;
+    }
+    // 6) problem_generators 删除 name 列（已备份到 generators.name）
+    {
+        std::string has;
+        QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE table_schema=DATABASE() AND table_name='problem_generators' AND column_name='name'", has);
+        if (has == "1" && !ExecSQL("ALTER TABLE problem_generators DROP COLUMN name", &err))
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 namespace oj {
@@ -534,14 +610,16 @@ bool mysql_init_schema(std::string& err) {
 ))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS generators (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(64) NOT NULL,
   code MEDIUMTEXT NOT NULL,
   description TEXT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_generator_name (name)
 ))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS problem_generators (
   problem_id INT NOT NULL,
   generator_id INT NOT NULL,
-  name VARCHAR(64) NOT NULL DEFAULT '',
   gen_count INT NOT NULL DEFAULT 0,
   seed_base INT NOT NULL DEFAULT 0,
   PRIMARY KEY (problem_id, generator_id),
@@ -628,6 +706,8 @@ bool mysql_init_schema(std::string& err) {
     }
     // 4) 匿名默认用户（未登录提交统一归到该账号；空哈希无法登录）
     if (!ExecSQL("INSERT IGNORE INTO users(username,password_hash,salt,role) VALUES('anonymous','','','user')", &err)) return false;
+    // 5) 生成器库（generators.name / problem_generators 去掉 name）
+    if (!migrate_generator_schema(err)) return false;
     return true;
 }
 
@@ -1031,6 +1111,150 @@ void mysql_purge_orphan_generators() {
     ExecSQL("DELETE FROM generators WHERE id NOT IN (SELECT generator_id FROM problem_generators)");
 }
 
+// ===== 生成器库（全局 generators 表：出题端增删改查 + 题↔生成器绑定） =====
+
+bool mysql_list_generators(std::string& out_json) {
+    if (!ExecSQL("SELECT id,name,description,created_at FROM generators ORDER BY name")) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "{\"id\":" + std::string(row[0] ? row[0] : "0")
+                 + ",\"name\":\"" + jsonEscRow(row[1] ? row[1] : "") + "\""
+                 + ",\"description\":\"" + jsonEscRow(row[2] ? row[2] : "") + "\""
+                 + ",\"createdAt\":\"" + (row[3] ? row[3] : "") + "\"}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
+
+bool mysql_get_generator(int id, std::string& out_name, std::string& out_code, std::string& out_desc) {
+    std::string sql = "SELECT name,code,description FROM generators WHERE id=" + std::to_string(id);
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    char** row = g_sql.mysql_fetch_row(res);
+    if (!row) { g_sql.mysql_free_result(res); return false; }
+    out_name = row[0] ? row[0] : "";
+    out_code = decrypt_blob(row[1] ? row[1] : "");
+    out_desc = row[2] ? row[2] : "";
+    g_sql.mysql_free_result(res);
+    return true;
+}
+
+bool mysql_create_generator(const std::string& name, const std::string& code, const std::string& desc,
+                            long long& out_id, std::string& err) {
+    std::string enc = encrypt_blob(code);
+    std::string sql = "INSERT INTO generators(name,code,description) VALUES('"
+        + SqlEscape(name) + "','" + SqlEscape(enc) + "','" + SqlEscape(desc) + "')";
+    if (!ExecSQL(sql, &err)) {
+        if (g_sql.mysql_errno && g_sql.mysql_errno(g_conn) == 1062) err = "生成器名字已存在";
+        return false;
+    }
+    out_id = g_sql.mysql_insert_id ? (long long)g_sql.mysql_insert_id(g_conn) : 0;
+    return out_id > 0;
+}
+
+bool mysql_update_generator(int id, const std::string& code, const std::string& desc, std::string& err) {
+    std::string enc = encrypt_blob(code);
+    std::string sql = "UPDATE generators SET code='" + SqlEscape(enc)
+        + "', description='" + SqlEscape(desc) + "' WHERE id=" + std::to_string(id);
+    return ExecSQL(sql, &err);
+}
+
+bool mysql_problem_generators(int problem_id, std::string& out_json) {
+    std::string sql = "SELECT g.id, g.name, pg.gen_count FROM problem_generators pg "
+                      "JOIN generators g ON g.id=pg.generator_id WHERE pg.problem_id="
+                      + std::to_string(problem_id) + " ORDER BY g.name";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "{\"id\":" + std::string(row[0] ? row[0] : "0")
+                 + ",\"name\":\"" + jsonEscRow(row[1] ? row[1] : "") + "\""
+                 + ",\"genCount\":" + std::string(row[2] ? row[2] : "0") + "}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
+
+bool mysql_bind_generator(int problem_id, int generator_id, int gen_count, std::string& err) {
+    if (gen_count <= 0) gen_count = 10;
+    // 确定性种子基准：由题目编号与生成器名字哈希组合，保证所有客户端生成同一份数据
+    std::string name;
+    if (!QueryScalar("SELECT name FROM generators WHERE id=" + std::to_string(generator_id), name) || name.empty()) {
+        err = "生成器不存在";
+        return false;
+    }
+    unsigned long long gh = HashString(name);
+    int seedBase = (int)(((unsigned long long)problem_id * 1000003ull + gh) & 0x7fffffff);
+    std::string sql = "INSERT INTO problem_generators(problem_id,generator_id,gen_count,seed_base) VALUES("
+        + std::to_string(problem_id) + "," + std::to_string(generator_id) + ","
+        + std::to_string(gen_count) + "," + std::to_string(seedBase) + ") "
+        "ON DUPLICATE KEY UPDATE gen_count=VALUES(gen_count), seed_base=VALUES(seed_base)";
+    return ExecSQL(sql, &err);
+}
+
+bool mysql_unbind_generator(int problem_id, int generator_id) {
+    return ExecSQL("DELETE FROM problem_generators WHERE problem_id=" + std::to_string(problem_id)
+                   + " AND generator_id=" + std::to_string(generator_id));
+}
+
+bool mysql_search_generators(const std::string& keyword, std::string& out_json) {
+    if (keyword.empty()) return false;
+    std::string sql = "SELECT id,name,code FROM generators ORDER BY name";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    std::string kw = keyword;
+    for (char& c : kw) c = (char)tolower((unsigned char)c);
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        int id = atoi(row[0]);
+        std::string name = row[1] ? row[1] : "";
+        std::string code = decrypt_blob(row[2] ? row[2] : "");
+        std::istringstream iss(code);
+        std::string line;
+        int lineNo = 0, n = 0;
+        while (std::getline(iss, line) && n < 30) {
+            ++lineNo;
+            std::string ll = line;
+            for (char& c : ll) c = (char)tolower((unsigned char)c);
+            if (ll.find(kw) != std::string::npos) {
+                std::string t = line;
+                size_t a = t.find_first_not_of(" \t\r\n");
+                if (a != std::string::npos) t = t.substr(a);
+                size_t b = t.find_last_not_of(" \t\r\n");
+                if (b != std::string::npos) t = t.substr(0, b + 1);
+                if (!first) out_json += ",";
+                first = false;
+                out_json += "{\"id\":" + std::to_string(id)
+                         + ",\"name\":\"" + jsonEscRow(name) + "\""
+                         + ",\"lineNo\":" + std::to_string(lineNo)
+                         + ",\"line\":\"" + jsonEscRow(t) + "\""
+                         + ",\"keyword\":\"" + jsonEscRow(keyword) + "\"}";
+                ++n;
+            }
+        }
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
+
 bool mysql_problem_visibility(std::string& out_json) {
     std::string sql = "SELECT id, is_public FROM problems ORDER BY id";
     if (!ExecSQL(sql)) return false;
@@ -1144,9 +1368,9 @@ bool mysql_sync_problems(const std::string& problem_dir, const std::string& serv
             if (!stdCode.empty()) WriteFileBin(dir + "\\std.cpp", stdCode);
 
             // 读取该题全部生成器（JOIN generators），解密后落盘 gen.cpp / desc.txt
-            std::string gq = "SELECT pg.name, pg.gen_count, pg.seed_base, g.code, g.description "
+            std::string gq = "SELECT g.name, pg.gen_count, pg.seed_base, g.code, g.description "
                              "FROM problem_generators pg JOIN generators g ON g.id=pg.generator_id "
-                             "WHERE pg.problem_id=" + std::to_string(id) + " ORDER BY pg.name";
+                             "WHERE pg.problem_id=" + std::to_string(id) + " ORDER BY g.name";
             std::vector<GenInfo> allGens, regenGens;
             if (g_sql.mysql_query(g_conn, gq.c_str()) == 0) {
                 void* gres = g_sql.mysql_store_result(g_conn);

@@ -887,54 +887,9 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int
                                   meta.tagsJson.empty() ? "[]" : meta.tagsJson, stdCode,
                                   is_public != 0, err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
-    if (!oj::mysql_clear_problem_generators(id))
-        return dup("{\"ok\":false,\"error\":\"清空旧生成器失败\"}");
 
-    // 扫描生成器子目录（含 gen.cpp），上传源码 + 描述 + 组数 + 确定性种子
-    std::vector<std::string> genNames;
-    {
-        std::string pat = dir + "\\*";
-        WIN32_FIND_DATAA fd;
-        HANDLE h = FindFirstFileA(pat.c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-                std::string n = fd.cFileName;
-                if (n == "." || n == ".." || n == "history" || n == "gen_history") continue;
-                if (exists(dir + "\\" + n + "\\gen.cpp")) genNames.push_back(n);
-            } while (FindNextFileA(h, &fd));
-            FindClose(h);
-        }
-    }
-    std::sort(genNames.begin(), genNames.end());
-
-    int uploaded = 0;
-    for (auto& gname : genNames) {
-        std::string gdir = dir + "\\" + gname;
-        std::string code = readFile(gdir + "\\gen.cpp");
-        std::string gdesc = readFile(gdir + "\\desc.txt");
-        int count = 0;
-        {
-            std::string pat = gdir + "\\*.in";
-            WIN32_FIND_DATAA fd;
-            HANDLE h = FindFirstFileA(pat.c_str(), &fd);
-            if (h != INVALID_HANDLE_VALUE) {
-                do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) ++count; }
-                while (FindNextFileA(h, &fd));
-                FindClose(h);
-            }
-        }
-        // 确定性种子基准：由题目编号与生成器名哈希组合，保证所有客户端生成同一份数据
-        unsigned long long gh = 5381;
-        for (unsigned char c : gname) gh = gh * 33 + c;
-        int seedBase = (int)((id * 1000003ull + gh) & 0x7fffffff);
-
-        if (oj::mysql_add_problem_generator(id, gname, code, gdesc, count, seedBase) <= 0)
-            return dup("{\"ok\":false,\"error\":\"写入生成器失败：" + jsonEscape(gname) + "\"}");
-        ++uploaded;
-    }
-    oj::mysql_purge_orphan_generators();
-    return dup("{\"ok\":true,\"generators\":" + std::to_string(uploaded) + "}");
+    // 生成器绑定由「数据生成器」页直接维护（problem_generators），发布只更新题面/元数据/标程。
+    return dup("{\"ok\":true}");
 }
 
 OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json) {
@@ -978,6 +933,72 @@ OJ_API const char* oj_mysql_problem_visibility(void) {
     std::string out;
     if (oj::mysql_problem_visibility(out)) return dup(out);
     return dup("{}");
+}
+
+// ===== 生成器库（全局 generators 表） =====
+
+OJ_API const char* oj_mysql_list_generators(void) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_list_generators(out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_mysql_get_generator(int id) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string name, code, desc;
+    if (oj::mysql_get_generator(id, name, code, desc))
+        return dup("{\"ok\":true,\"id\":" + std::to_string(id)
+                 + ",\"name\":\"" + jsonEscape(name) + "\""
+                 + ",\"code\":\"" + jsonEscape(code) + "\""
+                 + ",\"description\":\"" + jsonEscape(desc) + "\"}");
+    return dup("{\"ok\":false,\"error\":\"生成器不存在\"}");
+}
+
+OJ_API const char* oj_mysql_create_generator(const char* name, const char* code, const char* description) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    long long id = 0;
+    if (oj::mysql_create_generator(name ? name : "", code ? code : "", description ? description : "", id, err))
+        return dup("{\"ok\":true,\"id\":" + std::to_string(id) + "}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_mysql_update_generator(int id, const char* code, const char* description) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    if (oj::mysql_update_generator(id, code ? code : "", description ? description : "", err))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_mysql_problem_generators(int problem_id) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_problem_generators(problem_id, out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_mysql_bind_generator(int problem_id, int generator_id, int gen_count) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    if (oj::mysql_bind_generator(problem_id, generator_id, gen_count, err))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_mysql_unbind_generator(int problem_id, int generator_id) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    if (oj::mysql_unbind_generator(problem_id, generator_id))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"解绑失败\"}");
+}
+
+OJ_API const char* oj_mysql_search_generators(const char* keyword) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_search_generators(keyword ? keyword : "", out)) return dup(out);
+    return dup("[]");
 }
 
 OJ_API const char* oj_register(const char* username, const char* password, const char* role) {

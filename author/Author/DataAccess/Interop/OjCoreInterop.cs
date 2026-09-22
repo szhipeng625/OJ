@@ -40,6 +40,32 @@ public static class OjCoreInterop
     private static extern IntPtr oj_mysql_problem_visibility();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_list_generators();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_get_generator(int id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_create_generator([MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string code, [MarshalAs(UnmanagedType.LPUTF8Str)] string description);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_update_generator(int id,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string code, [MarshalAs(UnmanagedType.LPUTF8Str)] string description);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_problem_generators(int problem_id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_bind_generator(int problem_id, int generator_id, int gen_count);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_unbind_generator(int problem_id, int generator_id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_search_generators([MarshalAs(UnmanagedType.LPUTF8Str)] string keyword);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_publish_contest(int cid,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string contest_json);
 
@@ -75,6 +101,47 @@ public static class OjCoreInterop
     public static string ProblemVisibilityJson()
     {
         lock (Lock) return Take(oj_mysql_problem_visibility());
+    }
+
+    // ===== 生成器库（全局 generators 表） =====
+    public static string ListGeneratorsJson()
+    {
+        lock (Lock) return Take(oj_mysql_list_generators());
+    }
+
+    public static string GetGeneratorJson(int id)
+    {
+        lock (Lock) return Take(oj_mysql_get_generator(id));
+    }
+
+    public static string CreateGeneratorJson(string name, string code, string desc)
+    {
+        lock (Lock) return Take(oj_mysql_create_generator(name, code, desc));
+    }
+
+    public static string UpdateGeneratorJson(int id, string code, string desc)
+    {
+        lock (Lock) return Take(oj_mysql_update_generator(id, code, desc));
+    }
+
+    public static string ProblemGeneratorsJson(int problemId)
+    {
+        lock (Lock) return Take(oj_mysql_problem_generators(problemId));
+    }
+
+    public static string BindGeneratorJson(int problemId, int generatorId, int genCount)
+    {
+        lock (Lock) return Take(oj_mysql_bind_generator(problemId, generatorId, genCount));
+    }
+
+    public static string UnbindGeneratorJson(int problemId, int generatorId)
+    {
+        lock (Lock) return Take(oj_mysql_unbind_generator(problemId, generatorId));
+    }
+
+    public static string SearchGeneratorsJson(string keyword)
+    {
+        lock (Lock) return Take(oj_mysql_search_generators(keyword));
     }
 
     public static string PublishContest(int cid, string contestJson)

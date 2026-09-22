@@ -116,4 +116,17 @@ AC_API const char* ac_gen_search(const char* keyword);
 // 把某生成器生成的 .in 文件导入到题目根目录，{"ok":true}
 AC_API const char* ac_gen_import_to_problem(int id, const char* name, const char* filename);
 
+// ===== 数据生成器本地测试（DB 代码 → 临时目录编译运行，不触碰题库目录） =====
+// id = 生成器 id（仅作临时目录命名空间），name = 生成器名字
+AC_API const char* ac_gen_test_compile(int id, const char* name, const char* code);
+AC_API const char* ac_gen_test_run(int id, const char* name, int n);
+AC_API const char* ac_gen_test_files(int id, const char* name);
+AC_API const char* ac_gen_test_file(int id, const char* name, const char* file);
+
+// 读取本题勾选使用的生成器（返回 JSON 数组，如 ["juhua","lian"]；只保留仍然存在的名字）
+AC_API const char* ac_gen_get_used(int id);
+
+// 保存本题勾选使用的生成器（names_json 为 JSON 数组，如 ["juhua","lian"]，覆盖写 gen_used.txt）
+AC_API const char* ac_gen_set_used(int id, const char* names_json);
+
 }

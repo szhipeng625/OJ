@@ -102,6 +102,24 @@ public static class AuthorCoreInterop
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr ac_gen_import_to_problem(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string filename);
 
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_test_compile(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string code);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_test_run(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int n);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_test_files(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_test_file(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string file);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_get_used(int id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr ac_gen_set_used(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string names_json);
+
 
     private static string Take(IntPtr p)
     {
@@ -142,4 +160,10 @@ public static void GenSetTemp(string tempDir) => ac_gen_set_temp(tempDir);
     public static string GenGetFile(int id, string name, string file) => Take(ac_gen_get_file(id, name, file));
     public static string GenSearch(string keyword) => Take(ac_gen_search(keyword));
     public static string GenImportToProblem(int id, string name, string filename) => Take(ac_gen_import_to_problem(id, name, filename));
+    public static string GenTestCompile(int id, string name, string code) => Take(ac_gen_test_compile(id, name, code));
+    public static string GenTestRun(int id, string name, int n) => Take(ac_gen_test_run(id, name, n));
+    public static string GenTestFiles(int id, string name) => Take(ac_gen_test_files(id, name));
+    public static string GenTestFile(int id, string name, string file) => Take(ac_gen_test_file(id, name, file));
+    public static string GenGetUsed(int id) => Take(ac_gen_get_used(id));
+    public static string GenSetUsed(int id, string namesJson) => Take(ac_gen_set_used(id, namesJson));
 }

@@ -116,6 +116,7 @@ namespace author.Presentation.Controls
             };
             Editor.TextArea.TextEntering += TextArea_TextEntering;
             Editor.TextArea.KeyDown += TextArea_KeyDown;
+            Editor.TextArea.PreviewKeyDown += TextArea_PreviewKeyDown;
         }
 
         // 高亮定义名称（XSHD 插件，见 Presentation/Highlighting/CppDarkPlus.xshd）
@@ -275,6 +276,49 @@ namespace author.Presentation.Controls
             {
                 e.Handled = true;
                 ShowCompletion();
+            }
+        }
+
+        // 纯文本（题目描述 Markdown）模式：Tab 只缩进当前行，避免 AvalonEdit 默认的
+        // “选区/整段缩进”导致下面几行跟着一起缩进。
+        private void TextArea_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!IsLight || e.Key != Key.Tab) return;
+            e.Handled = true;
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                OutdentCurrentLine();
+            else
+                InsertTabIndent();
+        }
+
+        private void InsertTabIndent()
+        {
+            var ta = Editor.TextArea;
+            int offset = ta.Caret.Offset;
+            if (!ta.Selection.IsEmpty)
+            {
+                // 只缩进当前行：把选区折叠到起点，避免整段缩进
+                offset = ta.Selection.SurroundingSegment.Offset;
+                ta.Selection = Selection.Create(ta, offset, offset);
+            }
+            ta.Document.Insert(offset, "\t");
+            ta.Caret.Offset = offset + 1;
+        }
+
+        private void OutdentCurrentLine()
+        {
+            var ta = Editor.TextArea;
+            var doc = ta.Document;
+            var line = doc.GetLineByOffset(ta.Caret.Offset);
+            string text = doc.GetText(line.Offset, line.Length);
+            int indent = text.StartsWith("\t") ? 1
+                : text.StartsWith("    ") ? 4
+                : text.StartsWith("  ") ? 2 : 0;
+            if (indent > 0)
+            {
+                int caretCol = ta.Caret.Column;
+                doc.Remove(line.Offset, indent);
+                ta.Caret.Column = Math.Max(1, caretCol - indent);
             }
         }
 

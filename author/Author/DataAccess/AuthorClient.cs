@@ -316,6 +316,57 @@ public sealed class AuthorClient
 
     public string GenImportToProblem(int id, string name, string filename) => AuthorCoreInterop.GenImportToProblem(id, name, filename);
 
+    /// <summary>读取本题勾选使用的生成器名字列表（只保留仍然存在的名字）。</summary>
+    public List<string> GetUsedGenerators(int id)
+    {
+        var list = new List<string>();
+        try
+        {
+            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenGetUsed(id));
+            foreach (var x in doc.RootElement.EnumerateArray())
+            {
+                if (x.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(x.GetString()))
+                    list.Add(x.GetString()!);
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    /// <summary>覆盖保存本题勾选使用的生成器名字列表。</summary>
+    public void SetUsedGenerators(int id, IEnumerable<string> names)
+    {
+        string json = "[" + string.Join(",", names.Select(n => "\"" + n.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"")) + "]";
+        AuthorCoreInterop.GenSetUsed(id, json);
+    }
+
+    // ===== 生成器本地测试（DB 代码 → 临时目录编译运行） =====
+    public string GenTestCompile(int id, string name, string code) => AuthorCoreInterop.GenTestCompile(id, name, code);
+
+    public string GenTestRun(int id, string name, int n) => AuthorCoreInterop.GenTestRun(id, name, n);
+
+    public List<GenFile> ListGenTestFiles(int id, string name)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<GenFile>>(AuthorCoreInterop.GenTestFiles(id, name), JsonOpts) ?? new();
+        }
+        catch { return new(); }
+    }
+
+    public (string text, bool truncated) GetGenTestFile(int id, string name, string file)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(AuthorCoreInterop.GenTestFile(id, name, file));
+            var r = doc.RootElement;
+            string text = r.TryGetProperty("content", out var c) ? c.GetString() ?? "" : "";
+            bool truncated = r.TryGetProperty("truncated", out var tr) && tr.GetBoolean();
+            return (text, truncated);
+        }
+        catch { return ("", false); }
+    }
+
     /// <summary>跨题在所有题目的生成器代码中查找关键字（大小写不敏感，C++ 上限 30 条）。</summary>
     public List<GenSearchResult> SearchGenerators(string keyword)
     {

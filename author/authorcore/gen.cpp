@@ -55,6 +55,11 @@ std::string genExePath(int id, const std::string& name) {
 // 数据输出目录 = 生成器目录本身（即判题数据源）
 std::string genOutDir(int id, const std::string& name) { return genDir(id, name); }
 
+// 本地测试工作区（DB 代码 → 临时目录编译运行，不触碰题库目录）
+std::string testSrcPath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name + ".cpp"; }
+std::string testExePath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name + ".exe"; }
+std::string testOutDir(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name; }
+
 const char* kGenTemplate =
     "// 数据生成器 {name}.cpp\n"
     "// 运行约定：每个测试点独立运行一次，直接把测试数据输出到 stdout（cout）。\n"
@@ -147,6 +152,14 @@ std::string toLower(const std::string& s) {
     std::string r = s;
     for (char& c : r) c = (char)tolower((unsigned char)c);
     return r;
+}
+
+// 去掉首尾空白（用于读取 gen_used.txt 每行名字）
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
 }
 
 // 枚举题目下所有生成器子目录名（按名字排序）
@@ -529,6 +542,197 @@ AC_API const char* ac_gen_import_to_problem(int id, const char* name, const char
         g_lastError = err;
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
+    g_lastError.clear();
+    return dup("{\"ok\":true}");
+}
+
+// ===== 本地测试工作区（DB 代码 → 临时目录编译运行，不触碰题库目录） =====
+
+AC_API const char* ac_gen_test_compile(int id, const char* name, const char* code) {
+    std::string gn = name ? name : "";
+    if (!validGenName(gn)) {
+        std::string err = "生成器名字不合法";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    mkdirs(g_temp + "\\" + std::to_string(id));
+    writeFile(testSrcPath(id, gn), code ? code : "");
+    std::string err;
+    bool ok = oj::compile_cpp(testSrcPath(id, gn), testExePath(id, gn), err);
+    g_lastError = ok ? "" : err;
+    if (ok) return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+AC_API const char* ac_gen_test_run(int id, const char* name, int n) {
+    std::string gn = name ? name : "";
+    if (n <= 0) n = 1;
+    std::string exe = testExePath(id, gn);
+    if (!exists(exe)) {
+        std::string src = testSrcPath(id, gn);
+        if (!exists(src)) {
+            std::string err = "请先保存并编译生成器代码";
+            g_lastError = err;
+            return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+        }
+        mkdirs(g_temp + "\\" + std::to_string(id));
+        std::string cerr;
+        if (!oj::compile_cpp(src, exe, cerr)) {
+            g_lastError = cerr;
+            return dup("{\"ok\":false,\"error\":\"生成器编译失败：" + jsonEscape(cerr) + "\"}");
+        }
+    }
+    std::string outDir = testOutDir(id, gn);
+    mkdirs(outDir);
+
+    for (const char* ext : { ".in", ".out" }) {
+        std::string pat = outDir + "\\*" + ext;
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                    remove((outDir + "\\" + fd.cFileName).c_str());
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+    }
+
+    DWORD baseSeed = GetTickCount();
+    int generated = 0;
+    std::vector<std::string> fails;
+    for (int i = 1; i <= n; ++i) {
+        DWORD seed = baseSeed + i;
+        std::string args = "\"" + outDir + "\" " + std::to_string(seed)
+                         + " " + std::to_string(n) + " " + std::to_string(i);
+        std::string outFile = outDir + "\\" + std::to_string(i) + ".in";
+        RunRedirect rr = runRedirect(exe, args, outDir, outFile, 60000);
+        if (rr.timeout) { fails.push_back(std::to_string(i) + ".in：超时"); continue; }
+        if (!rr.ok) {
+            std::string e = std::to_string(i) + ".in：退出码 " + std::to_string(rr.exitCode);
+            if (!rr.errText.empty()) e += "：" + rr.errText.substr(0, 120);
+            fails.push_back(e);
+            continue;
+        }
+        ++generated;
+    }
+
+    if (generated == 0) {
+        std::string err = "生成器没有产出任何数据";
+        if (!fails.empty()) err += "（" + fails.front() + "）";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+
+    std::string json = "{\"ok\":true,\"generated\":" + std::to_string(generated)
+        + ",\"total\":" + std::to_string(n)
+        + ",\"outDir\":\"" + jsonEscape(outDir) + "\""
+        + ",\"fails\":[";
+    for (size_t i = 0; i < fails.size(); ++i) {
+        if (i) json += ",";
+        json += "\"" + jsonEscape(fails[i]) + "\"";
+    }
+    json += "]}";
+    g_lastError.clear();
+    return dup(json);
+}
+
+AC_API const char* ac_gen_test_files(int id, const char* name) {
+    std::string gn = name ? name : "";
+    std::string dir = testOutDir(id, gn);
+    std::vector<std::pair<int, std::string>> items;
+    std::string pattern = dir + "\\*.in";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            std::string fname = fd.cFileName;
+            std::string base = fname.substr(0, fname.size() - 3);
+            int num = atoi(base.c_str());
+            items.push_back({num, fname});
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    std::sort(items.begin(), items.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::string json = "[";
+    bool first = true;
+    for (auto& it : items) {
+        std::string path = dir + "\\" + it.second;
+        if (!first) json += ",";
+        first = false;
+        json += "{\"name\":\"" + jsonEscape(it.second) + "\""
+             + ",\"size\":" + std::to_string(fileSize(path))
+             + ",\"modified\":\"" + jsonEscape(fileModifiedDisplay(path)) + "\"}";
+    }
+    json += "]";
+    g_lastError.clear();
+    return dup(json);
+}
+
+AC_API const char* ac_gen_test_file(int id, const char* name, const char* file) {
+    if (!file || !*file) {
+        std::string err = "文件名为空";
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    std::string gn = name ? name : "";
+    std::string path = testOutDir(id, gn) + "\\" + file;
+    if (!exists(path)) {
+        std::string err = "文件不存在: " + std::string(file);
+        g_lastError = err;
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    }
+    std::string text = readFile(path);
+    bool truncated = false;
+    if (text.size() > 200000) { text = text.substr(0, 200000); truncated = true; }
+    g_lastError.clear();
+    return dup("{\"ok\":true,\"content\":\"" + jsonEscape(text) + "\""
+             + ",\"truncated\":" + std::string(truncated ? "true" : "false") + "}");
+}
+
+// 读取本题勾选使用的生成器（{id}/gen_used.txt 每行一个名字，只保留仍然存在的）
+AC_API const char* ac_gen_get_used(int id) {
+    std::vector<std::string> names;
+    std::string content = readFile(genProblemRoot(id) + "\\gen_used.txt");
+    std::istringstream iss(content);
+    std::string line;
+    while (std::getline(iss, line)) {
+        std::string n = trim(line);
+        if (!n.empty() && validGenName(n) && exists(genSrcPath(id, n))) names.push_back(n);
+    }
+    std::string json = "[";
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (i) json += ",";
+        json += "\"" + jsonEscape(names[i]) + "\"";
+    }
+    json += "]";
+    g_lastError.clear();
+    return dup(json);
+}
+
+// 保存本题勾选使用的生成器（names_json 形如 ["juhua","lian"]，覆盖写 gen_used.txt）
+AC_API const char* ac_gen_set_used(int id, const char* names_json) {
+    std::string s = names_json ? names_json : "";
+    std::vector<std::string> names;
+    for (size_t i = 0; i < s.size();) {
+        if (s[i] == '"') {
+            size_t j = i + 1;
+            while (j < s.size() && s[j] != '"') ++j;
+            if (j < s.size()) names.push_back(s.substr(i + 1, j - i - 1));
+            i = j + 1;
+        } else {
+            ++i;
+        }
+    }
+    std::string out;
+    for (auto& n : names) {
+        if (!validGenName(n)) continue;
+        if (!out.empty()) out += "\n";
+        out += n;
+    }
+    writeFile(genProblemRoot(id) + "\\gen_used.txt", out);
     g_lastError.clear();
     return dup("{\"ok\":true}");
 }

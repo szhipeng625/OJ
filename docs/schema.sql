@@ -97,26 +97,27 @@ CREATE TABLE IF NOT EXISTS problems (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
--- ⑥ 生成器表（独立表）
--- 只存生成器源码（密文），不存生成的 .in/.out；客户端拉取后本地解密、编译、运行重新生成判题数据。
+-- ⑥ 生成器表（全局库，所有数据生成器放一张表）
+-- 只存生成器源码（密文）+ 名称 + 描述，不存生成的 .in/.out；客户端拉取后本地解密、编译、运行重新生成判题数据。
 -- 一个生成器可被多道题复用；题目通过 problem_generators 关联到这里的 id。
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS generators (
   id          INT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(64) NOT NULL,            -- 生成器全局唯一名（如 juhua）
   code        MEDIUMTEXT NOT NULL,             -- gen.cpp 源码（AES-256 密文，base64）
-  description TEXT,                             -- desc.txt（明文）
-  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  description TEXT,                             -- 描述（明文）
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_generator_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
 -- ⑥' 题目 ↔ 生成器关联表（多对多）
--- name = 该生成器在此题内的目录名（如 "juhua"）；gen_count = 测试点数量 n；
--- seed_base = 确定性随机种子基准（所有客户端生成同一份数据）。
+-- gen_count = 测试点数量 n；seed_base = 确定性随机种子基准（所有客户端生成同一份数据）。
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS problem_generators (
   problem_id   INT NOT NULL,
   generator_id INT NOT NULL,
-  name         VARCHAR(64) NOT NULL DEFAULT '',
   gen_count    INT NOT NULL DEFAULT 0,
   seed_base    INT NOT NULL DEFAULT 0,
   PRIMARY KEY (problem_id, generator_id),
