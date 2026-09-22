@@ -17,19 +17,20 @@ public class ApiClient
     };
 
     public bool MySqlEnabled { get; private set; }
+    private readonly string _problemDir;
 
     public ApiClient()
     {
         // 题目/数据目录都相对 exe 目录（可移植），自动创建
         string baseDir = AppContext.BaseDirectory;
-        string problemDir = Path.Combine(baseDir, "problems");
+        _problemDir = Path.Combine(baseDir, "problems");
         var dataDir = Path.Combine(baseDir, "ojdata");
-        try { Directory.CreateDirectory(problemDir); } catch { }
+        try { Directory.CreateDirectory(_problemDir); } catch { }
         try { Directory.CreateDirectory(dataDir); } catch { }
         // 先试本地 LSM 模式
-        OJInterop.Init(problemDir, dataDir);
+        OJInterop.Init(_problemDir, dataDir);
         // 再尝试 MySQL 模式（如果同目录有 mysql_config.json 则启用）
-        TryInitMysql(problemDir, dataDir);
+        TryInitMysql(_problemDir, dataDir);
     }
 
     private void TryInitMysql(string problemDir, string dataDir)
@@ -95,6 +96,25 @@ public class ApiClient
     public Task<SubmitResult?> SubmitExAsync(int problemId, string code, string username, bool virt)
         => Task.Run(() => JsonSerializer.Deserialize<SubmitResult>(
             OJInterop.SubmitExJson(problemId, code, username, virt), Opt));
+
+    /// <summary>本地调试：编译并运行用户代码（不提交、不判题）。</summary>
+    public Task<DebugRunResult?> DebugRunAsync(string code, string input, int timeoutMs = 2000)
+        => Task.Run(() => JsonSerializer.Deserialize<DebugRunResult>(
+            OJInterop.DebugRunJson(code, input, timeoutMs), Opt));
+
+    /// <summary>本地调试（样例比对）：用 sample.in 作输入运行，与 sample.out 比对。</summary>
+    public Task<DebugTestResult?> DebugTestAsync(int problemId, string code, int timeoutMs = 2000)
+        => Task.Run(() => JsonSerializer.Deserialize<DebugTestResult>(
+            OJInterop.DebugTestJson(code, problemId, timeoutMs), Opt));
+
+    /// <summary>把样例输入/输出写到本地题目根目录 sample.in / sample.out。</summary>
+    public void WriteSampleFiles(int problemId, string input, string output)
+    {
+        string dir = Path.Combine(_problemDir, problemId.ToString());
+        try { Directory.CreateDirectory(dir); } catch { }
+        try { File.WriteAllText(Path.Combine(dir, "sample.in"), input); } catch { }
+        try { File.WriteAllText(Path.Combine(dir, "sample.out"), output); } catch { }
+    }
 
     // ---------- 比赛 / 榜单 ----------
 

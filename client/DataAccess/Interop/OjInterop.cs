@@ -42,6 +42,14 @@ public static class OJInterop
         int virtual_);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_debug_run([MarshalAs(UnmanagedType.LPUTF8Str)] string code,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string input, int timeout_ms);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_debug_test([MarshalAs(UnmanagedType.LPUTF8Str)] string code,
+        int problem_id, int timeout_ms);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_get_contests();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -142,6 +150,12 @@ public static class OJInterop
 
     public static string SubmitExJson(int problemId, string code, string username, bool virt)
         => PtrToString(oj_submit_ex(problemId, code, username, virt ? 1 : 0));
+
+    public static string DebugRunJson(string code, string input, int timeoutMs)
+        => PtrToString(oj_debug_run(code, input, timeoutMs));
+
+    public static string DebugTestJson(string code, int problemId, int timeoutMs)
+        => PtrToString(oj_debug_test(code, problemId, timeoutMs));
 
     public static string GetContestsJson() => PtrToString(oj_get_contests());
 

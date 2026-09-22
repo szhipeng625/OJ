@@ -60,7 +60,7 @@ public partial class SolveWindow : Window
         string tags = problem.Tags is { Length: > 0 } ? string.Join(", ", problem.Tags) : "无";
         DescTitle.Text = problem.Title;
         MetaText.Text = $"时间限制 {problem.TimeLimitMs}ms · 内存 {problem.MemLimitMB}MB · 标签：{tags}";
-        MarkdownRenderer.Render(DescBox, MarkdownRenderer.CombineStatement(problem.Description, problem.SampleIn, problem.SampleOut));
+        MarkdownRenderer.Render(DescBox, MarkdownRenderer.CombineStatement(problem.Description, problem.Samples, problem.SampleIn, problem.SampleOut));
 
         Loaded += async (_, _) => await LoadSavedCodeAsync();
         Closed += (_, _) => ReleaseResources();
@@ -137,6 +137,83 @@ public partial class SolveWindow : Window
             StatusText.Text = ex.Message;
         }
         finally { SubmitBtn.IsEnabled = true; }
+    }
+
+    private void ImportSample(int index)
+    {
+        var samples = _problem.Samples;
+        if (samples is null || index >= samples.Count)
+        {
+            DebugStatus.Text = index == 0 ? "测试结果（没有可导入的样例）" : "测试结果（没有样例2）";
+            return;
+        }
+        var s = samples[index];
+        _judge.WriteSampleFiles(_problem.Id, s.Input, s.Output);
+        DebugInputBox.Text = s.Input ?? "";
+        DebugExpectedBox.Text = s.Output ?? "";
+        DebugStatus.Text = $"测试结果（已导入：{s.Name}）";
+        DebugOutputBox.Text = "";
+    }
+
+    private void OnImportSample1(object sender, RoutedEventArgs e) => ImportSample(0);
+
+    private void OnImportSample2(object sender, RoutedEventArgs e) => ImportSample(1);
+
+    private void OnCustomImport(object sender, RoutedEventArgs e)
+    {
+        DebugInputBox.IsReadOnly = false;
+        DebugInputBox.Text = "";
+        DebugExpectedBox.Text = "";
+        DebugInputBox.Focus();
+        DebugStatus.Text = "测试结果（自定义输入：可直接在上方输入框填写）";
+        DebugOutputBox.Text = "";
+    }
+
+    private async void OnDebugRun(object sender, RoutedEventArgs e)
+    {
+        string code = CodeBox.Text;
+        if (string.IsNullOrWhiteSpace(code)) { MessageBox.Show("请先在「代码」页填写代码"); return; }
+
+        _judge.WriteSampleFiles(_problem.Id, DebugInputBox.Text, DebugExpectedBox.Text);
+
+        DebugStatus.Text = "运行中…";
+        DebugOutputBox.Text = "";
+        try
+        {
+            var r = await _judge.DebugTestAsync(_problem.Id, code);
+            if (r is null) { DebugStatus.Text = "测试结果（无响应）"; return; }
+            if (!string.IsNullOrEmpty(r.CompileError))
+            {
+                DebugStatus.Text = "测试结果（编译失败）";
+                DebugOutputBox.Text = r.CompileError;
+                return;
+            }
+            if (r.Timeout)
+            {
+                DebugStatus.Text = "测试结果（超时）";
+                DebugOutputBox.Text = r.Output;
+                return;
+            }
+            DebugStatus.Text = r.Passed ? "测试结果（通过 ✓）" : "测试结果（不通过 ✗）";
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("【实际输出】");
+            sb.AppendLine(r.Output);
+            sb.AppendLine();
+            sb.AppendLine("【期望输出】");
+            sb.AppendLine(r.Expected);
+            if (!string.IsNullOrEmpty(r.RunError))
+            {
+                sb.AppendLine();
+                sb.AppendLine("【stderr】");
+                sb.AppendLine(r.RunError);
+            }
+            DebugOutputBox.Text = sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            DebugStatus.Text = "测试结果（失败）";
+            DebugOutputBox.Text = ex.Message;
+        }
     }
 
     private void OnBack(object sender, RoutedEventArgs e) => Close();

@@ -20,20 +20,18 @@ public partial class ProblemWorkspaceWindow : Window
     private readonly int _id;
     private readonly Workbench _wb;
     private readonly WorkspaceManager _mgr;
-    private readonly string _testDataDir;
     private readonly string _serverProblemDir;
     private int _genId;
     private string _genName = "";
     private List<GenCheckItem> _genItems = new();
 
     public ProblemWorkspaceWindow(int problemId, Workbench workbench, WorkspaceManager manager,
-        string testDataDir = "", string serverProblemDir = "")
+        string serverProblemDir = "")
     {
         InitializeComponent();
         _id = problemId;
         _wb = workbench;
         _mgr = manager;
-        _testDataDir = testDataDir;
         _serverProblemDir = serverProblemDir;
         Title = $"P{problemId} 题目工作台";
         TargetBox.Text = string.IsNullOrWhiteSpace(serverProblemDir) ? "server\\problems" : serverProblemDir;
@@ -67,8 +65,6 @@ public partial class ProblemWorkspaceWindow : Window
             if (!IsLoaded) return;
             TitleBox.Text = c.StatementTitle;
             DescBox.Text = c.StatementDesc;
-            SampleInBox.Text = c.SampleIn;
-            SampleOutBox.Text = c.SampleOut;
             TimeLimitBox.Text = c.Meta.TimeLimitMs.ToString();
             MemLimitBox.Text = c.Meta.MemLimitMB.ToString();
             TagsBox.Text = string.Join(",", c.Meta.Tags);
@@ -87,92 +83,71 @@ public partial class ProblemWorkspaceWindow : Window
         var tags = TagsBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         await RunBusy("正在保存题面…", async () =>
         {
+            // 样例由「生成标准答案」页导入，保存题面时保留现有 sample.in / sample.out
+            string dir = _wb.Problems.ProblemDir(_id);
+            string sampleIn = File.Exists(Path.Combine(dir, "sample.in")) ? File.ReadAllText(Path.Combine(dir, "sample.in")) : "";
+            string sampleOut = File.Exists(Path.Combine(dir, "sample.out")) ? File.ReadAllText(Path.Combine(dir, "sample.out")) : "";
             var r = await _wb.Problems.SaveStatementAsync(
-                _id, TitleBox.Text, DescBox.Text, SampleInBox.Text, SampleOutBox.Text,
+                _id, TitleBox.Text, DescBox.Text, sampleIn, sampleOut,
                 timeMs, memMb, tags);
             if (IsLoaded) StatementMsg.Text = r.Message;
             _mgr.NotifyProblemListChanged();
         });
     }
 
-    // ---------- 样例导入（不再手写，从文件导入） ----------
-    private void OnImportSampleIn(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog
-        {
-            Filter = "样例输入 (*.in;*.txt)|*.in;*.txt|所有文件 (*.*)|*.*",
-            Title = "选择样例输入文件"
-        };
-        if (dlg.ShowDialog() != true) return;
-        SampleInBox.Text = File.ReadAllText(dlg.FileName);
-    }
+    // ---------- 题目描述格式工具栏（Word 式，插入 Markdown 标记） ----------
+    private void OnBold(object sender, RoutedEventArgs e) => DescBox.ApplyWrap("**", "**", "加粗");
+    private void OnItalic(object sender, RoutedEventArgs e) => DescBox.ApplyWrap("*", "*", "斜体");
+    private void OnHeading(object sender, RoutedEventArgs e) => DescBox.PrefixLines("# ");
+    private void OnList(object sender, RoutedEventArgs e) => DescBox.PrefixLines("- ");
+    private void OnQuote(object sender, RoutedEventArgs e) => DescBox.PrefixLines("> ");
+    private void OnCodeBlock(object sender, RoutedEventArgs e) => DescBox.ApplyWrap("```\n", "\n```", "代码");
+    private void OnHr(object sender, RoutedEventArgs e) => DescBox.InsertLine("---");
 
-    private void OnImportSampleOut(object sender, RoutedEventArgs e)
+    // ---------- 测试样例：勾选 = 作为题目样例并上传到数据库 ----------
+    private async void OnSampleCheck(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog
+        if (sender is not CheckBox cb || cb.DataContext is not DataRow row) return;
+        string name = $"{row.GroupKey}/{row.BaseName}";
+        if (cb.IsChecked == true)
         {
-            Filter = "样例输出 (*.out;*.txt)|*.out;*.txt|所有文件 (*.*)|*.*",
-            Title = "选择样例输出文件"
-        };
-        if (dlg.ShowDialog() != true) return;
-        SampleOutBox.Text = File.ReadAllText(dlg.FileName);
+            var (inText, _) = await _wb.Problems.ReadDataFileAsync(_id, row.GroupKey, row.InFile);
+            var (outText, _) = await _wb.Problems.ReadDataFileAsync(_id, row.GroupKey, row.OutFile);
+            var r = await _wb.Generators.SetTestcaseAsync(_id, name, inText, outText, true);
+            if (IsLoaded) DataMsg.Text = r.Message;
+        }
+        else
+        {
+            var r = await _wb.Generators.RemoveTestcaseAsync(_id, name);
+            if (IsLoaded) DataMsg.Text = r.Message;
+        }
     }
 
     // ---------- 测试数据 ----------
     private async Task RefreshDataList()
     {
         var rows = await _wb.Problems.ListGroupedRowsAsync(_id);
+        var tcs = await _wb.Generators.ListTestcasesAsync(_id);
         if (!IsLoaded) return;
+
+        var uploaded = new HashSet<string>(tcs.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in rows)
+        {
+            string name = $"{row.GroupKey}/{row.BaseName}";
+            row.IsSample = uploaded.Contains(name);
+        }
+
         var view = new ListCollectionView(rows);
-        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(DataRow.GroupTitle)));
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(DataRow.GroupKey)));
         DataGroupView.ItemsSource = view;
-    }
-
-    private async void OnAutoFill(object sender, RoutedEventArgs e)
-    {
-        await RunBusy("正在自动搜索填充测试数据…", async () =>
-        {
-            var (inCnt, outCnt) = await _wb.Problems.AutoFillDataAsync(_id, _testDataDir);
-            if (IsLoaded)
-                DataMsg.Text = inCnt > 0
-                    ? $"自动填充完成：{inCnt} 个 .in / {outCnt} 个 .out（源目录：{_testDataDir}）"
-                    : $"未在测试数据目录找到 .in/.out：{_testDataDir}";
-            await RefreshDataList();
-            _mgr.NotifyProblemListChanged();
-        });
-    }
-
-    private async void OnImportIn(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog { Multiselect = true, Filter = "输入文件 (*.in)|*.in|所有文件 (*.*)|*.*", Title = "选择测试输入文件（可多选）" };
-        if (dlg.ShowDialog() != true) return;
-        await RunBusy("正在导入…", async () =>
-        {
-            int n = await _wb.Problems.ImportDataAsync(_id, dlg.FileNames);
-            if (IsLoaded) DataMsg.Text = $"已导入 {n} 个 .in 文件";
-            await RefreshDataList();
-            _mgr.NotifyProblemListChanged();
-        });
-    }
-
-    private async void OnImportOut(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog { Multiselect = true, Filter = "答案文件 (*.out)|*.out|所有文件 (*.*)|*.*", Title = "选择测试答案文件（可多选）" };
-        if (dlg.ShowDialog() != true) return;
-        await RunBusy("正在导入…", async () =>
-        {
-            int n = await _wb.Problems.ImportDataAsync(_id, dlg.FileNames);
-            if (IsLoaded) DataMsg.Text = $"已导入 {n} 个 .out 文件";
-            await RefreshDataList();
-            _mgr.NotifyProblemListChanged();
-        });
     }
 
     private async void OnGenerateAnswers(object sender, RoutedEventArgs e)
     {
-        await RunBusy("正在自动搜索并生成标准答案…", async () =>
+        await RunBusy("正在编译标程并生成标准答案…", async () =>
         {
-            var r = await _wb.Problems.GenerateAnswersAsync(_id, StdBox.Text, _testDataDir);
+            var r = await _wb.Problems.GenerateAnswersAsync(_id, StdBox.Text);
             if (IsLoaded) DataMsg.Text = r.Message;
             await RefreshDataList();
             _mgr.NotifyProblemListChanged();
@@ -187,18 +162,6 @@ public partial class ProblemWorkspaceWindow : Window
         if (!IsLoaded) return;
         var win = new DataCompareWindow(row, inText, inTrunc, outText, outTrunc) { Owner = this };
         win.Show();
-    }
-
-    private async void OnDeleteData(object sender, RoutedEventArgs e)
-    {
-        if (DataGroupView.SelectedItem is not DataRow row) return;
-        await RunBusy("正在删除…", async () =>
-        {
-            await _wb.Problems.DeleteDataAsync(_id, row.GroupKey, row.BaseName);
-            if (IsLoaded) DataMsg.Text = $"已删除 {row.BaseName}（{row.GroupTitle}）";
-            await RefreshDataList();
-            _mgr.NotifyProblemListChanged();
-        });
     }
 
     // ---------- 标程 ----------
@@ -368,7 +331,7 @@ public partial class ProblemWorkspaceWindow : Window
         string code = GenBox.Text;
         await RunBusy("正在编译生成器（g++）…", async () =>
         {
-            var r = await _wb.Generators.CompileAsync(_genId, _genName, code);
+            var r = await _wb.Generators.CompileAsync(_id, _genId, _genName, code);
             if (IsLoaded) GenMsg.Text = r.Message;
         });
     }

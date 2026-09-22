@@ -626,6 +626,17 @@ bool mysql_init_schema(std::string& err) {
   FOREIGN KEY (problem_id) REFERENCES problems(id),
   FOREIGN KEY (generator_id) REFERENCES generators(id)
 ))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS problem_testcases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  problem_id INT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  input MEDIUMTEXT NOT NULL,
+  output MEDIUMTEXT NOT NULL,
+  is_sample TINYINT NOT NULL DEFAULT 0,
+  sort INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_problem_testcase (problem_id, name),
+  FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS contests (
   id INT PRIMARY KEY,
   content MEDIUMTEXT NOT NULL
@@ -1211,6 +1222,42 @@ bool mysql_unbind_generator(int problem_id, int generator_id) {
                    + " AND generator_id=" + std::to_string(generator_id));
 }
 
+// ===== 题目测试样例（丰富题面 + 调试用，实际判题仍由客户端按生成器代码重新生成） =====
+bool mysql_set_testcase(int problem_id, const std::string& name,
+                        const std::string& input, const std::string& output,
+                        bool is_sample) {
+    std::string sql = "INSERT INTO problem_testcases(problem_id,name,input,output,is_sample) VALUES("
+        + std::to_string(problem_id) + ",'" + SqlEscape(name) + "','" + SqlEscape(input)
+        + "','" + SqlEscape(output) + "'," + (is_sample ? "1" : "0") + ") "
+        "ON DUPLICATE KEY UPDATE input=VALUES(input), output=VALUES(output), is_sample=VALUES(is_sample)";
+    return ExecSQL(sql);
+}
+
+bool mysql_remove_testcase(int problem_id, const std::string& name) {
+    return ExecSQL("DELETE FROM problem_testcases WHERE problem_id=" + std::to_string(problem_id)
+                   + " AND name='" + SqlEscape(name) + "'");
+}
+
+bool mysql_list_testcases(int problem_id, std::string& out_json) {
+    std::string sql = "SELECT name, is_sample FROM problem_testcases WHERE problem_id="
+                      + std::to_string(problem_id) + " ORDER BY sort, id";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "{\"name\":\"" + jsonEscRow(row[0] ? row[0] : "") + "\""
+                 + ",\"isSample\":" + std::string(atoi(row[1]) ? "true" : "false") + "}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
+
 bool mysql_search_generators(const std::string& keyword, std::string& out_json) {
     if (keyword.empty()) return false;
     std::string sql = "SELECT id,name,code FROM generators ORDER BY name";
@@ -1271,6 +1318,93 @@ bool mysql_problem_visibility(std::string& out_json) {
     }
     g_sql.mysql_free_result(res);
     out_json += "}";
+    return true;
+}
+
+bool mysql_list_problems(std::string& out_json) {
+    if (!g_conn) return false;
+    std::string sql =
+        "SELECT p.id, p.title, p.is_public, "
+        "COALESCE((SELECT SUM(pg.gen_count) FROM problem_generators pg WHERE pg.problem_id=p.id),0) "
+        "FROM problems p ORDER BY p.id";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "{\"id\":" + std::string(row[0] ? row[0] : "0")
+                 + ",\"title\":\"" + jsonEscRow(row[1] ? row[1] : "") + "\""
+                 + ",\"isPublic\":" + std::string(atoi(row[2]) ? "true" : "false")
+                 + ",\"dataCount\":" + std::string(row[3] ? row[3] : "0") + "}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
+
+bool mysql_get_problem(int id, std::string& out_json) {
+    if (!g_conn) return false;
+    std::string sql = "SELECT title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code,is_public,updated_at "
+                      "FROM problems WHERE id=" + std::to_string(id);
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    char** row = g_sql.mysql_fetch_row(res);
+    if (!row) {
+        g_sql.mysql_free_result(res);
+        out_json = "{\"ok\":false,\"error\":\"题目不存在\"}";
+        return true;
+    }
+    std::string title = row[0] ? row[0] : "";
+    std::string desc = row[1] ? row[1] : "";
+    std::string sampleIn = row[2] ? row[2] : "";
+    std::string sampleOut = row[3] ? row[3] : "";
+    int timeMs = atoi(row[4]);
+    int memMb = atoi(row[5]);
+    std::string tags = row[6] ? row[6] : "[]";
+    std::string stdCode = decrypt_blob(row[7] ? row[7] : "");
+    bool isPublic = atoi(row[8]) != 0;
+    std::string updatedAt = row[9] ? row[9] : "";
+    g_sql.mysql_free_result(res);
+
+    out_json = "{\"ok\":true,\"id\":" + std::to_string(id)
+             + ",\"title\":\"" + jsonEscRow(title) + "\""
+             + ",\"description\":\"" + jsonEscRow(desc) + "\""
+             + ",\"sampleIn\":\"" + jsonEscRow(sampleIn) + "\""
+             + ",\"sampleOut\":\"" + jsonEscRow(sampleOut) + "\""
+             + ",\"timeMs\":" + std::to_string(timeMs)
+             + ",\"memMb\":" + std::to_string(memMb)
+             + ",\"tags\":" + (tags.empty() ? "[]" : tags)
+             + ",\"stdCode\":\"" + jsonEscRow(stdCode) + "\""
+             + ",\"isPublic\":" + (isPublic ? "true" : "false")
+             + ",\"updatedAt\":\"" + jsonEscRow(updatedAt) + "\"";
+
+    std::string gsql = "SELECT g.id, g.name, g.description, g.code, pg.gen_count "
+                       "FROM problem_generators pg JOIN generators g ON g.id=pg.generator_id "
+                       "WHERE pg.problem_id=" + std::to_string(id) + " ORDER BY g.name";
+    out_json += ",\"generators\":[";
+    if (ExecSQL(gsql)) {
+        void* gres = g_sql.mysql_store_result(g_conn);
+        if (gres) {
+            bool gfirst = true;
+            char** grow;
+            while ((grow = g_sql.mysql_fetch_row(gres)) != nullptr) {
+                if (!gfirst) out_json += ",";
+                gfirst = false;
+                out_json += "{\"id\":" + std::string(grow[0] ? grow[0] : "0")
+                         + ",\"name\":\"" + jsonEscRow(grow[1] ? grow[1] : "") + "\""
+                         + ",\"description\":\"" + jsonEscRow(grow[2] ? grow[2] : "") + "\""
+                         + ",\"code\":\"" + jsonEscRow(decrypt_blob(grow[3] ? grow[3] : "")) + "\""
+                         + ",\"genCount\":" + std::string(grow[4] ? grow[4] : "0") + "}";
+            }
+            g_sql.mysql_free_result(gres);
+        }
+    }
+    out_json += "]}";
     return true;
 }
 
@@ -1431,6 +1565,31 @@ bool mysql_sync_problems(const std::string& problem_dir, const std::string& serv
                             RemoveDir(dir + "\\" + n);
                     } while (FindNextFileA(h, &fd));
                     FindClose(h);
+                }
+            }
+
+            // 题目测试样例（丰富题面/调试用）：物化到本地 testcases.json
+            {
+                std::string tq = "SELECT name, input, output, is_sample FROM problem_testcases WHERE problem_id="
+                                 + std::to_string(id) + " ORDER BY sort, id";
+                if (g_sql.mysql_query(g_conn, tq.c_str()) == 0) {
+                    void* tres = g_sql.mysql_store_result(g_conn);
+                    if (tres) {
+                        std::string tj = "{\"cases\":[";
+                        bool tfirst = true;
+                        char** trow;
+                        while ((trow = g_sql.mysql_fetch_row(tres)) != nullptr) {
+                            if (!tfirst) tj += ",";
+                            tfirst = false;
+                            tj += "{\"name\":\"" + jsonEscRow(trow[0] ? trow[0] : "") + "\""
+                               + ",\"input\":\"" + jsonEscRow(trow[1] ? trow[1] : "") + "\""
+                               + ",\"output\":\"" + jsonEscRow(trow[2] ? trow[2] : "") + "\""
+                               + ",\"isSample\":" + std::string(atoi(trow[3]) ? "true" : "false") + "}";
+                        }
+                        tj += "]}";
+                        g_sql.mysql_free_result(tres);
+                        WriteFileBin(dir + "\\testcases.json", tj);
+                    }
                 }
             }
         }

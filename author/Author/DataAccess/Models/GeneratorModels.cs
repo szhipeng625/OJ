@@ -69,6 +69,11 @@ public sealed record GenSearchHit(
     [property: JsonPropertyName("line")] string Line,
     [property: JsonPropertyName("keyword")] string Keyword);
 
+/// <summary>某题已上传的测试样例（来自 oj_mysql_list_testcases）。</summary>
+public sealed record GenTestcase(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("isSample")] bool IsSample);
+
 // ===== 以下为 authorcore 本地多生成器模型的旧类型（保留兼容，新流程不再使用） =====
 
 /// <summary>题目下一个数据生成器的摘要（ac_gen_list 返回）。</summary>

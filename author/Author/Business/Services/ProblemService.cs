@@ -32,23 +32,30 @@ public sealed class ProblemService
 
     private static string Gate(int id) => "p" + id;
 
-    public Task<List<ProblemInfo>> ListAsync() => _build.RunAsync("list", () => _author.List());
+    public Task<List<ProblemInfo>> ListAsync() => _build.RunAsync("list", () => _author.ListFromMySql());
 
-    /// <summary>给出下一个可用的题目编号（现有最大编号 + 1，空题库时为 1）。</summary>
+    /// <summary>给出下一个可用的题目编号（数据库最大编号 + 1，空题库时为 1；本地缓存兜底）。</summary>
     public Task<int> SuggestIdAsync()
         => _build.RunAsync("list", () =>
         {
             int max = 0;
+            foreach (var it in _author.ListFromMySql())
+                if (it.Id > max) max = it.Id;
             foreach (var it in _author.List())
                 if (it.Id > max) max = it.Id;
             return max + 1;
         });
 
-    public Task<(bool Ok, string Message)> CreateAsync(int id, string title)
+    public Task<(bool Ok, string Message)> CreateAsync(int id, string title, string tags = "")
         => _build.RunAsync("list", () =>
         {
             string r = _author.Create(id, title);
             bool ok = r.Contains("\"ok\":true");
+            if (ok && !string.IsNullOrWhiteSpace(tags))
+            {
+                var tagsArr = tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                _author.SaveMeta(id, 1000, 256, tagsArr);
+            }
             return (ok, ok ? $"已创建题目 P{id}：{title}" : AuthorClient.ParseError(r));
         });
 
@@ -57,7 +64,7 @@ public sealed class ProblemService
         => _build.RunAsync(Gate(id), () => _author.AutoFillData(id, sourceDir));
 
     public Task<ProblemContent> LoadAsync(int id)
-        => _build.RunAsync(Gate(id), () => _author.LoadContent(id));
+        => _build.RunAsync(Gate(id), () => _author.LoadFromMySql(id) ?? _author.LoadContent(id));
 
     public Task<JobResult> SaveStatementAsync(int id, string title, string desc, string sampleIn, string sampleOut,
         int timeMs, int memMb, IReadOnlyList<string> tags)
@@ -75,7 +82,7 @@ public sealed class ProblemService
     public Task<List<DataPair>> ListDataAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.ListDataPairs(id));
 
-    /// <summary>按组别（根目录 + 各生成器）列出输入/输出数据，供两列展示。</summary>
+    /// <summary>按组别（各生成器）列出输入/输出数据，供两列展示。</summary>
     public Task<List<DataRow>> ListGroupedRowsAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.ListGroupedRows(id));
 
@@ -125,9 +132,9 @@ public sealed class ProblemService
         });
 
     /// <summary>
-    /// 一键生成标准答案：后台自动搜索填充 .in/.out → 编译标程 → 运行标程把输出重定向到各 .out。
+    /// 生成标准答案：编译标程 → 运行标程为所有 .in 生成对应 .out（.in 来自各生成器目录）。
     /// </summary>
-    public Task<JobResult> GenerateAnswersAsync(int id, string stdCode, string testDataDir)
+    public Task<JobResult> GenerateAnswersAsync(int id, string stdCode)
         => _build.RunAsync(Gate(id), () =>
         {
             string stdExe = _author.StdExePath(id);
@@ -136,9 +143,6 @@ public sealed class ProblemService
             string r = _author.Compile(_author.ProblemDir(id) + "\\std.cpp", stdExe);
             if (!r.Contains("\"ok\":true"))
                 return new JobResult(false, "标程编译失败：" + AuthorClient.ParseError(r));
-
-            var (inCnt, outCnt) = _author.AutoFillData(id, testDataDir);
-            string fillMsg = inCnt > 0 ? $"自动搜索填充 {inCnt} 个 .in / {outCnt} 个 .out；" : "";
 
             string gr = _author.GenOutputs(id, stdExe);
             int okCount = 0;
@@ -157,12 +161,20 @@ public sealed class ProblemService
             catch { /* 解析失败按 0 处理 */ }
 
             if (okCount > 0)
-                return new JobResult(true, fillMsg + $"标准答案生成完成：{okCount} 组 .out 已就位"
+                return new JobResult(true, $"标准答案生成完成：{okCount} 组 .out 已就位"
                     + (fails.Count > 0 ? "；失败：" + string.Join("、", fails.Take(5)) : ""));
-            return new JobResult(false, fillMsg + "没有生成标准答案（未找到 .in 或标程运行失败）");
+            return new JobResult(false, "没有生成标准答案（未找到 .in 或标程运行失败）");
         });
 
-    /// <summary>完整性校验，返回展示文本。</summary>
+    /// <summary>导入样例输入/输出为题目目录下的 sample.in / sample.out。</summary>
+    public Task ImportSampleAsync(int id, string srcFile, bool isIn)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            string dst = Path.Combine(_author.ProblemDir(id), isIn ? "sample.in" : "sample.out");
+            File.Copy(srcFile, dst, true);
+        });
+
+    /// <summary>完整性校验：题面检查 + 生成器检查，返回展示文本。</summary>
     public Task<string> ValidateAsync(int id)
         => _build.RunAsync(Gate(id), () =>
         {
@@ -171,12 +183,28 @@ public sealed class ProblemService
             {
                 using var doc = JsonDocument.Parse(r);
                 var root = doc.RootElement;
-                var miss = root.GetProperty("missing").EnumerateArray()
-                    .Select(m => m.GetString()).ToList();
-                return root.GetProperty("inCount").GetInt32() + " 组数据"
-                     + (root.GetProperty("hasStd").GetBoolean() ? "，有标程" : "，无标程")
-                     + " (生成器 " + root.GetProperty("genCount").GetInt32() + "个)"
-                     + (miss!.Count > 0 ? "；缺失：" + string.Join("、", miss) : "；完整 ✓");
+                bool title = root.GetProperty("title").GetBoolean();
+                bool desc = root.GetProperty("desc").GetBoolean();
+                bool hasStd = root.GetProperty("std").GetBoolean();
+                int genCount = root.GetProperty("genCount").GetInt32();
+                int inCount = root.GetProperty("inCount").GetInt32();
+                var missingOut = new List<string>();
+                if (root.TryGetProperty("missingOut", out var mo))
+                    foreach (var x in mo.EnumerateArray()) missingOut.Add(x.GetString() ?? "");
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("【题面检查】");
+                sb.AppendLine("  标题：" + (title ? "✓" : "✗ 缺失"));
+                sb.AppendLine("  描述：" + (desc ? "✓" : "✗ 缺失"));
+                sb.AppendLine("  标程 std.cpp：" + (hasStd ? "✓" : "✗ 缺失"));
+                sb.AppendLine("【生成器检查】");
+                sb.AppendLine($"  生成器：{genCount} 个，输入数据：{inCount} 组 .in");
+                if (missingOut.Count > 0)
+                    sb.AppendLine("  缺答案 .out：" + string.Join("、", missingOut.Take(8)));
+                bool ok = title && desc && hasStd
+                       && genCount > 0 && inCount > 0 && missingOut.Count == 0;
+                sb.AppendLine(ok ? "结论：完整 ✓" : "结论：存在缺失项，请先补全");
+                return sb.ToString().TrimEnd();
             }
             catch { return r; }
         });

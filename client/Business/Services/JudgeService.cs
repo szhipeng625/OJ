@@ -31,6 +31,18 @@ public class JudgeService
     public Task<SubmitResult?> SubmitAsync(int problemId, string code, string username, bool virt)
         => _api.SubmitExAsync(problemId, code, username, virt);
 
+    /// <summary>本地调试：编译并运行用户代码（不提交、不判题）。</summary>
+    public Task<DebugRunResult?> DebugRunAsync(string code, string input, int timeoutMs = 2000)
+        => _api.DebugRunAsync(code, input, timeoutMs);
+
+    /// <summary>本地调试（样例比对）：用 sample.in 作输入运行，与 sample.out 比对。</summary>
+    public Task<DebugTestResult?> DebugTestAsync(int problemId, string code, int timeoutMs = 2000)
+        => _api.DebugTestAsync(problemId, code, timeoutMs);
+
+    /// <summary>把样例输入/输出写到本地题目根目录 sample.in / sample.out。</summary>
+    public void WriteSampleFiles(int problemId, string input, string output)
+        => _api.WriteSampleFiles(problemId, input, output);
+
     public Task<List<ContestInfo>?> GetContestsAsync() => _api.GetContestsAsync();
 
     public Task<ContestDetail?> GetContestAsync(int contestId) => _api.GetContestAsync(contestId);

@@ -40,6 +40,12 @@ public static class OjCoreInterop
     private static extern IntPtr oj_mysql_problem_visibility();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_list_problems();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_get_problem(int id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_list_generators();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -64,6 +70,16 @@ public static class OjCoreInterop
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_search_generators([MarshalAs(UnmanagedType.LPUTF8Str)] string keyword);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_set_testcase(int problem_id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string input, [MarshalAs(UnmanagedType.LPUTF8Str)] string output, int is_sample);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_remove_testcase(int problem_id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_list_testcases(int problem_id);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_publish_contest(int cid,
@@ -101,6 +117,18 @@ public static class OjCoreInterop
     public static string ProblemVisibilityJson()
     {
         lock (Lock) return Take(oj_mysql_problem_visibility());
+    }
+
+    /// <summary>服务端题库列表（含未公开）：[{"id":1,"title":"...","isPublic":true,"dataCount":20}, ...]</summary>
+    public static string ListProblemsJson()
+    {
+        lock (Lock) return Take(oj_mysql_list_problems());
+    }
+
+    /// <summary>单道题完整内容（含标程与已绑定生成器源码）：{"ok":true,...} 或 {"ok":false,"error":"..."}</summary>
+    public static string GetProblemJson(int id)
+    {
+        lock (Lock) return Take(oj_mysql_get_problem(id));
     }
 
     // ===== 生成器库（全局 generators 表） =====
@@ -142,6 +170,22 @@ public static class OjCoreInterop
     public static string SearchGeneratorsJson(string keyword)
     {
         lock (Lock) return Take(oj_mysql_search_generators(keyword));
+    }
+
+    // ===== 题目测试样例 =====
+    public static string SetTestcaseJson(int problemId, string name, string input, string output, bool isSample)
+    {
+        lock (Lock) return Take(oj_mysql_set_testcase(problemId, name, input, output, isSample ? 1 : 0));
+    }
+
+    public static string RemoveTestcaseJson(int problemId, string name)
+    {
+        lock (Lock) return Take(oj_mysql_remove_testcase(problemId, name));
+    }
+
+    public static string ListTestcasesJson(int problemId)
+    {
+        lock (Lock) return Take(oj_mysql_list_testcases(problemId));
     }
 
     public static string PublishContest(int cid, string contestJson)

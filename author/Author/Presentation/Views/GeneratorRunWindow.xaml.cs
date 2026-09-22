@@ -45,7 +45,7 @@ public partial class GeneratorRunWindow : Window
             bool ok = false;
             try
             {
-                var r = await _wb.Generators.RunAsync(id, name, _count);
+                var r = await _wb.Generators.RunAsync(_pid, id, name, _count);
                 ok = r.Ok;
                 if (_closed) return;
                 node.Header = $"{name} — {(r.Ok ? "成功" : "失败")}";
@@ -85,7 +85,7 @@ public partial class GeneratorRunWindow : Window
         string? name = tag.Name;
         if (string.IsNullOrEmpty(name) || !_loadedGens.Add(tag.Id)) return;
 
-        var files = await _wb.Generators.FilesAsync(tag.Id, name);
+        var files = await _wb.Generators.FilesAsync(_pid, name);
         if (_closed) return;
         node.Items.Clear();
         if (files.Count == 0)
@@ -110,7 +110,7 @@ public partial class GeneratorRunWindow : Window
 
         PreviewTitle.Text = $"文件：{tag.File}";
         PreviewBox.Text = "正在读取…";
-        var (text, truncated) = await _wb.Generators.GetFileAsync(tag.Id, tag.Name, tag.File);
+        var (text, truncated) = await _wb.Generators.GetFileAsync(_pid, tag.Name, tag.File);
         if (_closed) return;
         PreviewBox.Text = truncated
             ? text + "\n……（文件过大，仅显示前 200KB）"

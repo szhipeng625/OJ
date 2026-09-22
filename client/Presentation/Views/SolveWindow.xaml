@@ -47,39 +47,104 @@
             </Border>
 
             <Border Grid.Column="2" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8">
-                <DockPanel>
-                    <DockPanel DockPanel.Dock="Top" Margin="12,10,12,6">
-                        <TextBlock Text="提交代码（C++）" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        <TextBlock Text="g++ -O2" HorizontalAlignment="Right"
-                                   Foreground="Gray" VerticalAlignment="Center"/>
-                    </DockPanel>
-
-                    <Border DockPanel.Dock="Bottom" BorderBrush="#FFE3E6EB" BorderThickness="0,1,0,0"
-                            Padding="10,8">
+                <TabControl Margin="4">
+                    <TabItem Header="代码">
                         <DockPanel>
-                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
-                                <Button x:Name="SubmitBtn" Content="提交判题"
-                                        Style="{StaticResource ButtonPrimary}"
-                                        Width="110" Height="32" Click="SubmitBtn_OnClick"/>
-                                <TextBlock x:Name="StatusText" VerticalAlignment="Center"
-                                           Margin="12,0,0,0" Foreground="Gray"/>
-                            </StackPanel>
-                            <Grid>
+                            <DockPanel DockPanel.Dock="Top" Margin="12,10,12,6">
+                                <TextBlock Text="提交代码（C++）" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock Text="g++ -O2" HorizontalAlignment="Right"
+                                           Foreground="Gray" VerticalAlignment="Center"/>
+                            </DockPanel>
+
+                            <Border DockPanel.Dock="Bottom" BorderBrush="#FFE3E6EB" BorderThickness="0,1,0,0"
+                                    Padding="10,8">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button x:Name="SubmitBtn" Content="提交判题"
+                                                Style="{StaticResource ButtonPrimary}"
+                                                Width="110" Height="32" Click="SubmitBtn_OnClick"/>
+                                        <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                                                   Margin="12,0,0,0" Foreground="Gray"/>
+                                    </StackPanel>
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock x:Name="VerdictText" Text="结果：等待提交"
+                                                   FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
+                                        <ListBox x:Name="CaseList" Grid.Row="1" BorderThickness="0" Height="130"/>
+                                    </Grid>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Background="#1E1E1E" Margin="10,0,10,10">
+                                <controls:CodeEditor x:Name="CodeBox"/>
+                            </Border>
+                        </DockPanel>
+                    </TabItem>
+
+                    <TabItem Header="本地调试">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="0.6*"/>
+                                <RowDefinition Height="0.6*"/>
+                                <RowDefinition Height="1.8*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 按钮行 -->
+                            <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                                <TextBlock Text="测试样例：" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" Margin="6,0,0,0">
+                                    <Button Content="导入样例1" Width="88" Click="OnImportSample1"/>
+                                    <Button Content="导入样例2" Width="88" Margin="6,0,0,0" Click="OnImportSample2"/>
+                                    <Button Content="自定义导入" Width="96" Margin="6,0,0,0" Click="OnCustomImport"/>
+                                    <Button Content="运行" Width="72" Margin="6,0,0,0" Click="OnDebugRun"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- 样例输入 -->
+                            <Grid Grid.Row="1" Margin="0,0,0,6">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
-                                <TextBlock x:Name="VerdictText" Text="结果：等待提交"
-                                           FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
-                                <ListBox x:Name="CaseList" Grid.Row="1" BorderThickness="0" Height="130"/>
+                                <TextBlock Text="样例输入（可直接编辑）" FontWeight="SemiBold" Margin="0,0,0,4" HorizontalAlignment="Left"/>
+                                <TextBox x:Name="DebugInputBox" Grid.Row="1" AcceptsReturn="True"
+                                         Background="#FFF7F9FC" FontFamily="Consolas"
+                                         TextAlignment="Left" HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
                             </Grid>
-                        </DockPanel>
-                    </Border>
 
-                    <Border Background="#1E1E1E" Margin="10,0,10,10">
-                        <controls:CodeEditor x:Name="CodeBox"/>
-                    </Border>
-                </DockPanel>
+                            <!-- 样例输出 -->
+                            <Grid Grid.Row="2" Margin="0,0,0,6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="样例输出（期望）" FontWeight="SemiBold" Margin="0,0,0,4" HorizontalAlignment="Left"/>
+                                <TextBox x:Name="DebugExpectedBox" Grid.Row="1" AcceptsReturn="True"
+                                         Background="#FFF7F9FC" FontFamily="Consolas"
+                                         TextAlignment="Left" HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                            </Grid>
+
+                            <!-- 测试结果 -->
+                            <Grid Grid.Row="3">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock x:Name="DebugStatus" Text="测试结果" FontWeight="SemiBold" Margin="0,0,0,4" HorizontalAlignment="Left"/>
+                                <TextBox x:Name="DebugOutputBox" Grid.Row="1" AcceptsReturn="True"
+                                         Background="#FFF7F9FC" FontFamily="Consolas"
+                                         TextAlignment="Left" HorizontalContentAlignment="Left" VerticalContentAlignment="Center"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                            </Grid>
+                        </Grid>
+                    </TabItem>
+                </TabControl>
             </Border>
         </Grid>
     </Grid>

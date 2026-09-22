@@ -119,6 +119,53 @@ namespace author.Presentation.Controls
             Editor.TextArea.PreviewKeyDown += TextArea_PreviewKeyDown;
         }
 
+        // ---------- 格式工具栏（Word 式 Markdown 插入） ----------
+
+        /// <summary>用前后缀包裹选区（无选区则插入占位文本并把光标放到中间）。</summary>
+        public void ApplyWrap(string before, string after, string placeholder = "")
+        {
+            var ta = Editor.TextArea;
+            if (!ta.Selection.IsEmpty)
+            {
+                string sel = ta.Selection.GetText();
+                ta.Selection.ReplaceSelectionWithText(before + sel + after);
+            }
+            else
+            {
+                int offset = ta.Caret.Offset;
+                string insert = before + placeholder + after;
+                ta.Document.Insert(offset, insert);
+                ta.Caret.Offset = offset + before.Length + placeholder.Length;
+            }
+            Editor.Focus();
+        }
+
+        /// <summary>给选区每一行（无选区时当前行）加行首前缀。</summary>
+        public void PrefixLines(string prefix)
+        {
+            var ta = Editor.TextArea;
+            var doc = ta.Document;
+            var seg = ta.Selection.SurroundingSegment;
+            int start = doc.GetLineByOffset(seg.Offset).LineNumber;
+            int end = doc.GetLineByOffset(seg.EndOffset).LineNumber;
+            for (int i = end; i >= start; --i)
+                doc.Insert(doc.GetLineByNumber(i).Offset, prefix);
+            Editor.Focus();
+        }
+
+        /// <summary>在当前行前插入独立一行文本。</summary>
+        public void InsertLine(string text)
+        {
+            var ta = Editor.TextArea;
+            var doc = ta.Document;
+            var line = doc.GetLineByOffset(ta.Caret.Offset);
+            string nl = line.DelimiterLength > 0
+                ? doc.GetText(line.Offset + line.Length, line.DelimiterLength)
+                : Environment.NewLine;
+            doc.Insert(line.Offset, text + nl);
+            Editor.Focus();
+        }
+
         // 高亮定义名称（XSHD 插件，见 Presentation/Highlighting/CppDarkPlus.xshd）
         private const string DarkDefinitionName = "C++ Dark+";
         private static readonly object HighlightInitLock = new();

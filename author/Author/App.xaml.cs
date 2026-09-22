@@ -52,7 +52,6 @@ public partial class App : Application
                 Generators = generators,
                 Contests = contests,
                 Build = build,
-                TestDataDir = testDataDir,
                 ServerRoot = serverRoot,
                 ServerProblemDir = serverProblemDir,
             };

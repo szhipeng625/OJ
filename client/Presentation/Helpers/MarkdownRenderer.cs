@@ -1,5 +1,6 @@
 ﻿using System.Windows.Controls;
 using Markdig;
+using client.DataAccess.Models;
 
 namespace client.Presentation.Helpers;
 
@@ -11,14 +12,29 @@ public static class MarkdownRenderer
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions().Build();
 
-    /// <summary>把题面描述与样例输入/输出拼成完整 Markdown（样例直接放进题面里展示）。</summary>
-    public static string CombineStatement(string description, string sampleIn, string sampleOut)
+    /// <summary>把题面描述与测试样例拼成完整 Markdown（样例直接放进题面里展示）。</summary>
+    public static string CombineStatement(string description, List<TestCaseSample>? samples, string sampleIn, string sampleOut)
     {
         var sb = new System.Text.StringBuilder(description ?? "");
-        if (!string.IsNullOrWhiteSpace(sampleIn))
-            sb.Append("\n\n## 样例输入\n\n```\n").Append(sampleIn).Append("\n```");
-        if (!string.IsNullOrWhiteSpace(sampleOut))
-            sb.Append("\n\n## 样例输出\n\n```\n").Append(sampleOut).Append("\n```");
+        if (samples is { Count: > 0 })
+        {
+            foreach (var s in samples)
+            {
+                string label = s.IsSample ? "样例" : "测试用例";
+                sb.Append($"\n\n## {label}：{s.Name}\n\n");
+                if (!string.IsNullOrWhiteSpace(s.Input))
+                    sb.Append("**输入**\n\n```\n").Append(s.Input).Append("\n```\n");
+                if (!string.IsNullOrWhiteSpace(s.Output))
+                    sb.Append("**输出**\n\n```\n").Append(s.Output).Append("\n```\n");
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(sampleIn))
+                sb.Append("\n\n## 样例输入\n\n```\n").Append(sampleIn).Append("\n```");
+            if (!string.IsNullOrWhiteSpace(sampleOut))
+                sb.Append("\n\n## 样例输出\n\n```\n").Append(sampleOut).Append("\n```");
+        }
         return sb.ToString();
     }
 

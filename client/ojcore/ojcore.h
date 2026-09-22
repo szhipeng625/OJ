@@ -61,6 +61,15 @@ OJ_API const char* oj_get_contest(int cid);
 OJ_API const char* oj_submit_ex(int problem_id, const char* code,
                                 const char* username, int virtual_);
 
+// 本地调试：编译用户代码并用给定输入运行，返回 stdout/stderr（不提交、不判题）。
+// 返回 {"ok":true/false,"compileError":"...","output":"...","runError":"...","timeout":bool,"exitCode":n}
+OJ_API const char* oj_debug_run(const char* code, const char* input, int timeout_ms);
+
+// 本地调试（样例比对）：编译用户代码，用 problems/{id}/sample.in 作输入运行，
+// 与 problems/{id}/sample.out 逐行比对。返回
+// {"ok":bool,"compileError":"...","output":"...","expected":"...","passed":bool,"runError":"...","timeout":bool,"exitCode":n}
+OJ_API const char* oj_debug_test(const char* code, int problem_id, int timeout_ms);
+
 // 比赛榜单。按 problemId ∈ contest.problems 过滤提交，按 username 聚合。
 // 每题 AC 时间（距 startTime 分钟）+ 每次错误提交 20 分钟罚时；按 AC 数降序、罚时升序。
 // 返回 {"official":[{"rank":1,"username":"alice","solved":3,"penalty":125,"detail":{...}},...],
@@ -119,6 +128,16 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int
 // 全部题目的公开状态：{"id":true/false,...}（服务端展示未公开标记用）
 OJ_API const char* oj_mysql_problem_visibility(void);
 
+// 服务端题库列表（含未公开）：[{"id":1,"title":"...","isPublic":true,"dataCount":20}, ...]
+OJ_API const char* oj_mysql_list_problems(void);
+
+// 单道题完整内容（含标程与已绑定生成器源码）：
+// {"ok":true,"id":1,"title":"...","description":"...","sampleIn":"...","sampleOut":"...",
+//  "timeMs":1000,"memMb":256,"tags":[...],"stdCode":"...","isPublic":true,"updatedAt":"...",
+//  "generators":[{"id":1,"name":"juhua","description":"...","code":"...","genCount":10}, ...]}
+// 不存在返回 {"ok":false,"error":"题目不存在"}
+OJ_API const char* oj_mysql_get_problem(int id);
+
 // ===== 生成器库（全局 generators 表：出题端增删改查 + 题↔生成器绑定） =====
 
 // 全部生成器：[{"id":1,"name":"juhua","description":"...","createdAt":"..."}, ...]
@@ -144,6 +163,14 @@ OJ_API const char* oj_mysql_unbind_generator(int problem_id, int generator_id);
 
 // 跨生成器搜索代码（解密后扫描）：[{"id":1,"name":"juhua","lineNo":5,"line":"...","keyword":"..."}, ...]
 OJ_API const char* oj_mysql_search_generators(const char* keyword);
+
+// ===== 题目测试样例（丰富题面 + 调试用，判题仍按生成器代码在客户端重新生成） =====
+// upsert 一个测试样例：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_set_testcase(int problem_id, const char* name, const char* input, const char* output, int is_sample);
+// 删除一个测试样例：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_remove_testcase(int problem_id, const char* name);
+// 某题全部测试样例：[{"name":"juhua/1","isSample":true}, ...]
+OJ_API const char* oj_mysql_list_testcases(int problem_id);
 
 // 发布比赛到 MySQL：contest_json 为比赛 JSON（含 name/description/startTime/endTime/problems）。
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。

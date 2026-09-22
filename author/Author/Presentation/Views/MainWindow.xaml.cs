@@ -30,8 +30,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        RootText.Text = "题库目录：" + _wb.Problems.Root;
-        DataDirBox.Text = _wb.TestDataDir;
+        RootText.Text = "题库来源：MySQL 数据库（本地目录仅作新建/编辑时的工作副本缓存）";
 
         _wb.Build.PendingChanged += OnPendingChanged;
         _workspaces.ProblemListChanged += () => Dispatcher.InvokeAsync(RefreshProblems);
@@ -52,46 +51,28 @@ public partial class MainWindow : Window
     // ---------- 题库列表 ----------
     private async Task RefreshProblems()
     {
+        // 题库列表直接从 MySQL 拉取（含未公开标记），本地目录仅作新建/编辑时的工作副本缓存
         _problems = await _wb.Problems.ListAsync();
-        // 从 MySQL 读取公开状态，标记未公开题目（仅服务端可见，客户端不展示）
-        try
-        {
-            var vis = await _wb.Problems.GetVisibilityAsync();
-            _problems = _problems.Select(p => p with { IsPublic = vis.TryGetValue(p.Id, out var pub) ? pub : true }).ToList();
-        }
-        catch { }
         if (!IsLoaded) return;
         ProblemList.ItemsSource = null;
         ProblemList.ItemsSource = _problems;
         StatusText.Text = $"共 {_problems.Count} 道题";
     }
 
-    // ---------- 新建题目：输入标题 → 自动编号 → 自动填充测试数据 ----------
+    // ---------- 新建题目：弹窗输入标题 + 标签 → 自动编号 ----------
     private async void OnNewProblem(object sender, RoutedEventArgs e)
     {
-        string title = NewTitleBox.Text.Trim();
-        if (string.IsNullOrEmpty(title))
-        {
-            StatusText.Text = "请输入题目标题";
-            return;
-        }
+        var win = new NewProblemWindow { Owner = this };
+        if (win.ShowDialog() != true || win.ProblemTitle is not { } title) return;
 
         IsEnabled = false;
         try
         {
             int id = await _wb.Problems.SuggestIdAsync();
-            var (ok, msg) = await _wb.Problems.CreateAsync(id, title);
+            var (ok, msg) = await _wb.Problems.CreateAsync(id, title, win.ProblemTags ?? "");
             StatusText.Text = msg;
             if (!ok) return;
 
-            // 自动搜索填充测试数据（.in/.out）
-            string dataDir = DataDirBox.Text.Trim();
-            var (inCnt, outCnt) = await _wb.Problems.AutoFillDataAsync(id, dataDir);
-            StatusText.Text = inCnt > 0
-                ? $"已创建 P{id}「{title}」，并自动填充 {inCnt} 个 .in / {outCnt} 个 .out 测试数据"
-                : $"已创建 P{id}「{title}」（测试数据目录 {dataDir} 中未找到 .in/.out）";
-
-            NewTitleBox.Text = "";
             await RefreshProblems();
             _workspaces.Open(id);   // 新建后直接打开工作台
         }
@@ -110,18 +91,6 @@ public partial class MainWindow : Window
     {
         var win = new ContestManagementWindow(_wb) { Owner = this };
         win.ShowDialog();
-    }
-
-    // ---------- 测试数据目录 ----------
-    private void OnBrowseDataDir(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog
-        {
-            Title = "选择测试数据目录（自动搜索其中的 .in / .out 文件）",
-            InitialDirectory = DataDirBox.Text.Trim()
-        };
-        if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(dlg.FolderName))
-            DataDirBox.Text = dlg.FolderName;
     }
 
     // ---------- 退出：等待所有后台线程/任务结束 ----------

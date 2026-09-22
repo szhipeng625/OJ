@@ -81,6 +81,27 @@ public sealed class GeneratorClient
         catch { return new(); }
     }
 
+    // ===== 题目测试样例 =====
+    public List<GenTestcase> ListTestcases(int problemId)
+    {
+        try { return JsonSerializer.Deserialize<List<GenTestcase>>(OjCoreInterop.ListTestcasesJson(problemId), JsonOpts) ?? new(); }
+        catch { return new(); }
+    }
+
+    public (bool Ok, string Message) SetTestcase(int problemId, string name, string input, string output, bool isSample)
+    {
+        string r = OjCoreInterop.SetTestcaseJson(problemId, name, input, output, isSample);
+        if (r.Contains("\"ok\":true")) return (true, "已上传测试样例");
+        return (false, ParseError(r));
+    }
+
+    public (bool Ok, string Message) RemoveTestcase(int problemId, string name)
+    {
+        string r = OjCoreInterop.RemoveTestcaseJson(problemId, name);
+        if (r.Contains("\"ok\":true")) return (true, "已移除测试样例");
+        return (false, ParseError(r));
+    }
+
     private static string ParseError(string json)
     {
         try

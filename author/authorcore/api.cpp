@@ -365,35 +365,63 @@ AC_API const char* ac_gen_outputs(int id, const char* std_exe) {
     return dup(json);
 }
 
-// 完整性校验
+// 完整性校验：题面检查（标题/描述/样例/标程）+ 生成器检查（.in/.out）
 AC_API const char* ac_validate(int id) {
     std::string dir = problemDir(id);
-    std::string json = "{\"ok\":";
-    std::vector<std::string> missing;
-    if (!exists(dir + "\\statement.txt")) missing.push_back("statement.txt");
-    if (!exists(dir + "\\sample.in"))    missing.push_back("sample.in");
-    if (!exists(dir + "\\sample.out"))   missing.push_back("sample.out");
+
+    // —— 题面检查 ——
+    std::string st = readFile(dir + "\\statement.txt");
+    size_t nl = st.find('\n');
+    std::string title = (nl == std::string::npos) ? st : st.substr(0, nl);
+    std::string desc  = (nl == std::string::npos) ? "" : st.substr(nl + 1);
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t\r\n");
+        return s.substr(a, b - a + 1);
+    };
+    bool titleOk = !trim(title).empty();
+    bool descOk  = !trim(desc).empty();
+    bool hasStd = exists(dir + "\\std.cpp");
+
+    // —— 生成器检查 ——
     auto gens = listGenDirs(id);
-    std::vector<std::string> ins;
+    int genCount = (int)gens.size();
+    int inCount = 0;
+    std::vector<std::string> missingOut;
     for (auto& g : gens) {
         std::string gd = dir + "\\" + g;
         for (auto& fn : listInFiles(gd)) {
-            ins.push_back(g + "\\" + fn);
+            ++inCount;
             std::string base = fn.substr(0, fn.size() - 3);
-            if (!exists(gd + "\\" + base + ".out")) missing.push_back(g + "\\" + base + ".out");
+            if (!exists(gd + "\\" + base + ".out")) missingOut.push_back(g + "\\" + base + ".out");
         }
     }
-    bool hasStd = exists(dir + "\\std.cpp");
-    json += std::to_string(missing.empty() && !ins.empty());
-    json += ",\"inCount\":" + std::to_string(ins.size());
-    json += ",\"genCount\":" + std::to_string((int)gens.size());
-    json += ",\"hasStd\":" + std::string(hasStd ? "true" : "false");
+
+    std::vector<std::string> missing;
+    if (!exists(dir + "\\statement.txt")) missing.push_back("statement.txt");
+
+    bool ok = titleOk && descOk && hasStd
+           && genCount > 0 && inCount > 0 && missingOut.empty();
+
+    std::string json = "{\"ok\":" + std::string(ok ? "true" : "false");
+    json += ",\"title\":" + std::string(titleOk ? "true" : "false");
+    json += ",\"desc\":" + std::string(descOk ? "true" : "false");
+    json += ",\"std\":" + std::string(hasStd ? "true" : "false");
+    json += ",\"genCount\":" + std::to_string(genCount);
+    json += ",\"inCount\":" + std::to_string(inCount);
     json += ",\"missing\":[";
     for (size_t i = 0; i < missing.size(); ++i) {
         if (i) json += ",";
-        json += "\"" + missing[i] + "\"";
+        json += "\"" + jsonEscape(missing[i]) + "\"";
+    }
+    json += "],\"missingOut\":[";
+    for (size_t i = 0; i < missingOut.size(); ++i) {
+        if (i) json += ",";
+        json += "\"" + jsonEscape(missingOut[i]) + "\"";
     }
     json += "]}";
+    g_lastError.clear();
     return dup(json);
 }
 

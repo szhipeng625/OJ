@@ -26,6 +26,8 @@ public sealed class GeneratorService
     // 本地编译/运行按生成器 id 分 gate，避免同目录 exe/数据竞争。
     private const string LibGate = "gen-lib";
     private static string Gate(int id) => "g" + id;
+    // 本地编译/运行/读文件都落在 problems/{题号}/{name}/，按题号串行（与 ProblemService 一致）
+    private static string PGate(int problemId) => "p" + problemId;
 
     private const string GenTemplate =
         "// 数据生成器 {name}.cpp\n"
@@ -92,29 +94,37 @@ public sealed class GeneratorService
         });
 
     // ===== 本地测试（编译 / 运行 / 文件预览） =====
-    public Task<JobResult> CompileAsync(int id, string name, string code)
-        => _build.RunAsync(Gate(id), () =>
+    // 生成数据落到固定相对路径 problems/{题号}/{生成器名}/（与客户端判题读取目录一致）。
+
+    public Task<JobResult> CompileAsync(int problemId, int id, string name, string code)
+        => _build.RunAsync(PGate(problemId), () =>
         {
             var d = _db.GetGenerator(id);
             if (d != null) _db.Update(id, code, d.Desc);   // 编译前先落库
-            string r = _author.GenTestCompile(id, name, code);
-            return r.Contains("\"ok\":true")
+            string r = _author.GenSave(problemId, name, code);   // 写 gen.cpp 到 problems/{题号}/{name}/
+            if (!r.Contains("\"ok\":true"))
+                return new JobResult(false, "保存失败：" + AuthorClient.ParseError(r));
+            string rc = _author.GenCompile(problemId, name);
+            return rc.Contains("\"ok\":true")
                 ? new JobResult(true, "编译成功 ✓")
-                : new JobResult(false, "编译失败：" + AuthorClient.ParseError(r));
+                : new JobResult(false, "编译失败：" + AuthorClient.ParseError(rc));
         });
 
-    public Task<JobResult> RunAsync(int id, string name, int n)
-        => _build.RunAsync(Gate(id), () =>
+    public Task<JobResult> RunAsync(int problemId, int id, string name, int n)
+        => _build.RunAsync(PGate(problemId), () =>
         {
             var d = _db.GetGenerator(id);
             if (d == null) return new JobResult(false, "生成器不存在");
-            string cr = _author.GenTestCompile(id, name, d.Code);
-            if (!cr.Contains("\"ok\":true"))
-                return new JobResult(false, "编译失败：" + AuthorClient.ParseError(cr));
-            string r = _author.GenTestRun(id, name, n);
+            string r = _author.GenSave(problemId, name, d.Code);
+            if (!r.Contains("\"ok\":true"))
+                return new JobResult(false, "保存失败：" + AuthorClient.ParseError(r));
+            string rc = _author.GenCompile(problemId, name);
+            if (!rc.Contains("\"ok\":true"))
+                return new JobResult(false, "编译失败：" + AuthorClient.ParseError(rc));
+            string rr = _author.GenRun(problemId, name, n);
             try
             {
-                using var doc = JsonDocument.Parse(r);
+                using var doc = JsonDocument.Parse(rr);
                 var root = doc.RootElement;
                 if (root.TryGetProperty("ok", out var ok) && ok.GetBoolean())
                 {
@@ -127,17 +137,35 @@ public sealed class GeneratorService
                                + (fails.Count > 0 ? "；失败：" + string.Join("；", fails.Take(5)) : "");
                     return new JobResult(true, msg);
                 }
-                return new JobResult(false, "生成失败：" + AuthorClient.ParseError(r));
+                return new JobResult(false, "生成失败：" + AuthorClient.ParseError(rr));
             }
-            catch { return new JobResult(false, "生成失败：" + r); }
+            catch { return new JobResult(false, "生成失败：" + rr); }
         });
 
-    public Task<List<GenFile>> FilesAsync(int id, string name)
-        => _build.RunAsync(Gate(id), () => _author.ListGenTestFiles(id, name));
+    public Task<List<GenFile>> FilesAsync(int problemId, string name)
+        => _build.RunAsync(PGate(problemId), () => _author.ListGenFiles(problemId, name));
 
-    public Task<(string Text, bool Truncated)> GetFileAsync(int id, string name, string file)
-        => _build.RunAsync(Gate(id), () => _author.GetGenTestFile(id, name, file));
+    public Task<(string Text, bool Truncated)> GetFileAsync(int problemId, string name, string file)
+        => _build.RunAsync(PGate(problemId), () => _author.GetGenFile(problemId, name, file));
 
     public Task<List<GenSearchHit>> SearchAsync(string keyword)
         => _build.RunAsync(LibGate, () => _db.Search(keyword));
+
+    // ===== 题目测试样例（丰富题面 + 调试用） =====
+    public Task<List<GenTestcase>> ListTestcasesAsync(int problemId)
+        => _build.RunAsync(LibGate, () => _db.ListTestcases(problemId));
+
+    public Task<JobResult> SetTestcaseAsync(int problemId, string name, string input, string output, bool isSample)
+        => _build.RunAsync(LibGate, () =>
+        {
+            var (ok, msg) = _db.SetTestcase(problemId, name, input, output, isSample);
+            return new JobResult(ok, msg);
+        });
+
+    public Task<JobResult> RemoveTestcaseAsync(int problemId, string name)
+        => _build.RunAsync(LibGate, () =>
+        {
+            var (ok, msg) = _db.RemoveTestcase(problemId, name);
+            return new JobResult(ok, msg);
+        });
 }

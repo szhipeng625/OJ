@@ -48,6 +48,27 @@ public sealed class AuthorClient
         catch { return new(); }
     }
 
+    /// <summary>从 MySQL（problems 表）读取题库列表，本地目录仅作为工作副本缓存。</summary>
+    public List<ProblemInfo> ListFromMySql()
+    {
+        var items = new List<ProblemInfo>();
+        try
+        {
+            using var doc = JsonDocument.Parse(OjCoreInterop.ListProblemsJson());
+            foreach (var p in doc.RootElement.EnumerateArray())
+            {
+                int id = p.TryGetProperty("id", out var x) ? x.GetInt32() : 0;
+                if (id <= 0) continue;
+                string title = p.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+                bool isPublic = !p.TryGetProperty("isPublic", out var pub) || pub.GetBoolean();
+                int dataCount = p.TryGetProperty("dataCount", out var dc) ? dc.GetInt32() : 0;
+                items.Add(new ProblemInfo(id, title, dataCount, isPublic));
+            }
+        }
+        catch { }
+        return items;
+    }
+
     public string Create(int id, string? title)
         => AuthorCoreInterop.Create(id,
             string.IsNullOrWhiteSpace(title) ? "新题目" : title,
@@ -104,6 +125,68 @@ public sealed class AuthorClient
             ReadFile("sample.in"), ReadFile("sample.out"),
             GetMeta(id),
             File.Exists(stdPath) ? File.ReadAllText(stdPath) : StdTemplate);
+    }
+
+    /// <summary>
+    /// 从 MySQL 读取一道题的完整内容并物化到本地缓存目录（statement.txt / sample.in / sample.out /
+    /// meta.json / std.cpp / 各绑定生成器的 gen.cpp 与 desc.txt），供 authorcore 编辑、编译、发布使用。
+    /// 题目不在数据库（如新建未发布）时返回 null，由调用方回退到本地缓存。
+    /// </summary>
+    public ProblemContent? LoadFromMySql(int id)
+    {
+        string json = OjCoreInterop.GetProblemJson(id);
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            if (!r.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) return null;
+
+            string title = r.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+            string desc = r.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
+            string sampleIn = r.TryGetProperty("sampleIn", out var si) ? si.GetString() ?? "" : "";
+            string sampleOut = r.TryGetProperty("sampleOut", out var so) ? so.GetString() ?? "" : "";
+            int timeMs = r.TryGetProperty("timeMs", out var tm) ? tm.GetInt32() : 1000;
+            int memMb = r.TryGetProperty("memMb", out var mm) ? mm.GetInt32() : 256;
+            string stdCode = r.TryGetProperty("stdCode", out var sc) ? sc.GetString() ?? "" : "";
+            string updatedAt = r.TryGetProperty("updatedAt", out var ua) ? ua.GetString() ?? "" : "";
+            string tagsJson = r.TryGetProperty("tags", out var tg) ? tg.GetRawText() : "[]";
+            var tags = new List<string>();
+            if (r.TryGetProperty("tags", out var ta) && ta.ValueKind == JsonValueKind.Array)
+                foreach (var tag in ta.EnumerateArray())
+                    if (!string.IsNullOrEmpty(tag.GetString())) tags.Add(tag.GetString()!);
+
+            // 物化到本地缓存目录（本地仅作工作副本，权威数据在 MySQL）
+            string dir = ProblemDir(id);
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "statement.txt"), title + "\n\n" + desc);
+            File.WriteAllText(Path.Combine(dir, "sample.in"), sampleIn);
+            File.WriteAllText(Path.Combine(dir, "sample.out"), sampleOut);
+            File.WriteAllText(Path.Combine(dir, "std.cpp"), stdCode);
+            string updated = updatedAt.Replace("\"", "").Replace("\\", "");
+            File.WriteAllText(Path.Combine(dir, "meta.json"),
+                "{\"timeLimitMs\":" + timeMs + ",\"memLimitMB\":" + memMb
+                + ",\"tags\":" + tagsJson + ",\"updatedAt\":\"" + updated + "\"}");
+
+            if (r.TryGetProperty("generators", out var gens) && gens.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var g in gens.EnumerateArray())
+                {
+                    string name = g.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
+                    string code = g.TryGetProperty("code", out var cd) ? cd.GetString() ?? "" : "";
+                    string gdesc = g.TryGetProperty("description", out var gd) ? gd.GetString() ?? "" : "";
+                    if (string.IsNullOrEmpty(name)) continue;
+                    string gdir = Path.Combine(dir, name);
+                    Directory.CreateDirectory(gdir);
+                    File.WriteAllText(Path.Combine(gdir, "gen.cpp"), code);
+                    File.WriteAllText(Path.Combine(gdir, "desc.txt"), gdesc);
+                }
+            }
+
+            return new ProblemContent(title, desc, sampleIn, sampleOut,
+                new ProblemMeta(true, timeMs, memMb, tags.ToArray(), updatedAt), stdCode);
+        }
+        catch { return null; }
     }
 
     public void WriteProblemFile(int id, string name, string content)
@@ -213,7 +296,6 @@ public sealed class AuthorClient
     public List<DataRow> ListGroupedRows(int id)
     {
         var rows = new List<DataRow>();
-        AddGroup(rows, "", "手工数据（题目根目录）", ProblemDir(id));
         foreach (var g in ListGenerators(id))
         {
             string title = "生成器 " + g.Name + (string.IsNullOrEmpty(g.Desc) ? "" : "（" + g.Desc + "）");

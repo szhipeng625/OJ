@@ -15,7 +15,6 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
@@ -41,32 +40,23 @@
                         <TextBlock Grid.Column="4" Text="标签(逗号分隔)：" VerticalAlignment="Center" Margin="10,0,4,0"/>
                         <TextBox x:Name="TagsBox" Grid.Column="5" VerticalContentAlignment="Center" ToolTip="如：基础,模拟,字符串"/>
                     </Grid>
-                    <TextBlock Grid.Row="2" Text="题目描述（支持 Markdown 格式，Tab 缩进，客户端将按 Markdown 渲染）：" Margin="0,4"/>
+                    <StackPanel Grid.Row="2" Margin="0,4,0,0">
+                        <DockPanel>
+                            <TextBlock Text="题目描述（支持 Markdown，客户端将按 Markdown 渲染）：" Margin="0,0,0,4" VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Right" Foreground="#888" Text="选中文字后点按钮格式化（类似 Word）" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <WrapPanel Margin="0,0,0,4">
+                            <Button Content="B" FontWeight="Bold" Width="30" Margin="0,0,4,0" Click="OnBold" ToolTip="加粗 **文字**"/>
+                            <Button Content="I" FontStyle="Italic" Width="30" Margin="0,0,4,0" Click="OnItalic" ToolTip="斜体 *文字*"/>
+                            <Button Content="H" Width="30" Margin="0,0,4,0" Click="OnHeading" ToolTip="标题（#）"/>
+                            <Button Content="• 列表" Width="56" Margin="0,0,4,0" Click="OnList" ToolTip="无序列表（-）"/>
+                            <Button Content="❝ 引用" Width="56" Margin="0,0,4,0" Click="OnQuote" ToolTip="引用（>）"/>
+                            <Button Content="代码块" Width="60" Margin="0,0,4,0" Click="OnCodeBlock" ToolTip="代码块（```）"/>
+                            <Button Content="分隔线" Width="60" Click="OnHr" ToolTip="分隔线（---）"/>
+                        </WrapPanel>
+                    </StackPanel>
                     <controls:CodeEditor x:Name="DescBox" Grid.Row="3" IsLight="True" ShowLineNumbers="False" WordWrap="True"/>
-                    <Grid Grid.Row="4" Margin="0,6,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <DockPanel Grid.Column="0">
-                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
-                                <Button DockPanel.Dock="Right" Content="导入…" Width="64" Height="24" Padding="0" Click="OnImportSampleIn"/>
-                                <TextBlock Text="样例输入 sample.in" Foreground="#888" VerticalAlignment="Center"/>
-                            </DockPanel>
-                            <TextBox x:Name="SampleInBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"
-                                     IsReadOnly="True" Background="#FFF7F9FC" VerticalScrollBarVisibility="Auto"/>
-                        </DockPanel>
-                        <DockPanel Grid.Column="2">
-                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
-                                <Button DockPanel.Dock="Right" Content="导入…" Width="64" Height="24" Padding="0" Click="OnImportSampleOut"/>
-                                <TextBlock Text="样例输出 sample.out" Foreground="#888" VerticalAlignment="Center"/>
-                            </DockPanel>
-                            <TextBox x:Name="SampleOutBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"
-                                     IsReadOnly="True" Background="#FFF7F9FC" VerticalScrollBarVisibility="Auto"/>
-                        </DockPanel>
-                    </Grid>
-                    <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,8,0,0">
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,8,0,0">
                         <Button Content="保存题面" Width="110" Click="OnSaveStatement"/>
                         <TextBlock x:Name="StatementMsg" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#888"/>
                     </StackPanel>
@@ -98,27 +88,30 @@
                                    Margin="0,0,0,4" Foreground="#888" TextWrapping="Wrap"/>
                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                             <Button Content="生成标准答案" Click="OnGenerateAnswers" Width="130" Margin="0,0,6,0"
-                                    ToolTip="后台自动搜索填充 .in/.out → 编译标程 → 运行标程把输出重定向到对应 .out"/>
-                            <Button Content="自动搜索填充" Click="OnAutoFill" Width="120" Margin="0,0,6,0"
-                                    ToolTip="从测试数据目录自动搜索 .in/.out 并填充到本题"/>
-                            <Button Content="导入 .in" Click="OnImportIn" Width="80" Margin="0,0,6,0"/>
-                            <Button Content="导入 .out" Click="OnImportOut" Width="80" Margin="0,0,6,0"/>
-                            <Button Content="删除选中" Click="OnDeleteData" Width="90"/>
+                                    ToolTip="编译标程 → 运行标程为所有 .in 生成对应 .out"/>
+                            <TextBlock Text="勾选需要作为题目样例的输入/输出，自动上传到数据库" Foreground="#888" VerticalAlignment="Center"/>
                         </WrapPanel>
                         <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
                         <ListView x:Name="DataGroupView" BorderThickness="1" BorderBrush="#FFE3E6EB"
                                   MouseDoubleClick="OnDataRowDoubleClick">
                             <ListView.View>
                                 <GridView>
-                                    <GridViewColumn Header="输入数据 (.in)" Width="190" DisplayMemberBinding="{Binding InDisplay}"/>
-                                    <GridViewColumn Header="输出数据 (.out)" Width="190" DisplayMemberBinding="{Binding OutDisplay}"/>
+                                    <GridViewColumn Header="样例" Width="52">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsSample, Mode=TwoWay}" HorizontalAlignment="Center" Click="OnSampleCheck"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="输入数据 (.in)" Width="180" DisplayMemberBinding="{Binding InDisplay}"/>
+                                    <GridViewColumn Header="输出数据 (.out)" Width="180" DisplayMemberBinding="{Binding OutDisplay}"/>
                                 </GridView>
                             </ListView.View>
                             <ListView.GroupStyle>
                                 <GroupStyle>
                                     <GroupStyle.HeaderTemplate>
                                         <DataTemplate>
-                                            <TextBlock FontWeight="Bold" Margin="0,6,0,2" Foreground="#2d8cf0" Text="{Binding Name}"/>
+                                            <TextBlock FontWeight="Bold" Margin="0,6,0,2" Foreground="#2d8cf0" Text="{Binding Items[0].GroupTitle}"/>
                                         </DataTemplate>
                                     </GroupStyle.HeaderTemplate>
                                 </GroupStyle>
@@ -144,9 +137,9 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="跨题查找 gen.cpp：" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Text="查找数据生成器：" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBox x:Name="GenSearchBox" Grid.Column="1" VerticalContentAlignment="Center"
-                                     ToolTip="在所有题目的 gen.cpp 中搜索函数名 / 变量 / 注释关键字" KeyDown="OnGenSearchKey"/>
+                                     ToolTip="在生成器库中搜索代码（函数名 / 变量 / 注释关键字）" KeyDown="OnGenSearchKey"/>
                             <Button Grid.Column="2" Content="查找" Width="80" Margin="8,0,0,0" Click="OnGenSearch"/>
                         </Grid>
                     </Border>

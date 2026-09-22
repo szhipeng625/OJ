@@ -34,4 +34,32 @@ std::vector<CaseResult> run_tests(const std::string& exeFile,
 // 汇总整体判定：CE > TLE > RE/SE > WA > AC
 std::string summarize(const std::vector<CaseResult>& cases);
 
+// 本地调试：编译用户源码并用给定 stdin 运行，返回 stdout/stderr。
+// workDir 为临时目录（用于中间文件）。timeoutMs 为运行时限。
+struct DebugResult {
+    bool ok = false;            // 编译成功且运行退出码为 0
+    std::string compileError;   // g++ 编译错误（stderr）
+    std::string output;         // 程序 stdout
+    std::string runError;       // 程序 stderr
+    bool timeout = false;
+    DWORD exitCode = 0;
+};
+DebugResult debug_run(const std::string& workDir, const std::string& code,
+                      const std::string& input, DWORD timeoutMs);
+
+// 本地调试（样例比对）：编译并用 inFile 作 stdin 运行，与 outFile 逐行比对。
+struct DebugTestResult {
+    bool ok = false;            // 编译成功且运行正常
+    std::string compileError;
+    std::string output;         // 程序 stdout（实际输出）
+    std::string expected;       // 期望输出（sample.out）
+    bool passed = false;        // 输出比对通过
+    std::string runError;       // 程序 stderr
+    bool timeout = false;
+    DWORD exitCode = 0;
+};
+DebugTestResult debug_test(const std::string& workDir, const std::string& code,
+                           const std::string& inFile, const std::string& outFile,
+                           DWORD timeoutMs);
+
 } // namespace oj

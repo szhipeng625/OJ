@@ -28,36 +28,20 @@
             </DockPanel>
             <TextBlock Grid.Row="1" x:Name="RootText" Foreground="#888" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-            <!-- 新建题目：输入标题，自动生成编号 -->
+            <!-- 新建题目：点击弹出输入标题与标签，编号自动生成 -->
             <Grid Grid.Row="2" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="题目标题：" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox x:Name="NewTitleBox" Grid.Column="1" VerticalContentAlignment="Center"
-                         ToolTip="输入新题目标题，系统将自动生成题目编号"/>
-                <Button Grid.Column="2" Content="新建题目" Width="96" Margin="6,0,6,0" Click="OnNewProblem"/>
-                <Button Grid.Column="3" Content="打开工作台" Width="96" Click="OnOpenWorkspace"/>
-            </Grid>
-
-            <!-- 测试数据目录（自动搜索填充源） -->
-            <Grid Grid.Row="3" Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="测试数据目录：" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox x:Name="DataDirBox" Grid.Column="1" VerticalContentAlignment="Center"
-                         ToolTip="新建题目时自动在此目录搜索 .in/.out 并填充到题目；也可在题目工作台的「测试数据」页点击「自动搜索填充」"/>
-                <Button Grid.Column="2" Content="浏览…" Width="72" Margin="6,0,0,0" Click="OnBrowseDataDir"/>
+                <TextBlock Text="点击「新建题目」输入标题与标签（编号自动生成）：" Foreground="#888" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="新建题目" Width="110" Margin="0,0,8,0" Click="OnNewProblem"/>
+                <Button Grid.Column="2" Content="打开工作台" Width="96" Click="OnOpenWorkspace"/>
             </Grid>
 
             <!-- 题库列表 -->
-            <Grid Grid.Row="4">
+            <Grid Grid.Row="3">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>

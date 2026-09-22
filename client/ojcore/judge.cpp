@@ -258,4 +258,156 @@ std::string summarize(const std::vector<CaseResult>& cases) {
     return "AC";
 }
 
+DebugResult debug_run(const std::string& workDir, const std::string& code,
+                      const std::string& input, DWORD timeoutMs) {
+    DebugResult r;
+    std::string src = workDir + "\\debug.cpp";
+    std::string exe = workDir + "\\debug.exe";
+    std::string inFile  = workDir + "\\debug.in";
+    std::string outFile = workDir + "\\debug.out";
+    std::string errFile = workDir + "\\debug.err";
+
+    {
+        std::ofstream f(src, std::ios::binary | std::ios::trunc);
+        if (!f) { r.compileError = "无法写入源文件"; return r; }
+        f << code;
+    }
+    {
+        std::ofstream f(inFile, std::ios::binary | std::ios::trunc);
+        f << input;
+    }
+
+    std::string cerrMsg;
+    if (!compile_cpp(src, exe, cerrMsg)) {
+        r.compileError = cerrMsg;
+        DeleteFileA(src.c_str());
+        DeleteFileA(inFile.c_str());
+        return r;
+    }
+
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+    HANDLE hIn  = CreateFileA(inFile.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                              &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hOut = CreateFileA(outFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hErr = CreateFileA(errFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hIn == INVALID_HANDLE_VALUE || hOut == INVALID_HANDLE_VALUE || hErr == INVALID_HANDLE_VALUE) {
+        if (hIn  != INVALID_HANDLE_VALUE) CloseHandle(hIn);
+        if (hOut != INVALID_HANDLE_VALUE) CloseHandle(hOut);
+        if (hErr != INVALID_HANDLE_VALUE) CloseHandle(hErr);
+        DeleteFileA(src.c_str()); DeleteFileA(exe.c_str()); DeleteFileA(inFile.c_str());
+        r.runError = "无法创建输入/输出文件";
+        return r;
+    }
+
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = hIn; si.hStdOutput = hOut; si.hStdError = hErr;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = "\"" + exe + "\"";
+    std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
+    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
+                                  workDir.empty() ? NULL : workDir.c_str(), &si, &pi);
+    CloseHandle(hIn); CloseHandle(hOut); CloseHandle(hErr);
+    if (!started) {
+        DeleteFileA(src.c_str()); DeleteFileA(exe.c_str()); DeleteFileA(inFile.c_str());
+        r.runError = "启动程序失败";
+        return r;
+    }
+
+    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (wr == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, 1); r.timeout = true; }
+    GetExitCodeProcess(pi.hProcess, &r.exitCode);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+
+    r.output = readAll(outFile);
+    r.runError = readAll(errFile);
+    r.ok = !r.timeout && r.exitCode == 0 && r.compileError.empty();
+
+    DeleteFileA(src.c_str()); DeleteFileA(exe.c_str()); DeleteFileA(inFile.c_str());
+    DeleteFileA(outFile.c_str()); DeleteFileA(errFile.c_str());
+    return r;
+}
+
+DebugTestResult debug_test(const std::string& workDir, const std::string& code,
+                           const std::string& inFile, const std::string& outFile,
+                           DWORD timeoutMs) {
+    DebugTestResult r;
+    std::string src = workDir + "\\debug.cpp";
+    std::string exe = workDir + "\\debug.exe";
+    std::string outTmp = workDir + "\\debug.out";
+    std::string errTmp = workDir + "\\debug.err";
+
+    {
+        std::ofstream f(src, std::ios::binary | std::ios::trunc);
+        if (!f) { r.compileError = "无法写入源文件"; return r; }
+        f << code;
+    }
+
+    std::string cerrMsg;
+    if (!compile_cpp(src, exe, cerrMsg)) {
+        r.compileError = cerrMsg;
+        DeleteFileA(src.c_str());
+        return r;
+    }
+
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+    HANDLE hIn = CreateFileA(inFile.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                             &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hIn == INVALID_HANDLE_VALUE) {
+        DeleteFileA(src.c_str()); DeleteFileA(exe.c_str());
+        r.runError = "未导入样例输入(sample.in)";
+        return r;
+    }
+    HANDLE hOut = CreateFileA(outTmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hErr = CreateFileA(errTmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hOut == INVALID_HANDLE_VALUE || hErr == INVALID_HANDLE_VALUE) {
+        CloseHandle(hIn);
+        if (hOut != INVALID_HANDLE_VALUE) CloseHandle(hOut);
+        if (hErr != INVALID_HANDLE_VALUE) CloseHandle(hErr);
+        DeleteFileA(src.c_str()); DeleteFileA(exe.c_str());
+        r.runError = "无法创建输出文件";
+        return r;
+    }
+
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = hIn; si.hStdOutput = hOut; si.hStdError = hErr;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = "\"" + exe + "\"";
+    std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
+    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
+                                  workDir.empty() ? NULL : workDir.c_str(), &si, &pi);
+    CloseHandle(hIn); CloseHandle(hOut); CloseHandle(hErr);
+    if (!started) {
+        DeleteFileA(src.c_str()); DeleteFileA(exe.c_str());
+        r.runError = "启动程序失败";
+        return r;
+    }
+
+    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (wr == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, 1); r.timeout = true; }
+    GetExitCodeProcess(pi.hProcess, &r.exitCode);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+
+    r.output = readAll(outTmp);
+    r.runError = readAll(errTmp);
+    r.expected = readAll(outFile);
+    r.passed = (normalize(r.output) == normalize(r.expected));
+    r.ok = !r.timeout && r.exitCode == 0 && r.compileError.empty();
+
+    DeleteFileA(src.c_str()); DeleteFileA(exe.c_str());
+    DeleteFileA(outTmp.c_str()); DeleteFileA(errTmp.c_str());
+    return r;
+}
+
 } // namespace oj

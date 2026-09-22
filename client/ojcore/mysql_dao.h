@@ -90,6 +90,17 @@ bool mysql_upsert_problem(int id, const std::string& title, const std::string& d
 // 全部题目的公开状态，返回 JSON 对象：{"id":true/false, ...}
 bool mysql_problem_visibility(std::string& out_json);
 
+// 服务端题库列表（含未公开），返回 JSON 数组：
+// [{"id":1,"title":"...","isPublic":true,"dataCount":20}, ...]
+bool mysql_list_problems(std::string& out_json);
+
+// 单道题完整内容（含标程与已绑定生成器源码/描述），返回 JSON 对象：
+// {"ok":true,"id":1,"title":"...","description":"...","sampleIn":"...","sampleOut":"...",
+//  "timeMs":1000,"memMb":256,"tags":[...],"stdCode":"...","isPublic":true,"updatedAt":"...",
+//  "generators":[{"id":1,"name":"juhua","description":"...","code":"...","genCount":10}, ...]}
+// 不存在返回 {"ok":false,"error":"题目不存在"}
+bool mysql_get_problem(int id, std::string& out_json);
+
 // 清空某题与生成器的全部关联（重新发布前调用，旧关联指向的生成器随后被清理）
 bool mysql_clear_problem_generators(int problem_id);
 
@@ -112,6 +123,12 @@ bool mysql_problem_generators(int problem_id, std::string& out_json);
 bool mysql_bind_generator(int problem_id, int generator_id, int gen_count, std::string& err);
 bool mysql_unbind_generator(int problem_id, int generator_id);
 bool mysql_search_generators(const std::string& keyword, std::string& out_json);
+
+// 题目测试样例（丰富题面 + 调试用）
+bool mysql_set_testcase(int problem_id, const std::string& name,
+                        const std::string& input, const std::string& output, bool is_sample);
+bool mysql_remove_testcase(int problem_id, const std::string& name);
+bool mysql_list_testcases(int problem_id, std::string& out_json);
 
 // upsert 一场比赛的 contest.json 原文
 bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err);

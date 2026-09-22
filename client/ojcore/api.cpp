@@ -200,6 +200,7 @@ struct ProblemInfo {
     int id; std::string title, desc, sampleIn, sampleOut;
     long long timeLimitMs, memLimitMB;
     std::string tagsJson;
+    std::string samplesJson;
 };
 std::vector<ProblemInfo> scanProblems() {
     std::vector<ProblemInfo> res;
@@ -222,6 +223,18 @@ std::vector<ProblemInfo> scanProblems() {
         else { pi.title = st.substr(0, nl); pi.desc = st.substr(nl + 1); }
         pi.sampleIn  = readFile(dir + "\\sample.in");
         pi.sampleOut = readFile(dir + "\\sample.out");
+        // 测试样例（丰富题面）：testcases.json 里的 cases 数组原文
+        {
+            std::string tc = readFile(dir + "\\testcases.json");
+            size_t sp = tc.find("\"cases\"");
+            if (sp != std::string::npos) {
+                sp = tc.find('[', sp);
+                if (sp != std::string::npos) {
+                    size_t ep = tc.find(']', sp);
+                    if (ep != std::string::npos) pi.samplesJson = tc.substr(sp, ep - sp + 1);
+                }
+            }
+        }
         auto meta = readMeta(dir);
         pi.timeLimitMs = meta.timeLimitMs;
         pi.memLimitMB = meta.memLimitMB;
@@ -572,7 +585,9 @@ OJ_API const char* oj_get_problems(void) {
              + ",\"sampleOut\":\"" + jsonEscape(p.sampleOut) + "\""
              + ",\"timeLimitMs\":" + std::to_string(p.timeLimitMs)
              + ",\"memLimitMB\":" + std::to_string(p.memLimitMB)
-             + ",\"tags\":" + (p.tagsJson.empty() ? "[]" : p.tagsJson) + "}";
+             + ",\"tags\":" + (p.tagsJson.empty() ? "[]" : p.tagsJson)
+             + ",\"samples\":" + (p.samplesJson.empty() ? "[]" : p.samplesJson)
+             + "}";
     }
     json += "]";
     return dup(json);
@@ -876,8 +891,23 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int
     size_t nl = st.find('\n');
     std::string title = (nl == std::string::npos) ? st : st.substr(0, nl);
     std::string desc  = (nl == std::string::npos) ? "" : st.substr(nl + 1);
-    std::string sampleIn  = readFile(dir + "\\sample.in");
-    std::string sampleOut = readFile(dir + "\\sample.out");
+
+    // 样例：来自勾选的生成器第 1 组数据（sample_gen.txt 存生成器名），无则回退旧 sample.in/out
+    auto trimStr = [](const std::string& s) {
+        size_t a = s.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t\r\n");
+        return s.substr(a, b - a + 1);
+    };
+    std::string sampleIn, sampleOut;
+    std::string sampleGen = trimStr(readFile(dir + "\\sample_gen.txt"));
+    if (!sampleGen.empty()) {
+        sampleIn  = readFile(dir + "\\" + sampleGen + "\\1.in");
+        sampleOut = readFile(dir + "\\" + sampleGen + "\\1.out");
+    } else {
+        sampleIn  = readFile(dir + "\\sample.in");
+        sampleOut = readFile(dir + "\\sample.out");
+    }
     std::string stdCode   = readFile(dir + "\\std.cpp");
     auto meta = readMeta(dir);
 
@@ -933,6 +963,20 @@ OJ_API const char* oj_mysql_problem_visibility(void) {
     std::string out;
     if (oj::mysql_problem_visibility(out)) return dup(out);
     return dup("{}");
+}
+
+OJ_API const char* oj_mysql_list_problems(void) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_list_problems(out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_mysql_get_problem(int id) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string out;
+    if (oj::mysql_get_problem(id, out)) return dup(out);
+    return dup("{\"ok\":false,\"error\":\"查询失败\"}");
 }
 
 // ===== 生成器库（全局 generators 表） =====
@@ -999,6 +1043,58 @@ OJ_API const char* oj_mysql_search_generators(const char* keyword) {
     std::string out;
     if (oj::mysql_search_generators(keyword ? keyword : "", out)) return dup(out);
     return dup("[]");
+}
+
+OJ_API const char* oj_mysql_set_testcase(int problem_id, const char* name, const char* input, const char* output, int is_sample) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    if (oj::mysql_set_testcase(problem_id, name ? name : "", input ? input : "",
+                               output ? output : "", is_sample != 0))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"写入测试样例失败\"}");
+}
+
+OJ_API const char* oj_mysql_remove_testcase(int problem_id, const char* name) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    if (oj::mysql_remove_testcase(problem_id, name ? name : "")) return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"删除测试样例失败\"}");
+}
+
+OJ_API const char* oj_mysql_list_testcases(int problem_id) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_list_testcases(problem_id, out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_debug_run(const char* code, const char* input, int timeout_ms) {
+    if (!code || !*code) return dup("{\"ok\":false,\"error\":\"代码为空\"}");
+    DWORD t = timeout_ms > 0 ? (DWORD)timeout_ms : 2000;
+    oj::DebugResult r = oj::debug_run(g_tempDir, code, input ? input : "", t);
+    std::string json = "{\"ok\":" + std::string(r.ok ? "true" : "false")
+        + ",\"compileError\":\"" + jsonEscape(r.compileError) + "\""
+        + ",\"output\":\"" + jsonEscape(r.output) + "\""
+        + ",\"runError\":\"" + jsonEscape(r.runError) + "\""
+        + ",\"timeout\":" + (r.timeout ? "true" : "false")
+        + ",\"exitCode\":" + std::to_string(r.exitCode) + "}";
+    return dup(json);
+}
+
+OJ_API const char* oj_debug_test(const char* code, int problem_id, int timeout_ms) {
+    if (!code || !*code) return dup("{\"ok\":false,\"error\":\"代码为空\"}");
+    DWORD t = timeout_ms > 0 ? (DWORD)timeout_ms : 2000;
+    std::string dir = g_problemDir + "\\" + std::to_string(problem_id);
+    std::string inFile = dir + "\\sample.in";
+    std::string outFile = dir + "\\sample.out";
+    oj::DebugTestResult r = oj::debug_test(g_tempDir, code, inFile, outFile, t);
+    std::string json = "{\"ok\":" + std::string(r.ok ? "true" : "false")
+        + ",\"compileError\":\"" + jsonEscape(r.compileError) + "\""
+        + ",\"output\":\"" + jsonEscape(r.output) + "\""
+        + ",\"expected\":\"" + jsonEscape(r.expected) + "\""
+        + ",\"passed\":" + (r.passed ? "true" : "false")
+        + ",\"runError\":\"" + jsonEscape(r.runError) + "\""
+        + ",\"timeout\":" + (r.timeout ? "true" : "false")
+        + ",\"exitCode\":" + std::to_string(r.exitCode) + "}";
+    return dup(json);
 }
 
 OJ_API const char* oj_register(const char* username, const char* password, const char* role) {
