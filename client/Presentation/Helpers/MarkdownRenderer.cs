@@ -11,6 +11,17 @@ public static class MarkdownRenderer
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions().Build();
 
+    /// <summary>把题面描述与样例输入/输出拼成完整 Markdown（样例直接放进题面里展示）。</summary>
+    public static string CombineStatement(string description, string sampleIn, string sampleOut)
+    {
+        var sb = new System.Text.StringBuilder(description ?? "");
+        if (!string.IsNullOrWhiteSpace(sampleIn))
+            sb.Append("\n\n## 样例输入\n\n```\n").Append(sampleIn).Append("\n```");
+        if (!string.IsNullOrWhiteSpace(sampleOut))
+            sb.Append("\n\n## 样例输出\n\n```\n").Append(sampleOut).Append("\n```");
+        return sb.ToString();
+    }
+
     public static void Render(WebBrowser wb, string? markdown)
     {
         if (string.IsNullOrEmpty(markdown))

@@ -38,6 +38,33 @@ CREATE TABLE IF NOT EXISTS submissions (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- 题目表（服务端发布上传，客户端拉取）
+CREATE TABLE IF NOT EXISTS problems (
+  id INT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL DEFAULT '',
+  description MEDIUMTEXT,
+  sample_in MEDIUMTEXT,
+  sample_out MEDIUMTEXT,
+  time_ms INT NOT NULL DEFAULT 1000,
+  mem_mb INT NOT NULL DEFAULT 256,
+  tags TEXT,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 题目数据文件表（.in/.out/gen.cpp/desc.txt 等，name 为相对路径，content 为 base64）
+CREATE TABLE IF NOT EXISTS problem_files (
+  problem_id INT NOT NULL,
+  name VARCHAR(512) NOT NULL,
+  content LONGBLOB NOT NULL,
+  PRIMARY KEY (problem_id, name)
+);
+
+-- 比赛表（contest.json 原文）
+CREATE TABLE IF NOT EXISTS contests (
+  id INT PRIMARY KEY,
+  content MEDIUMTEXT NOT NULL
+);
+
 -- 匿名默认用户（客户端未登录的提交归到该账号；空哈希无法登录）
 INSERT IGNORE INTO users(username, password_hash, salt, role)
 VALUES ('anonymous', '', '', 'user');

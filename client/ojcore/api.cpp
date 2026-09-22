@@ -113,6 +113,26 @@ long long jsonInt(const std::string& j, const char* key, long long def = 0) {
     return atoll(j.c_str() + p + 1);
 }
 
+// 反转义 JSON 字符串（jsonEscape 的逆操作）
+std::string jsonUnescape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            char c = s[++i];
+            switch (c) {
+                case '"':  out += '"';  break;
+                case '\\': out += '\\'; break;
+                case 'n':  out += '\n'; break;
+                case 'r':  out += '\r'; break;
+                case 't':  out += '\t'; break;
+                default:   out += '\\'; out += c; break;
+            }
+        } else out += s[i];
+    }
+    return out;
+}
+
 // 解析 JSON 数组 [1,2,3] 成 vector<int>
 std::vector<int> parseIntArray(const std::string& j, const char* key) {
     std::vector<int> res;
@@ -618,6 +638,9 @@ OJ_API const char* oj_get_board(int cid) {
         }
     };
 
+    // 收集本场比赛全部提交，按提交 id（时间顺序）排序，保证「AC 之前的错误提交」统计正确
+    struct Sub { long long id; std::string uname; int pid; bool ac; bool virt; std::string ts; time_t baseline; };
+    std::vector<Sub> subs;
     try {
         auto it = g_lsm->begin(0);
         auto end = g_lsm->end();
@@ -646,9 +669,21 @@ OJ_API const char* oj_get_board(int cid) {
                 auto ri = virtRegTs.find(uname);
                 if (ri != virtRegTs.end()) baseline = ri->second;
             }
-            consider(virt ? virtUsers : offUsers, uname, (int)pid, ac, ts, baseline);
+            Sub s;
+            s.id = jsonInt(val, "id");
+            s.uname = uname;
+            s.pid = (int)pid;
+            s.ac = ac;
+            s.virt = virt;
+            s.ts = ts;
+            s.baseline = baseline;
+            subs.push_back(std::move(s));
         }
     } catch (...) {}
+    std::sort(subs.begin(), subs.end(), [](const Sub& a, const Sub& b) { return a.id < b.id; });
+    for (auto& s : subs) {
+        consider(s.virt ? virtUsers : offUsers, s.uname, s.pid, s.ac, s.ts, s.baseline);
+    }
 
     // 3. 聚合输出
     auto emitTable = [&](const std::map<std::string, UserStat>& table) -> std::string {
@@ -803,10 +838,10 @@ OJ_API const char* oj_contest_submissions(int cid, const char* username, int vie
 
 OJ_API int oj_init_mysql(const char* host, int port, const char* user,
                          const char* pass, const char* db,
-                         const char* problem_dir) {
+                         const char* problem_dir, const char* data_dir) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     g_problemDir = problem_dir ? problem_dir : "";
-    g_dataDir = "ojdata";
+    g_dataDir = data_dir ? data_dir : "ojdata";
     g_tempDir = g_dataDir + "\\temp";
     CreateDirectoryA(g_dataDir.c_str(), NULL);
     CreateDirectoryA(g_tempDir.c_str(), NULL);
@@ -830,6 +865,113 @@ OJ_API const char* oj_mysql_init_schema(void) {
     std::string err;
     if (oj::mysql_init_schema(err)) return dup("{\"ok\":true}");
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+// ===== 题目 / 比赛发布与同步（MySQL 分发） =====
+
+OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用（libmysql.dll 未加载）\"}");
+    std::string dir = problem_dir ? problem_dir : "";
+    if (dir.empty() || !exists(dir)) return dup("{\"ok\":false,\"error\":\"题目目录不存在\"}");
+
+    std::string st = readFile(dir + "\\statement.txt");
+    size_t nl = st.find('\n');
+    std::string title = (nl == std::string::npos) ? st : st.substr(0, nl);
+    std::string desc  = (nl == std::string::npos) ? "" : st.substr(nl + 1);
+    std::string sampleIn  = readFile(dir + "\\sample.in");
+    std::string sampleOut = readFile(dir + "\\sample.out");
+    std::string stdCode   = readFile(dir + "\\std.cpp");
+    auto meta = readMeta(dir);
+
+    std::string err;
+    if (!oj::mysql_upsert_problem(id, title, desc, sampleIn, sampleOut,
+                                  (int)meta.timeLimitMs, (int)meta.memLimitMB,
+                                  meta.tagsJson.empty() ? "[]" : meta.tagsJson, stdCode, err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    if (!oj::mysql_clear_problem_generators(id))
+        return dup("{\"ok\":false,\"error\":\"清空旧生成器失败\"}");
+
+    // 扫描生成器子目录（含 gen.cpp），上传源码 + 描述 + 组数 + 确定性种子
+    std::vector<std::string> genNames;
+    {
+        std::string pat = dir + "\\*";
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                std::string n = fd.cFileName;
+                if (n == "." || n == ".." || n == "history" || n == "gen_history") continue;
+                if (exists(dir + "\\" + n + "\\gen.cpp")) genNames.push_back(n);
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+    }
+    std::sort(genNames.begin(), genNames.end());
+
+    int uploaded = 0;
+    for (auto& gname : genNames) {
+        std::string gdir = dir + "\\" + gname;
+        std::string code = readFile(gdir + "\\gen.cpp");
+        std::string gdesc = readFile(gdir + "\\desc.txt");
+        int count = 0;
+        {
+            std::string pat = gdir + "\\*.in";
+            WIN32_FIND_DATAA fd;
+            HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) ++count; }
+                while (FindNextFileA(h, &fd));
+                FindClose(h);
+            }
+        }
+        // 确定性种子基准：由题目编号与生成器名哈希组合，保证所有客户端生成同一份数据
+        unsigned long long gh = 5381;
+        for (unsigned char c : gname) gh = gh * 33 + c;
+        int seedBase = (int)((id * 1000003ull + gh) & 0x7fffffff);
+
+        if (oj::mysql_add_problem_generator(id, gname, code, gdesc, count, seedBase) <= 0)
+            return dup("{\"ok\":false,\"error\":\"写入生成器失败：" + jsonEscape(gname) + "\"}");
+        ++uploaded;
+    }
+    oj::mysql_purge_orphan_generators();
+    return dup("{\"ok\":true,\"generators\":" + std::to_string(uploaded) + "}");
+}
+
+OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用（libmysql.dll 未加载）\"}");
+    std::string j = contest_json ? contest_json : "";
+    std::string name = jsonUnescape(jsonStr(j, "name"));
+    std::string desc = jsonUnescape(jsonStr(j, "description"));
+    std::string start = jsonUnescape(jsonStr(j, "startTime"));
+    std::string end = jsonUnescape(jsonStr(j, "endTime"));
+    std::vector<int> pids = parseIntArray(j, "problems");
+    std::string pjson = "[";
+    for (size_t i = 0; i < pids.size(); ++i) {
+        if (i) pjson += ",";
+        pjson += std::to_string(pids[i]);
+    }
+    pjson += "]";
+
+    // 重建与 authorcore 一致格式的 contest.json（id/name/description/startTime/endTime/problems）
+    std::string json = "{\"id\":" + std::to_string(cid)
+        + ",\"name\":\"" + jsonEscape(name) + "\""
+        + ",\"description\":\"" + jsonEscape(desc) + "\""
+        + ",\"startTime\":\"" + jsonEscape(start) + "\""
+        + ",\"endTime\":\"" + jsonEscape(end) + "\""
+        + ",\"problems\":" + pjson + "}";
+
+    std::string err;
+    if (!oj::mysql_upsert_contest(cid, json, err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    return dup("{\"ok\":true}");
+}
+
+OJ_API const char* oj_mysql_sync_problems(void) {
+    std::string err;
+    if (!oj::mysql_sync_problems(g_problemDir, serverRoot(), err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    return dup("{\"ok\":true}");
 }
 
 OJ_API const char* oj_register(const char* username, const char* password, const char* role) {

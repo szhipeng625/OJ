@@ -50,7 +50,7 @@ public partial class SolveWindow : Window
         string tags = problem.Tags is { Length: > 0 } ? string.Join(", ", problem.Tags) : "无";
         DescTitle.Text = problem.Title;
         MetaText.Text = $"时间限制 {problem.TimeLimitMs}ms · 内存 {problem.MemLimitMB}MB · 标签：{tags}";
-        MarkdownRenderer.Render(DescBox, problem.Description);
+        MarkdownRenderer.Render(DescBox, MarkdownRenderer.CombineStatement(problem.Description, problem.SampleIn, problem.SampleOut));
 
         Loaded += async (_, _) => await LoadSavedCodeAsync();
         Closed += (_, _) => ReleaseResources();

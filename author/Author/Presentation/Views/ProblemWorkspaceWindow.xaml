@@ -50,12 +50,20 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <DockPanel Grid.Column="0">
-                            <TextBlock DockPanel.Dock="Top" Text="样例输入 sample.in" Margin="0,0,0,2" Foreground="#888"/>
-                            <TextBox x:Name="SampleInBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"/>
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                                <Button DockPanel.Dock="Right" Content="导入…" Width="64" Height="24" Padding="0" Click="OnImportSampleIn"/>
+                                <TextBlock Text="样例输入 sample.in" Foreground="#888" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <TextBox x:Name="SampleInBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"
+                                     IsReadOnly="True" Background="#FFF7F9FC" VerticalScrollBarVisibility="Auto"/>
                         </DockPanel>
                         <DockPanel Grid.Column="2">
-                            <TextBlock DockPanel.Dock="Top" Text="样例输出 sample.out" Margin="0,0,0,2" Foreground="#888"/>
-                            <TextBox x:Name="SampleOutBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"/>
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                                <Button DockPanel.Dock="Right" Content="导入…" Width="64" Height="24" Padding="0" Click="OnImportSampleOut"/>
+                                <TextBlock Text="样例输出 sample.out" Foreground="#888" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <TextBox x:Name="SampleOutBox" AcceptsReturn="True" Height="80" FontFamily="Consolas"
+                                     IsReadOnly="True" Background="#FFF7F9FC" VerticalScrollBarVisibility="Auto"/>
                         </DockPanel>
                     </Grid>
                     <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,8,0,0">
@@ -258,7 +266,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="目标目录：" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="TargetBox" Grid.Column="1" Text="D:\OJ\server\problems"
+                        <TextBox x:Name="TargetBox" Grid.Column="1" Text="server\problems"
                                  IsReadOnly="True" Background="#F5F7FA" ToolTip="发布目标目录固定为客户端题目目录，不可修改"/>
                     </Grid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">

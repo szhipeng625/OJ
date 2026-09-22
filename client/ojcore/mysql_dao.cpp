@@ -1,12 +1,15 @@
-﻿// mysql_dao.cpp — 动态加载 libmysql.dll，封装用户/会话/提交/榜单
+﻿// mysql_dao.cpp — 动态加载 libmysql.dll，封装用户/会话/提交/榜单/题目分发
 #include "mysql_dao.h"
+#include "judge.h"
 
 #include <windows.h>
 #include <bcrypt.h>
 #include <wincrypt.h>
 
 #include <algorithm>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -14,6 +17,7 @@
 #include <cstring>
 #include <ctime>
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace {
 
@@ -153,11 +157,292 @@ std::string NowSQL() {
     return buf;
 }
 
+// ---------- base64（测试数据文件作为 LONGBLOB 前先转文本，避免二进制/字符集问题） ----------
+static const char* B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string Base64Encode(const std::string& in) {
+    std::string out;
+    out.reserve(((in.size() + 2) / 3) * 4);
+    int val = 0, bits = -6;
+    for (unsigned char c : in) {
+        val = (val << 8) + c;
+        bits += 8;
+        while (bits >= 0) { out += B64[(val >> bits) & 0x3F]; bits -= 6; }
+    }
+    if (bits > -6) out += B64[((val << 8) >> (bits + 8)) & 0x3F];
+    while (out.size() % 4) out += '=';
+    return out;
+}
+
+std::string Base64Decode(const std::string& in) {
+    int table[256] = {};
+    for (int i = 0; i < 64; ++i) table[(unsigned char)B64[i]] = i;
+    std::string out;
+    int val = 0, bits = -8;
+    for (unsigned char c : in) {
+        if (c == '=') break;
+        int v = table[c];
+        if (v == 0 && c != 'A') continue;   // 忽略非法字符
+        val = (val << 6) + v;
+        bits += 6;
+        if (bits >= 0) { out += (char)((val >> bits) & 0xFF); bits -= 8; }
+    }
+    return out;
+}
+
+// ---------- 文件工具（同步题目时把 DB 内容物化到本地目录） ----------
+void Mkdirs(const std::string& path) {
+    std::string cur;
+    for (size_t i = 0; i < path.size(); ++i) {
+        cur += path[i];
+        if (path[i] == '\\' || path[i] == '/') CreateDirectoryA(cur.c_str(), nullptr);
+    }
+    CreateDirectoryA(path.c_str(), nullptr);
+}
+
+void WriteFileBin(const std::string& path, const std::string& content) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (f) f.write(content.data(), (std::streamsize)content.size());
+}
+
+void RemoveDir(const std::string& dir) {
+    if (GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    std::string cmd = "rmdir /s /q \"" + dir + "\"";
+    system(cmd.c_str());
+}
+
+bool ExistsFile(const std::string& p) {
+    return GetFileAttributesA(p.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+std::string ReadFileText(const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return "";
+    std::stringstream ss; ss << f.rdbuf();
+    return ss.str();
+}
+
+// djb2 字符串哈希（仅用于生成器的变更检测 / 确定性种子，无需密码学强度）
+unsigned long long HashString(const std::string& s) {
+    unsigned long long h = 5381;
+    for (unsigned char c : s) h = h * 33 + c;
+    return h;
+}
+
+std::string ToHex(unsigned long long v) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%016llx", v);
+    return buf;
+}
+
+// ---------- AES-256-CBC 加密/解密（生成器源码与标程在库里密文存储，客户端解密后使用） ----------
+static const unsigned char kAesKey[32] = {
+    0x6f,0x6a,0x5f,0x63,0x6f,0x72,0x65,0x5f,0x32,0x30,0x32,0x36,0x6b,0x65,0x79,0x21,
+    0x4f,0x4a,0x2d,0x45,0x4e,0x43,0x52,0x59,0x50,0x54,0x2d,0x4b,0x45,0x59,0x00,0x31
+};
+static const unsigned char kAesIv[16] = {
+    0x6f,0x6a,0x2d,0x69,0x76,0x2d,0x31,0x36,0x62,0x79,0x74,0x65,0x73,0x21,0x21,0x21
+};
+
+bool AesCrypt(bool encrypt, const std::string& input, std::string& output) {
+    if (input.empty()) { output.clear(); return true; }
+    HCRYPTPROV prov = 0;
+    HCRYPTKEY key = 0;
+    if (!CryptAcquireContextW(&prov, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+        return false;
+    struct AesKeyBlob {
+        BLOBHEADER hdr;
+        DWORD keySize;
+        BYTE keyBytes[32];
+    } kb;
+    kb.hdr.bType = PLAINTEXTKEYBLOB;
+    kb.hdr.bVersion = CUR_BLOB_VERSION;
+    kb.hdr.reserved = 0;
+    kb.hdr.aiKeyAlg = CALG_AES_256;
+    kb.keySize = 32;
+    memcpy(kb.keyBytes, kAesKey, 32);
+    if (!CryptImportKey(prov, (BYTE*)&kb, sizeof(kb), 0, 0, &key)) {
+        CryptReleaseContext(prov, 0);
+        return false;
+    }
+    DWORD mode = CRYPT_MODE_CBC;
+    CryptSetKeyParam(key, KP_MODE, (BYTE*)&mode, 0);
+    CryptSetKeyParam(key, KP_IV, (BYTE*)kAesIv, 0);
+    DWORD pad = PKCS5_PADDING;
+    CryptSetKeyParam(key, KP_PADDING, (BYTE*)&pad, 0);
+
+    std::vector<BYTE> buf(input.begin(), input.end());
+    bool ok = false;
+    if (encrypt) {
+        DWORD len = (DWORD)buf.size();
+        buf.resize(len + 16);
+        if (CryptEncrypt(key, 0, TRUE, 0, buf.data(), &len, (DWORD)buf.size())) {
+            buf.resize(len);
+            ok = true;
+        }
+    } else {
+        DWORD len = (DWORD)buf.size();
+        if (CryptDecrypt(key, 0, TRUE, 0, buf.data(), &len)) {
+            buf.resize(len);
+            ok = true;
+        }
+    }
+    CryptDestroyKey(key);
+    CryptReleaseContext(prov, 0);
+    if (ok) output.assign((char*)buf.data(), buf.size());
+    return ok;
+}
+
+// 运行子进程：stdin 从 stdinFile（可为空），stdout 重定向到 stdoutFile，stderr 捕获。
+// 用于客户端本地把「生成器源码」重新编译运行、把「标程」跑出 .out。
+struct ProcResult { bool ok = false; bool timeout = false; int exitCode = 0; std::string errText; };
+
+ProcResult RunRedirect(const std::string& exe, const std::string& args,
+                       const std::string& stdinFile, const std::string& stdoutFile,
+                       const std::string& workDir, DWORD timeoutMs) {
+    ProcResult r;
+    SECURITY_ATTRIBUTES sa{ sizeof(sa), NULL, TRUE };
+    HANDLE hErrRead = NULL, hErrWrite = NULL;
+    if (!CreatePipe(&hErrRead, &hErrWrite, &sa, 0)) { r.errText = "CreatePipe failed"; return r; }
+    SetHandleInformation(hErrRead, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE hIn = NULL;
+    if (!stdinFile.empty()) {
+        hIn = CreateFileA(stdinFile.c_str(), GENERIC_READ, FILE_SHARE_READ, &sa,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hIn == INVALID_HANDLE_VALUE) { CloseHandle(hErrRead); CloseHandle(hErrWrite); r.errText = "无法打开输入文件"; return r; }
+    }
+    HANDLE hOut = CreateFileA(stdoutFile.c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hOut == INVALID_HANDLE_VALUE) {
+        if (hIn) CloseHandle(hIn);
+        CloseHandle(hErrRead); CloseHandle(hErrWrite);
+        r.errText = "无法创建输出文件";
+        return r;
+    }
+
+    STARTUPINFOA si{ sizeof(si) };
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = hIn;
+    si.hStdOutput = hOut;
+    si.hStdError = hErrWrite;
+    PROCESS_INFORMATION pi;
+    std::string cmd = "\"" + exe + "\"" + (args.empty() ? "" : " " + args);
+    std::vector<char> cmdBuf(cmd.begin(), cmd.end());
+    cmdBuf.push_back('\0');
+    if (!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
+                        workDir.empty() ? NULL : workDir.c_str(), &si, &pi)) {
+        if (hIn) CloseHandle(hIn);
+        CloseHandle(hOut); CloseHandle(hErrRead); CloseHandle(hErrWrite);
+        r.errText = "启动失败";
+        return r;
+    }
+    CloseHandle(hOut); CloseHandle(hErrWrite);
+    if (hIn) CloseHandle(hIn);
+    // 先等待进程结束（带超时），再读取 stderr —— 否则长时间运行的进程会让超时判定失效
+    DWORD wait = WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (wait == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, 1); r.timeout = true; }
+    char buf[8192]; DWORD dwRead;
+    while (ReadFile(hErrRead, buf, sizeof(buf), &dwRead, NULL) && dwRead > 0)
+        r.errText.append(buf, dwRead);
+    CloseHandle(hErrRead);
+    GetExitCodeProcess(pi.hProcess, (LPDWORD)&r.exitCode);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    r.ok = !r.timeout && r.exitCode == 0;
+    return r;
+}
+
+// 生成器信息（用于本地重新生成判题数据）
+struct GenInfo { std::string name; int count; int seedBase; std::string marker; std::string hash; };
+
+// 重新生成某题的判题数据：编译标程 + 编译运行各生成器（确定性种子）→ .in，再跑标程 → .out。
+// 生成器协议：每个测试点独立运行一次，stdout 重定向到 i.in；
+// argv[1]=输出目录, argv[2]=随机种子, argv[3]=总组数 n, argv[4]=当前组号 i。
+bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& gens,
+                           std::string& errOut) {
+    if (gens.empty()) return true;
+
+    std::string stdSrc = dir + "\\std.cpp";
+    std::string stdExe = dir + "\\std.exe";
+    std::string cerr;
+    if (!oj::compile_cpp(stdSrc, stdExe, cerr)) { errOut = "标程编译失败：" + cerr; return false; }
+
+    for (auto& g : gens) {
+        std::string gdir = dir + "\\" + g.name;
+        Mkdirs(gdir);
+        std::string gexe = gdir + "\\gen.exe";
+        if (!oj::compile_cpp(gdir + "\\gen.cpp", gexe, cerr)) {
+            DeleteFileA(stdExe.c_str());
+            errOut = "生成器 " + g.name + " 编译失败：" + cerr;
+            return false;
+        }
+        // 清空旧 .in/.out
+        for (const char* ext : { ".in", ".out" }) {
+            std::string pat = gdir + "\\*" + ext;
+            WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                        DeleteFileA((gdir + "\\" + fd.cFileName).c_str());
+                } while (FindNextFileA(h, &fd));
+                FindClose(h);
+            }
+        }
+        // 运行生成器 count 次 → i.in
+        for (int i = 1; i <= g.count; ++i) {
+            int seed = g.seedBase + i;
+            std::string args = "\"" + gdir + "\" " + std::to_string(seed)
+                             + " " + std::to_string(g.count) + " " + std::to_string(i);
+            std::string outFile = gdir + "\\" + std::to_string(i) + ".in";
+            ProcResult rr = RunRedirect(gexe, args, "", outFile, gdir, 60000);
+            if (!rr.ok) {
+                DeleteFileA(gexe.c_str()); DeleteFileA(stdExe.c_str());
+                errOut = "生成器 " + g.name + " 第 " + std::to_string(i) + " 组失败："
+                    + (rr.timeout ? "超时" : "退出码 " + std::to_string(rr.exitCode))
+                    + (rr.errText.empty() ? "" : "：" + rr.errText.substr(0, 120));
+                return false;
+            }
+        }
+        DeleteFileA(gexe.c_str());
+
+        // 跑标程生成 .out（生成阶段给足 60s，避免大数据点被过短超时误杀）
+        for (int i = 1; i <= g.count; ++i) {
+            std::string inFile = gdir + "\\" + std::to_string(i) + ".in";
+            std::string outFile = gdir + "\\" + std::to_string(i) + ".out";
+            ProcResult rr = RunRedirect(stdExe, "", inFile, outFile, "", 60000);
+            if (!rr.ok) {
+                DeleteFileA(stdExe.c_str());
+                errOut = "标程运行 " + g.name + "/" + std::to_string(i) + " 失败："
+                    + (rr.timeout ? "超时" : "退出码 " + std::to_string(rr.exitCode));
+                return false;
+            }
+        }
+    }
+    DeleteFileA(stdExe.c_str());
+    return true;
+}
+
 } // namespace
 
 namespace oj {
 
 bool mysql_available() { return LoadMySql(); }
+
+// 加密：AES-256-CBC → base64（库中存储密文）；解密反之。
+std::string encrypt_blob(const std::string& plain) {
+    std::string cip;
+    if (!AesCrypt(true, plain, cip)) return "";
+    return Base64Encode(cip);
+}
+
+std::string decrypt_blob(const std::string& enc) {
+    if (enc.empty()) return "";
+    std::string raw = Base64Decode(enc);
+    std::string plain;
+    if (!AesCrypt(false, raw, plain)) return "";
+    return plain;
+}
 
 bool mysql_connect(const std::string& host, unsigned int port,
                    const std::string& user, const std::string& pass,
@@ -167,6 +452,20 @@ bool mysql_connect(const std::string& host, unsigned int port,
     if (!g_conn) { err = "mysql_init failed"; return false; }
     g_conn = g_sql.mysql_real_connect(g_conn, host.c_str(), user.c_str(), pass.c_str(),
                                 db.c_str(), port, nullptr, 0);
+    if (!g_conn && !db.empty()) {
+        // 目标库不存在时：先无库连接并自动建库，再重连目标库（首次在远程部署时免手工建库）
+        void* c2 = g_sql.mysql_init(nullptr);
+        c2 = g_sql.mysql_real_connect(c2, host.c_str(), user.c_str(), pass.c_str(),
+                                      nullptr, port, nullptr, 0);
+        if (c2) {
+            std::string createDb = "CREATE DATABASE IF NOT EXISTS `" + db + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+            g_sql.mysql_query(c2, createDb.c_str());
+            g_sql.mysql_close(c2);
+            g_conn = g_sql.mysql_init(nullptr);
+            g_conn = g_sql.mysql_real_connect(g_conn, host.c_str(), user.c_str(), pass.c_str(),
+                                              db.c_str(), port, nullptr, 0);
+        }
+    }
     if (!g_conn) { err = g_sql.mysql_error ? g_sql.mysql_error(g_conn) : "connect failed"; return false; }
     // 设 utf8mb4
     ExecSQL("SET NAMES utf8mb4");
@@ -217,8 +516,50 @@ bool mysql_init_schema(std::string& err) {
   registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_contest (user_id, contest_id),
   FOREIGN KEY (user_id) REFERENCES users(id)
+))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS problems (
+  id INT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL DEFAULT '',
+  description MEDIUMTEXT,
+  sample_in MEDIUMTEXT,
+  sample_out MEDIUMTEXT,
+  time_ms INT NOT NULL DEFAULT 1000,
+  mem_mb INT NOT NULL DEFAULT 256,
+  tags TEXT,
+  std_code MEDIUMTEXT,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS generators (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code MEDIUMTEXT NOT NULL,
+  description TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS problem_generators (
+  problem_id INT NOT NULL,
+  generator_id INT NOT NULL,
+  name VARCHAR(64) NOT NULL DEFAULT '',
+  gen_count INT NOT NULL DEFAULT 0,
+  seed_base INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (problem_id, generator_id),
+  FOREIGN KEY (problem_id) REFERENCES problems(id),
+  FOREIGN KEY (generator_id) REFERENCES generators(id)
+))SQL",
+        R"SQL(CREATE TABLE IF NOT EXISTS contests (
+  id INT PRIMARY KEY,
+  content MEDIUMTEXT NOT NULL
 ))SQL"
     };
+    // 旧版 problem_generators（含 code/version 列的宽表）结构不同，先删除让新 DDL 重建
+    {
+        std::string hasOld;
+        if (QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                        "WHERE table_schema=DATABASE() AND table_name='problem_generators' "
+                        "AND column_name IN ('code','version')",
+                        hasOld) && hasOld != "0") {
+            ExecSQL("DROP TABLE IF EXISTS problem_generators");
+        }
+    }
     for (auto d : ddl) if (!ExecSQL(d, &err)) return false;
 
     // ===== 幂等迁移：老库（contest_id 可空 / 无唯一键）升级到"最后提交原地更新" =====
@@ -257,6 +598,14 @@ bool mysql_init_schema(std::string& err) {
                          "WHERE table_schema=DATABASE() AND table_name='users' AND column_name='avatar'",
                          hasAvatar)) hasAvatar = "0";
         if (hasAvatar == "0" && !ExecSQL("ALTER TABLE users ADD COLUMN avatar MEDIUMTEXT", &err)) return false;
+    }
+    // 3.5) 题目标程源码列：std_code（生成器分发模式：客户端用它重新生成 .out）
+    {
+        std::string hasStd;
+        if (!QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                         "WHERE table_schema=DATABASE() AND table_name='problems' AND column_name='std_code'",
+                         hasStd)) hasStd = "0";
+        if (hasStd == "0" && !ExecSQL("ALTER TABLE problems ADD COLUMN std_code MEDIUMTEXT", &err)) return false;
     }
     // 4) 匿名默认用户（未登录提交统一归到该账号；空哈希无法登录）
     if (!ExecSQL("INSERT IGNORE INTO users(username,password_hash,salt,role) VALUES('anonymous','','','user')", &err)) return false;
@@ -447,70 +796,90 @@ bool mysql_contest_submissions(int cid, const std::string& username, bool view_a
 bool mysql_board(int cid, const std::string& start_str,
                 const std::string& problems_csv,
                 std::string& out_official, std::string& out_virtual) {
-    // 按 user + problem 聚合：取该题最早 AC 时间（分钟）+ 错误提交次数*20
-    // 正式选手相对比赛开始时间计时；虚拟选手相对其报名时间计时。
-    // SQL 直接算好，C++ 再按用户汇总
+    // 排行榜罚时逻辑（ICPC）：
+    //   每题罚时 = 第一次 AC 相对基准时间（分钟） + AC 之前每次错误提交 * 20 分钟；
+    //   AC 之后的提交不再计分/计罚时。
+    //   正式选手基准 = 比赛开始时间；虚拟选手基准 = 其报名时间（无报名则回退比赛开始）。
     std::string startEsc = SqlEscape(start_str);
     std::string sql =
         "SELECT u.username, s.problem_id, s.`virtual`, "
-        "  MIN(IF(s.verdict='AC', TIMESTAMPDIFF(MINUTE, "
-        "      IF(s.`virtual`=1, COALESCE(cr.registered_at, '" + startEsc + "'), '" + startEsc + "'), "
-        "      s.created_at), NULL)) AS ac_min, "
-        "  SUM(IF(s.verdict<>'AC', 1, 0)) AS wrong_before "
+        "  TIMESTAMPDIFF(MINUTE, IF(s.`virtual`=1, COALESCE(cr.registered_at, '" + startEsc + "'), '" + startEsc + "'), s.created_at) AS rel_min, "
+        "  IF(s.verdict='AC', 1, 0) AS is_ac "
         "FROM submissions s JOIN users u ON u.id=s.user_id "
         "LEFT JOIN contest_registrations cr ON cr.user_id=s.user_id AND cr.contest_id=s.contest_id "
         "WHERE s.contest_id=" + std::to_string(cid) +
         " AND s.problem_id IN (" + problems_csv + ") "
-        "GROUP BY u.username, s.problem_id, s.virtual "
-        "HAVING ac_min IS NOT NULL";
+        "ORDER BY u.username, s.problem_id, s.`virtual`, s.created_at, s.id";
     if (!ExecSQL(sql)) return false;
     void* res = g_sql.mysql_store_result(g_conn);
     if (!res) return false;
 
-    struct Row { std::string username; int virt; long long penalty; };
-    std::vector<Row> off, virt_rows;
+    // 每人每题的聚合状态：第一次 AC 时间 + AC 之前的错误次数
+    struct Cell { long long firstAcMin = -1; long long wrong = 0; };
+    std::map<std::string, long long> solved, penalty;   // 按 username 汇总（总罚时）
+    std::map<std::string, bool> isVirt;
+
+    std::string curUser, curProblem;
+    int curVirt = -1;
+    bool hasCell = false;
+    Cell cell;
+
+    auto flush = [&]() {
+        if (!hasCell) return;
+        if (cell.firstAcMin >= 0) {
+            solved[curUser] += 1;
+            penalty[curUser] += cell.firstAcMin + cell.wrong * 20;
+            isVirt[curUser] = (curVirt == 1);
+        }
+    };
+
     char** row;
     while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
         std::string username = row[0] ? row[0] : "?";
-        int v = atoi(row[2]);
-        long long acMin = atoll(row[3]);
-        long long wrong = atoll(row[4]);
-        long long penalty = acMin + wrong * 20;
-        Row r{username, v, penalty};
-        if (v) virt_rows.push_back(r); else off.push_back(r);
+        std::string problem = row[1] ? row[1] : "0";
+        int virt = atoi(row[2]);
+        long long relMin = atoll(row[3]);
+        bool ac = atoi(row[4]) != 0;
+
+        if (!hasCell || curUser != username || curProblem != problem || curVirt != virt) {
+            flush();
+            curUser = username; curProblem = problem; curVirt = virt;
+            cell = Cell();
+            hasCell = true;
+        }
+        if (cell.firstAcMin >= 0) continue;   // 已 AC，之后提交不计
+        if (ac) cell.firstAcMin = relMin;
+        else cell.wrong++;
     }
+    flush();
     g_sql.mysql_free_result(res);
 
-    auto emit = [](const std::vector<Row>& rows) -> std::string {
-        // 按 username 聚合：solved 数 + penalty 总和，再排序
-        std::map<std::string, long long> solved, penalty;
-        for (auto& r : rows) { solved[r.username]++; penalty[r.username] += r.penalty; }
+    auto emit = [&](bool virt) -> std::string {
         struct O { std::string name; long long s; long long p; };
         std::vector<O> v;
-        for (auto& kv : solved) v.push_back({kv.first, kv.second, penalty[kv.first]});
+        for (auto& kv : solved) {
+            if (isVirt[kv.first] != virt) continue;
+            v.push_back({kv.first, kv.second, penalty[kv.first]});
+        }
         std::sort(v.begin(), v.end(), [](const O& a, const O& b) {
-            if (a.s != b.s) return a.s > b.s;
-            return a.p < b.p;
+            if (a.s != b.s) return a.s > b.s;    // AC 数降序
+            return a.p < b.p;                    // 总罚时升序
         });
         std::string out = "[";
         for (size_t i = 0; i < v.size(); ++i) {
             if (i) out += ",";
+            std::string name = v[i].name;
+            for (auto& c : name) if (c == '"' || c == '\\') c = '_';
             out += "{\"rank\":" + std::to_string((int)i + 1)
-                 + ",\"username\":\"" + v[i].name + "\""
+                 + ",\"username\":\"" + name + "\""
                  + ",\"solved\":" + std::to_string(v[i].s)
                  + ",\"penalty\":" + std::to_string(v[i].p) + "}";
         }
         out += "]";
         return out;
     };
-    // username 转义（简单）
-    auto esc = [](std::string s) {
-        for (auto& c : s) if (c == '"' || c == '\\') c = '_';
-        return s;
-    };
-    (void)esc;
-    out_official = emit(off);
-    out_virtual = emit(virt_rows);
+    out_official = emit(false);
+    out_virtual = emit(true);
     return true;
 }
 
@@ -532,6 +901,181 @@ bool mysql_list_users(std::string& out_json, std::string& err) {
     }
     g_sql.mysql_free_result(res);
     out_json += "]";
+    return true;
+}
+
+// ===== 题目 / 比赛发布与同步 =====
+
+bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
+                          const std::string& sample_in, const std::string& sample_out,
+                          int time_ms, int mem_mb, const std::string& tags_json,
+                          const std::string& std_code, std::string& err) {
+    if (time_ms <= 0) time_ms = 1000;
+    if (mem_mb <= 0) mem_mb = 256;
+    std::string tags = tags_json.empty() ? "[]" : tags_json;
+    std::string encStd = std_code.empty() ? "" : encrypt_blob(std_code);
+    std::string sql = "INSERT INTO problems(id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code,updated_at) VALUES("
+        + std::to_string(id) + ",'" + SqlEscape(title) + "','" + SqlEscape(desc) + "','"
+        + SqlEscape(sample_in) + "','" + SqlEscape(sample_out) + "'," + std::to_string(time_ms) + ","
+        + std::to_string(mem_mb) + ",'" + SqlEscape(tags) + "','" + SqlEscape(encStd) + "',NOW()) "
+        "ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), "
+        "sample_in=VALUES(sample_in), sample_out=VALUES(sample_out), time_ms=VALUES(time_ms), "
+        "mem_mb=VALUES(mem_mb), tags=VALUES(tags), std_code=VALUES(std_code), updated_at=NOW()";
+    return ExecSQL(sql, &err);
+}
+
+bool mysql_clear_problem_generators(int problem_id) {
+    return ExecSQL("DELETE FROM problem_generators WHERE problem_id=" + std::to_string(problem_id));
+}
+
+long long mysql_add_problem_generator(int problem_id, const std::string& name,
+                                      const std::string& code, const std::string& desc,
+                                      int gen_count, int seed_base) {
+    std::string encCode = encrypt_blob(code);
+    std::string sql = "INSERT INTO generators(code,description) VALUES('"
+        + SqlEscape(encCode) + "','" + SqlEscape(desc) + "')";
+    if (!ExecSQL(sql)) return 0;
+    long long gid = g_sql.mysql_insert_id ? (long long)g_sql.mysql_insert_id(g_conn) : 0;
+    if (gid <= 0) return 0;
+    std::string link = "INSERT INTO problem_generators(problem_id,generator_id,name,gen_count,seed_base) VALUES("
+        + std::to_string(problem_id) + "," + std::to_string(gid) + ",'" + SqlEscape(name) + "',"
+        + std::to_string(gen_count) + "," + std::to_string(seed_base) + ")";
+    if (!ExecSQL(link)) return 0;
+    return gid;
+}
+
+void mysql_purge_orphan_generators() {
+    ExecSQL("DELETE FROM generators WHERE id NOT IN (SELECT generator_id FROM problem_generators)");
+}
+
+bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err) {
+    std::string sql = "INSERT INTO contests(id,content) VALUES("
+        + std::to_string(cid) + ",'" + SqlEscape(contest_json) + "') "
+        "ON DUPLICATE KEY UPDATE content=VALUES(content)";
+    return ExecSQL(sql, &err);
+}
+
+bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err) {
+    if (!g_conn) { err = "MySQL not connected"; return false; }
+    if (problem_dir.empty()) { err = "题目目录为空"; return false; }
+    CreateDirectoryA(problem_dir.c_str(), nullptr);
+
+    // 1) 题目（含标程源码 std.cpp）
+    if (g_sql.mysql_query(g_conn, "SELECT id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code FROM problems ORDER BY id")) {
+        if (g_sql.mysql_error) err = g_sql.mysql_error(g_conn);
+        return false;
+    }
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (res) {
+        char** row;
+        while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+            int id = atoi(row[0]);
+            std::string title = row[1] ? row[1] : "";
+            std::string desc = row[2] ? row[2] : "";
+            std::string sampleIn = row[3] ? row[3] : "";
+            std::string sampleOut = row[4] ? row[4] : "";
+            int timeMs = atoi(row[5]); if (timeMs <= 0) timeMs = 1000;
+            int memMb = atoi(row[6]); if (memMb <= 0) memMb = 256;
+            std::string tags = row[7] ? row[7] : "[]";
+            std::string stdCode = decrypt_blob(row[8] ? row[8] : "");
+            std::string dir = problem_dir + "\\" + std::to_string(id);
+            Mkdirs(dir);
+            WriteFileBin(dir + "\\statement.txt", title + "\n" + desc);
+            WriteFileBin(dir + "\\sample.in", sampleIn);
+            WriteFileBin(dir + "\\sample.out", sampleOut);
+            std::string meta = "{\"timeLimitMs\":" + std::to_string(timeMs)
+                + ",\"memLimitMB\":" + std::to_string(memMb)
+                + ",\"tags\":" + (tags.empty() ? "[]" : tags) + "}";
+            WriteFileBin(dir + "\\meta.json", meta);
+            if (!stdCode.empty()) WriteFileBin(dir + "\\std.cpp", stdCode);
+
+            // 读取该题全部生成器（JOIN generators），解密后落盘 gen.cpp / desc.txt
+            std::string gq = "SELECT pg.name, pg.gen_count, pg.seed_base, g.code, g.description "
+                             "FROM problem_generators pg JOIN generators g ON g.id=pg.generator_id "
+                             "WHERE pg.problem_id=" + std::to_string(id) + " ORDER BY pg.name";
+            std::vector<GenInfo> allGens, regenGens;
+            if (g_sql.mysql_query(g_conn, gq.c_str()) == 0) {
+                void* gres = g_sql.mysql_store_result(g_conn);
+                if (gres) {
+                    char** grow;
+                    while ((grow = g_sql.mysql_fetch_row(gres)) != nullptr) {
+                        GenInfo gi;
+                        gi.name = grow[0] ? grow[0] : "";
+                        gi.count = atoi(grow[1]);
+                        gi.seedBase = atoi(grow[2]);
+                        std::string code = decrypt_blob(grow[3] ? grow[3] : "");
+                        std::string gdesc = grow[4] ? grow[4] : "";
+                        if (gi.name.empty() || gi.count <= 0) continue;
+
+                        std::string gdir = dir + "\\" + gi.name;
+                        Mkdirs(gdir);
+                        WriteFileBin(gdir + "\\gen.cpp", code);
+                        WriteFileBin(gdir + "\\desc.txt", gdesc);
+
+                        // 变更检测：gen.cpp / 组数 / 种子 / 标程 任一变化则重新生成
+                        std::string hashInput = code + "|" + std::to_string(gi.count)
+                            + "|" + std::to_string(gi.seedBase) + "|" + stdCode;
+                        gi.hash = ToHex(HashString(hashInput));
+                        gi.marker = gdir + "\\.genhash";
+                        bool complete = ExistsFile(gdir + "\\" + std::to_string(gi.count) + ".in")
+                                     && ExistsFile(gdir + "\\" + std::to_string(gi.count) + ".out");
+                        allGens.push_back(gi);
+                        if (ReadFileText(gi.marker) != gi.hash || !complete)
+                            regenGens.push_back(gi);
+
+                    }
+                    g_sql.mysql_free_result(gres);
+                }
+            }
+
+            // 重新生成需要更新的生成器数据（非致命：失败仅记录，不中断其余同步）
+            if (!regenGens.empty() && !stdCode.empty()) {
+                std::string rerr;
+                if (RegenerateProblemData(dir, regenGens, rerr)) {
+                    for (auto& gi : regenGens) WriteFileBin(gi.marker, gi.hash);
+                } else {
+                    if (err.empty()) err = "题目 " + std::to_string(id) + " 数据生成失败：" + rerr;
+                }
+            }
+
+            // 清理已删除的生成器目录（DB 中不存在的旧 gen.cpp 目录）
+            {
+                std::string pat = dir + "\\*";
+                WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+                if (h != INVALID_HANDLE_VALUE) {
+                    do {
+                        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                        std::string n = fd.cFileName;
+                        if (n == "." || n == "..") continue;
+                        bool known = false;
+                        for (auto& gi : allGens) if (gi.name == n) { known = true; break; }
+                        if (!known && ExistsFile(dir + "\\" + n + "\\gen.cpp"))
+                            RemoveDir(dir + "\\" + n);
+                    } while (FindNextFileA(h, &fd));
+                    FindClose(h);
+                }
+            }
+        }
+        g_sql.mysql_free_result(res);
+    }
+
+    // 2) 比赛
+    if (!server_root.empty() && g_sql.mysql_query(g_conn, "SELECT id,content FROM contests ORDER BY id") == 0) {
+        void* cres = g_sql.mysql_store_result(g_conn);
+        if (cres) {
+            char** row;
+            while ((row = g_sql.mysql_fetch_row(cres)) != nullptr) {
+                int cid = atoi(row[0]);
+                std::string content = row[1] ? row[1] : "";
+                if (content.empty()) continue;
+                std::string cdir = server_root + "\\contests\\" + std::to_string(cid);
+                Mkdirs(cdir);
+                WriteFileBin(cdir + "\\contest.json", content);
+            }
+            g_sql.mysql_free_result(cres);
+        }
+    }
+    err.clear();
     return true;
 }
 

@@ -15,17 +15,19 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
 
 ## 二、配置客户端
 
-把 `docs/mysql_config.example.json` 复制到 `dist/mysql_config.json`，改成你的真实连接：
+把 `docs/mysql_config.example.json` 复制到客户端与出题服务端的运行目录（`dist/mysql_config.json`、`dist/author/mysql_config.json`），改成真实连接：
 ```json
 {
-  "host": "127.0.0.1",
+  "host": "你的服务器IP",
   "port": 3306,
   "user": "root",
   "pass": "你的密码",
   "db": "oj"
 }
 ```
-把 Connector/C 里的 `libmysql.dll` 复制到 `dist/` 目录。
+把 Connector/C 里的 `libmysql.dll` 复制到两个目录。
+- 首次连接时若 `oj` 库不存在，会自动 `CREATE DATABASE oj`（无需手工建库）。
+- 出题端与服务端共用同一份连接参数：出题端把发布的题目写入该库，客户端从该库拉取题目。
 
 ## 三、使用
 
@@ -58,7 +60,18 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
 密码用 SHA-256(salt + password) 哈希存储，salt 每用户随机 16 字节。
 SQL 注入通过 `mysql_real_escape_string` 转义。
 
-## 六、新导出函数（ojcore.dll）
+## 六、题目与比赛分发（出题端上传、客户端拉取）
+
+- 出题端在「发布」题目/比赛时，除复制到本地客户端目录外，还会把内容写入 MySQL：
+  - `problems` 表：题面（标题/描述/样例）、元数据（时限/内存/标签）、标程源码 `std_code`（**AES-256 密文**）。
+  - `generators` 表：生成器源码（**AES-256 密文**）+ 描述；`problem_generators` 表：题目 ↔ 生成器关联（目录名 + 测试点数量 `gen_count` + 确定性种子 `seed_base`）。一道题一个标程、多个生成器，生成器可跨题复用。
+  - `contests` 表：`contest.json` 原文。
+- 客户端启用 MySQL 后，启动时从 MySQL 拉取题目/比赛，**解密**生成器与标程源码到本地，并在本地**编译生成器 → 运行生成 `.in` → 编译标程 → 运行生成 `.out`**。
+  - 用「生成器内容 + 组数 + 种子 + 标程」做哈希做缓存：本地已存在且内容未变则**不再拉取、不再生成**，直接判题。
+  - 所有客户端用同一 `seed_base`，生成的判题数据完全一致。
+- 效果：数据库只存几 KB 的源码（还是密文），不存可能上 GB 的测试数据；判题数据在客户端本地按需生成并缓存。
+
+## 七、新导出函数（ojcore.dll）
 
 - `oj_init_mysql(host, port, user, pass, db, problem_dir)` — 0 = 已连 MySQL；1 = 回退本地
 - `oj_mysql_init_schema()` — 建表（幂等）

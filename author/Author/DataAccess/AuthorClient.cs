@@ -115,6 +115,9 @@ public sealed class AuthorClient
     public string Validate(int id) => AuthorCoreInterop.Validate(id);
     public string Publish(int id, string targetRoot) => AuthorCoreInterop.Publish(id, targetRoot);
 
+    /// <summary>把题目（题面 + 元数据 + 测试数据文件）发布到 MySQL，供客户端拉取。</summary>
+    public string PublishToMySql(int id) => OjCoreInterop.PublishProblemDir(id, ProblemDir(id));
+
     // ===== 测试数据文件 =====
     public List<DataPair> ListDataPairs(int id)
     {

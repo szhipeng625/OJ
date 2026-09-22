@@ -20,24 +20,19 @@ public class ApiClient
 
     public ApiClient()
     {
-        // 题目目录：开发环境在 bin/.../net8.0-windows（上溯 4 级到仓库根），
-        // 发布环境在 dist/（上溯 1 级）；逐个候选探测，取存在的那个。
+        // 题目/数据目录都相对 exe 目录（可移植），自动创建
         string baseDir = AppContext.BaseDirectory;
-        string[] candidates =
-        {
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "server", "problems")),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "server", "problems")),
-            Path.GetFullPath(Path.Combine(baseDir, "server", "problems")),
-        };
-        string problemDir = candidates.FirstOrDefault(Directory.Exists) ?? candidates[0];
+        string problemDir = Path.Combine(baseDir, "problems");
         var dataDir = Path.Combine(baseDir, "ojdata");
+        try { Directory.CreateDirectory(problemDir); } catch { }
+        try { Directory.CreateDirectory(dataDir); } catch { }
         // 先试本地 LSM 模式
         OJInterop.Init(problemDir, dataDir);
         // 再尝试 MySQL 模式（如果同目录有 mysql_config.json 则启用）
-        TryInitMysql(problemDir);
+        TryInitMysql(problemDir, dataDir);
     }
 
-    private void TryInitMysql(string problemDir)
+    private void TryInitMysql(string problemDir, string dataDir)
     {
         try
         {
@@ -50,12 +45,14 @@ public class ApiClient
             string user = root.GetProperty("user").GetString() ?? "root";
             string pass = root.GetProperty("pass").GetString() ?? "";
             string db = root.GetProperty("db").GetString() ?? "oj";
-            int rc = OJInterop.InitMySQL(host, port, user, pass, db, problemDir);
+            int rc = OJInterop.InitMySQL(host, port, user, pass, db, problemDir, dataDir);
             MySqlEnabled = (rc == 0);
             if (MySqlEnabled)
             {
                 // 首次建表（IF NOT EXISTS，幂等）
                 OJInterop.InitMysqlSchemaJson();
+                // 从 MySQL 拉取题目与比赛到本地目录（本地文件作为缓存，判题仍走文件）
+                try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败不阻塞启动，回退本地题目 */ }
             }
         }
         catch { MySqlEnabled = false; }

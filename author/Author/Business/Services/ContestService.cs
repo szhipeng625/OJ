@@ -50,13 +50,20 @@ public sealed class ContestService
             if (string.IsNullOrWhiteSpace(target))
                 return new JobResult(false, "请填写目标目录");
             string r = _client.Publish(cid, target.Trim());
-            return r.Contains("\"ok\":true")
-                ? new JobResult(true, $"已发布比赛 C{cid} 到 {target.Trim()}\\contests\\{cid} ✓")
-                : new JobResult(false, "发布失败：" + AuthorClient.ParseError(r));
+            if (r.Contains("\"ok\":true"))
+            {
+                string m = "";
+                try { m = _client.PublishToMySql(cid); } catch { }
+                string msg = $"已发布比赛 C{cid} 到 {target.Trim()}\\contests\\{cid} ✓";
+                if (m.Contains("\"ok\":true")) msg += "\n已同步到 MySQL 数据库 ✓";
+                else if (!string.IsNullOrEmpty(m)) msg += "\nMySQL 同步失败：" + AuthorClient.ParseError(m);
+                return new JobResult(true, msg);
+            }
+            return new JobResult(false, "发布失败：" + AuthorClient.ParseError(r));
         });
 
     /// <summary>
-    /// 保存比赛并自动发布到客户端的 contest 目录（serverRoot\contests\{cid}），一步完成。
+    /// 保存比赛并发布：主渠道上传到 MySQL 数据库（客户端从此拉取），本地复制作为兜底。
     /// </summary>
     public Task<JobResult> SaveAndPublishAsync(ContestDraft draft, string serverRoot)
         => _build.RunAsync("c" + draft.Id, () =>
@@ -65,18 +72,26 @@ public sealed class ContestService
             if (!r.Contains("\"ok\":true"))
                 return new JobResult(false, AuthorClient.ParseError(r));
 
-            if (string.IsNullOrWhiteSpace(serverRoot))
-                return new JobResult(true,
-                    $"已保存比赛 C{draft.Id}：{draft.Name}\n题目：{string.Join(", ", draft.ProblemIds)}\n（未配置客户端目录，仅本地保存）");
+            // 1) 上传到 MySQL（主渠道，客户端从此拉取）
+            string m = "";
+            try { m = _client.PublishToMySql(draft.Id); } catch { }
+            bool mysqlOk = m.Contains("\"ok\":true");
 
-            string p = _client.Publish(draft.Id, serverRoot.Trim());
-            if (!p.Contains("\"ok\":true"))
-                return new JobResult(false, "已保存，但发布失败：" + AuthorClient.ParseError(p));
+            // 2) 本地复制（兜底，失败不影响主流程）
+            string localMsg = "";
+            if (!string.IsNullOrWhiteSpace(serverRoot))
+            {
+                string p = _client.Publish(draft.Id, serverRoot.Trim());
+                localMsg = p.Contains("\"ok\":true")
+                    ? $"；已复制到 {serverRoot.Trim()}\\contests\\{draft.Id}"
+                    : "；本地复制失败：" + AuthorClient.ParseError(p);
+            }
 
-            return new JobResult(true,
-                $"已保存并发布比赛 C{draft.Id}：{draft.Name}\n" +
+            string msg = $"已保存并发布比赛 C{draft.Id}：{draft.Name}\n" +
                 $"时间：{draft.StartTime} ~ {draft.EndTime}\n" +
                 $"题目：{string.Join(", ", draft.ProblemIds)}\n" +
-                $"客户端目录：{serverRoot.Trim()}\\contests\\{draft.Id} ✓");
+                (mysqlOk ? "已同步 MySQL ✓" : ("MySQL 同步失败：" + (string.IsNullOrEmpty(m) ? "未知错误" : AuthorClient.ParseError(m)))) +
+                localMsg;
+            return new JobResult(mysqlOk, msg);
         });
 }

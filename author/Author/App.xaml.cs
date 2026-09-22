@@ -22,34 +22,15 @@ public partial class App : Application
         {
             string baseDir = AppContext.BaseDirectory;
 
-            // 客户端题目目录（MySQL 初始化需要，dev 上溯 5 级到仓库根；发布环境在 exe 上级）
-            string[] serverCandidates =
-            {
-                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "server", "problems")),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "server", "problems")),
-                Path.GetFullPath(Path.Combine(baseDir, "server", "problems")),
-            };
-            string serverProblemDir = serverCandidates.FirstOrDefault(Directory.Exists) ?? serverCandidates[0];
-            string serverRoot = Path.GetDirectoryName(serverProblemDir) ?? serverProblemDir;
-
-            // 服务端自有题库 / 编译临时目录（dev：Author\problems、Author\temp）
-            string[] authorCandidates =
-            {
-                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "problems")),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "problems")),
-                Path.GetFullPath(Path.Combine(baseDir, "problems")),
-            };
-            string authorProblemDir = authorCandidates.FirstOrDefault(Directory.Exists) ?? authorCandidates[0];
-            string testDataDir = Path.GetFullPath(Path.Combine(authorProblemDir, "..", "testdata"));
-            try { Directory.CreateDirectory(testDataDir); } catch { /* 创建测试数据目录失败不阻塞启动 */ }
-
-            string[] tempCandidates =
-            {
-                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "temp")),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "temp")),
-                Path.GetFullPath(Path.Combine(baseDir, "temp")),
-            };
-            string tempRoot = tempCandidates.FirstOrDefault(Directory.Exists) ?? tempCandidates[0];
+            // 全部数据目录相对 exe 目录（可移植），自动创建
+            string authorProblemDir = Path.Combine(baseDir, "problems");       // 出题端自有题库
+            string serverRoot = Path.Combine(baseDir, "server");               // 客户端服务端根目录
+            string serverProblemDir = Path.Combine(serverRoot, "problems");    // 题目发布目标（本地兜底）
+            string testDataDir = Path.Combine(baseDir, "testdata");            // 测试数据目录
+            string tempRoot = Path.Combine(baseDir, "temp");                   // 编译临时目录
+            string dataDir = Path.Combine(baseDir, "ojdata");                  // 本地提交记录
+            foreach (var d in new[] { authorProblemDir, serverProblemDir, testDataDir, tempRoot, dataDir })
+                try { Directory.CreateDirectory(d); } catch { /* 创建目录失败不阻塞启动 */ }
 
             // ---- 组合根：DAL → BLL ----
             var authClient = new AuthClient();
@@ -76,7 +57,7 @@ public partial class App : Application
             };
 
             // ---- MySQL 认证（服务端强制要求） ----
-            if (!await auth.InitAsync(serverProblemDir))
+            if (!await auth.InitAsync(serverProblemDir, dataDir))
             {
                 MessageBox.Show("未配置 MySQL 连接（缺少 mysql_config.json 或连不上数据库），服务端无法启动。\n请参考 docs/MYSQL.md。",
                     "OJ 服务端", MessageBoxButton.OK, MessageBoxImage.Error);

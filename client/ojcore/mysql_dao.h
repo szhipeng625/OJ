@@ -69,4 +69,34 @@ bool mysql_board(int cid, const std::string& start_str,
 // admin：列出全部用户（返回 JSON 数组）
 bool mysql_list_users(std::string& out_json, std::string& err);
 
+// ===== 题目 / 比赛发布与同步（服务端上传、客户端拉取） =====
+
+// 加密 / 解密（生成器源码与标程在库中以密文存储，客户端本地解密后使用）
+std::string encrypt_blob(const std::string& plain);
+std::string decrypt_blob(const std::string& enc);
+
+// upsert 一道题的题面、元数据与标程源码（std_code 明文传入，内部加密存储）
+bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
+                          const std::string& sample_in, const std::string& sample_out,
+                          int time_ms, int mem_mb, const std::string& tags_json,
+                          const std::string& std_code, std::string& err);
+
+// 清空某题与生成器的全部关联（重新发布前调用，旧关联指向的生成器随后被清理）
+bool mysql_clear_problem_generators(int problem_id);
+
+// 新增一个生成器：code 明文传入，内部加密后写入 generators 并关联到题目。
+// 返回新生成器 id（>0 成功，0 失败）。
+long long mysql_add_problem_generator(int problem_id, const std::string& name,
+                                      const std::string& code, const std::string& desc,
+                                      int gen_count, int seed_base);
+
+// 清理不再被任何题目引用的孤儿生成器（发布后调用）
+void mysql_purge_orphan_generators();
+
+// upsert 一场比赛的 contest.json 原文
+bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err);
+
+// 把 MySQL 中的题目与比赛物化到本地目录（problem_dir 下按 id 建目录，server_root 下建 contests）
+bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err);
+
 } // namespace oj

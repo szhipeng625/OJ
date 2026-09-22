@@ -335,7 +335,7 @@ public partial class MainWindow : Window
     private void ShowProblemDescription(Problem p)
     {
         HomeDescTitle.Text = p.Title;
-        MarkdownRenderer.Render(HomeDescBox, p.Description);
+        MarkdownRenderer.Render(HomeDescBox, MarkdownRenderer.CombineStatement(p.Description, p.SampleIn, p.SampleOut));
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
         HomeMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
         ProfilePanel.Visibility = Visibility.Collapsed;
@@ -600,7 +600,7 @@ public partial class MainWindow : Window
     private void ShowContestProblemDescription(Problem p)
     {
         ContestDescTitle.Text = p.Title;
-        MarkdownRenderer.Render(ContestDescBox, p.Description);
+        MarkdownRenderer.Render(ContestDescBox, MarkdownRenderer.CombineStatement(p.Description, p.SampleIn, p.SampleOut));
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
         ContestMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
         ContestInfoPanel.Visibility = Visibility.Collapsed;

@@ -12,7 +12,7 @@ namespace author.DataAccess;
 public sealed class AuthClient
 {
     /// <summary>初始化 MySQL 连接并建表。false = 未配置或连接失败，服务端不允许进入。</summary>
-    public bool Init(string problemDir)
+    public bool Init(string problemDir, string dataDir)
     {
         try
         {
@@ -29,7 +29,7 @@ public sealed class AuthClient
             int rc;
             // oj_init_mysql 建立进程级单例连接，只在启动时调用一次（不进 OjCoreInterop 的调用锁）
             lock (OjCoreInterop.Lock)
-                rc = OjCoreInterop.InitMysql(host, port, user, pass, db, problemDir);
+                rc = OjCoreInterop.InitMysql(host, port, user, pass, db, problemDir, dataDir);
             if (rc != 0) return false;
 
             try { _ = OjCoreInterop.InitSchema(); } catch { /* 建表失败不阻塞登录 */ }

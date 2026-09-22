@@ -35,7 +35,7 @@ public partial class ProblemWorkspaceWindow : Window
         _testDataDir = testDataDir;
         _serverProblemDir = serverProblemDir;
         Title = $"P{problemId} 题目工作台";
-        TargetBox.Text = string.IsNullOrWhiteSpace(serverProblemDir) ? @"D:\OJ\server\problems" : serverProblemDir;
+        TargetBox.Text = string.IsNullOrWhiteSpace(serverProblemDir) ? "server\\problems" : serverProblemDir;
         Loaded += async (_, _) => await LoadAllAsync();
     }
 
@@ -92,6 +92,29 @@ public partial class ProblemWorkspaceWindow : Window
             if (IsLoaded) StatementMsg.Text = r.Message;
             _mgr.NotifyProblemListChanged();
         });
+    }
+
+    // ---------- 样例导入（不再手写，从文件导入） ----------
+    private void OnImportSampleIn(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Filter = "样例输入 (*.in;*.txt)|*.in;*.txt|所有文件 (*.*)|*.*",
+            Title = "选择样例输入文件"
+        };
+        if (dlg.ShowDialog() != true) return;
+        SampleInBox.Text = File.ReadAllText(dlg.FileName);
+    }
+
+    private void OnImportSampleOut(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Filter = "样例输出 (*.out;*.txt)|*.out;*.txt|所有文件 (*.*)|*.*",
+            Title = "选择样例输出文件"
+        };
+        if (dlg.ShowDialog() != true) return;
+        SampleOutBox.Text = File.ReadAllText(dlg.FileName);
     }
 
     // ---------- 测试数据 ----------

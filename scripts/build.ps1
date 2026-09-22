@@ -37,7 +37,7 @@ param(
     [switch]$Publish,
     # 清理
     [switch]$Clean,
-    # 生成 mysql_config.json 时使用的本地数据库连接参数（该文件不入库；仅在缺失时生成）
+    # 生成 mysql_config.json 时使用的数据库连接参数（该文件不入库；仅在缺失时生成）
     [string]$MysqlHost = '127.0.0.1',
     [int]$MysqlPort = 3306,
     [string]$MysqlUser = 'root',

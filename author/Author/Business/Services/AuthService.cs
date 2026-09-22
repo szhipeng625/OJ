@@ -14,7 +14,7 @@ public sealed class AuthService
     public Session? CurrentUser { get; private set; }
 
     /// <summary>初始化 MySQL（服务端必须可用）。</summary>
-    public Task<bool> InitAsync(string problemDir) => Task.Run(() => _client.Init(problemDir));
+    public Task<bool> InitAsync(string problemDir, string dataDir) => Task.Run(() => _client.Init(problemDir, dataDir));
 
     /// <summary>登录并校验角色（仅 admin/author）。</summary>
     public Task<Session> LoginAsync(string username, string password)

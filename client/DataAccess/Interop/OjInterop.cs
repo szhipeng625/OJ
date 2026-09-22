@@ -70,10 +70,14 @@ public static class OJInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string user,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string pass,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string db,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir);
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_init_schema();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_sync_problems();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_register([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
@@ -147,10 +151,11 @@ public static class OJInterop
     public static string ContestSubmissionsJson(int cid, string username, bool viewAll)
         => PtrToString(oj_contest_submissions(cid, username, viewAll ? 1 : 0));
 
-    public static int InitMySQL(string host, int port, string user, string pass, string db, string problemDir)
-        => oj_init_mysql(host, port, user, pass, db, problemDir);
+    public static int InitMySQL(string host, int port, string user, string pass, string db, string problemDir, string dataDir)
+        => oj_init_mysql(host, port, user, pass, db, problemDir, dataDir);
 
     public static string InitMysqlSchemaJson() => PtrToString(oj_mysql_init_schema());
+    public static string SyncProblemsJson() => PtrToString(oj_mysql_sync_problems());
     public static string RegisterJson(string u, string p, string role) => PtrToString(oj_register(u, p, role));
     public static string LoginJson(string u, string p) => PtrToString(oj_login(u, p));
     public static string WhoamiJson(string token) => PtrToString(oj_whoami(token));

@@ -19,7 +19,8 @@ public static class OjCoreInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string user,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string pass,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string db,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir);
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_login([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
@@ -30,6 +31,14 @@ public static class OjCoreInterop
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_init_schema();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_publish_problem(int id,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_publish_contest(int cid,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string contest_json);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void oj_free_string(IntPtr s);
@@ -45,12 +54,23 @@ public static class OjCoreInterop
     }
 
     // ===== 认证 / 初始化 =====
-    public static int InitMysql(string host, int port, string user, string pass, string db, string problemDir)
-        => oj_init_mysql(host, port, user, pass, db, problemDir);
+    public static int InitMysql(string host, int port, string user, string pass, string db, string problemDir, string dataDir)
+        => oj_init_mysql(host, port, user, pass, db, problemDir, dataDir);
 
     public static string InitSchema()
     {
         lock (Lock) return Take(oj_mysql_init_schema());
+    }
+
+    // ===== 题目 / 比赛发布到 MySQL =====
+    public static string PublishProblemDir(int id, string problemDir)
+    {
+        lock (Lock) return Take(oj_mysql_publish_problem(id, problemDir));
+    }
+
+    public static string PublishContest(int cid, string contestJson)
+    {
+        lock (Lock) return Take(oj_mysql_publish_contest(cid, contestJson));
     }
 
     public static string LoginJson(string u, string p)

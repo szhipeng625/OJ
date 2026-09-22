@@ -78,6 +78,7 @@ store/
 xshd_dump/
 author/drain_test/
 author/smoke_concurrency/
+temp_login/
 _test_gen/
 _test_judge/
 _jd/

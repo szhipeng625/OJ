@@ -74,11 +74,12 @@ OJ_API const char* oj_contest_submissions(int cid, const char* username, int vie
 
 // ===== MySQL 用户体系（可选，未配置时回退本地 anonymous）=====
 
-// 初始化 MySQL 模式。host/port/user/pass/db 为连接参数；problem_dir 仍为题目目录。
+// 初始化 MySQL 模式。host/port/user/pass/db 为连接参数；problem_dir 仍为题目目录；
+// data_dir 为本地数据目录（提交记录/临时文件，相对 exe 目录传入）。
 // 若 libmysql.dll 未找到或连接失败，返回非 0 且仍可用本地模式。
 OJ_API int oj_init_mysql(const char* host, int port, const char* user,
                          const char* pass, const char* db,
-                         const char* problem_dir);
+                         const char* problem_dir, const char* data_dir);
 
 // 首次初始化建表（users/sessions/submissions）。返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_init_schema(void);
@@ -100,6 +101,20 @@ OJ_API const char* oj_logout(const char* token);
 
 // 列出全部用户（admin 用）。返回 JSON 数组。
 OJ_API const char* oj_list_users(const char* token);
+
+// ===== 题目 / 比赛发布与同步（MySQL 分发） =====
+
+// 发布题目到 MySQL：读取 problem_dir 目录下的题面/元数据/测试数据文件，upsert 到 problems/problem_files。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir);
+
+// 发布比赛到 MySQL：contest_json 为比赛 JSON（含 name/description/startTime/endTime/problems）。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json);
+
+// 从 MySQL 同步题目与比赛到本地目录（g_problemDir 与 serverRoot）。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_mysql_sync_problems(void);
 
 // 释放 oj_get_problems / oj_submit 返回的字符串。
 OJ_API void oj_free_string(const char* s);

@@ -10,73 +10,24 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 顶部：比赛信息 -->
-        <WrapPanel Grid.Row="0" Margin="0,0,0,8">
-            <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
-                <TextBlock Text="编号：" VerticalAlignment="Center"/>
-                <TextBox x:Name="ContestIdBox" Width="60" VerticalContentAlignment="Center" ToolTip="比赛编号（正整数，留空则自动建议）"/>
+        <!-- 顶部：标题 + 新建比赛 -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="已有比赛（双击可再次编辑）：" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="新建比赛" Width="96" Height="32" Click="OnNewContest"/>
+                <Button Content="刷新" Width="70" Height="32" Margin="8,0,0,0" Click="OnRefresh"/>
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
-                <TextBlock Text="名称：" VerticalAlignment="Center"/>
-                <TextBox x:Name="ContestNameBox" Width="180" VerticalContentAlignment="Center"/>
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
-                <TextBlock Text="开始：" VerticalAlignment="Center"/>
-                <TextBox x:Name="ContestStartBox" Width="140" VerticalContentAlignment="Center" ToolTip="2026-09-20 09:00"/>
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" Margin="0,0,12,6">
-                <TextBlock Text="结束：" VerticalAlignment="Center"/>
-                <TextBox x:Name="ContestEndBox" Width="140" VerticalContentAlignment="Center" ToolTip="2026-09-20 11:00"/>
-            </StackPanel>
-            <Button Content="保存并发布" Width="110" Margin="0,0,8,0" Click="OnSave"/>
-            <Button Content="新建空比赛" Width="100" Click="OnNew"/>
-        </WrapPanel>
+        </DockPanel>
 
-        <!-- 中部：左题目勾选列表 + 右比赛列表 -->
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="360"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- 左：题目列表（勾选） -->
-            <DockPanel Grid.Column="0">
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-                    <TextBlock Text="勾选本场比赛题目：" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button Content="全选" Width="56" Margin="4,0,0,0" Click="OnCheckAll"/>
-                        <Button Content="清空" Width="56" Margin="4,0,0,0" Click="OnCheckNone"/>
-                    </StackPanel>
-                </DockPanel>
-                <ListBox x:Name="ProblemCheckList" BorderThickness="1" BorderBrush="#FFE3E6EB">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      VerticalContentAlignment="Center">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock FontWeight="SemiBold">
-                                        <Run Text="P"/><Run Text="{Binding Id, Mode=OneWay}"/>
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding Title, Mode=OneWay}" Margin="8,0,0,0"/>
-                                </StackPanel>
-                            </CheckBox>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
-
-            <!-- 右：比赛列表 + 目标目录 -->
-            <DockPanel Grid.Column="2">
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-                    <TextBlock Text="已有比赛（点选可再次编辑）：" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <Button DockPanel.Dock="Right" Content="刷新" Width="70" Click="OnRefresh"/>
-                </DockPanel>
-                <ListBox x:Name="ContestList" SelectionChanged="OnSelectContest"
-                         BorderThickness="1" BorderBrush="#FFE3E6EB"/>
-                <TextBlock x:Name="TargetText" DockPanel.Dock="Bottom" Foreground="#888" TextWrapping="Wrap" Margin="0,8,0,0"/>
-            </DockPanel>
-        </Grid>
+        <!-- 中部：比赛列表 -->
+        <ListBox x:Name="ContestList" Grid.Row="1" BorderThickness="1" BorderBrush="#FFE3E6EB"
+                 MouseDoubleClick="OnContestDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Display}" Margin="4"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
 
         <!-- 底部：状态 -->
         <TextBlock x:Name="StatusText" Grid.Row="2" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>

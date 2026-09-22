@@ -26,6 +26,9 @@ public sealed class ContestClient
 
     public string Publish(int cid, string targetRoot) => AuthorCoreInterop.ContestPublish(cid, targetRoot);
 
+    /// <summary>把比赛配置发布到 MySQL，供客户端拉取（contest.json 经 ContestGet 读取）。</summary>
+    public string PublishToMySql(int cid) => OjCoreInterop.PublishContest(cid, AuthorCoreInterop.ContestGet(cid));
+
     /// <summary>读取一场比赛的可编辑草稿（用于在比赛管理中再次编辑），失败返回 null。</summary>
     public ContestDraft? GetDraft(int cid)
     {

@@ -181,7 +181,7 @@ public sealed class ProblemService
             catch { return r; }
         });
 
-    /// <summary>发布题目到客户端题目目录（目录复制较慢，走后台任务）。</summary>
+    /// <summary>发布题目到客户端题目目录（目录复制较慢，走后台任务），并同步到 MySQL。</summary>
     public Task<JobResult> PublishAsync(int id, string target)
         => _build.RunAsync(Gate(id), () =>
         {
@@ -189,7 +189,14 @@ public sealed class ProblemService
                 return new JobResult(false, "请填写目标目录");
             string r = _author.Publish(id, target.Trim());
             if (r.Contains("\"ok\":true"))
-                return new JobResult(true, $"已发布到 {target.Trim()}\\{id} ✓（客户端启动后即可看到新题）");
+            {
+                string m = "";
+                try { m = _author.PublishToMySql(id); } catch { }
+                string msg = $"已发布到 {target.Trim()}\\{id} ✓（客户端启动后即可看到新题）";
+                if (m.Contains("\"ok\":true")) msg += "\n已同步到 MySQL 数据库 ✓";
+                else if (!string.IsNullOrEmpty(m)) msg += "\nMySQL 同步失败：" + AuthorClient.ParseError(m);
+                return new JobResult(true, msg);
+            }
             return new JobResult(false, "发布失败：" + AuthorClient.ParseError(r));
         });
 }
