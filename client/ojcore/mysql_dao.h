@@ -1,6 +1,6 @@
 ﻿// mysql_dao.h — MySQL 持久化层（动态加载 libmysql.dll，不硬链接）
 // 设计：运行时 LoadLibrary("libmysql.dll")；未安装 MySQL Connector/C 时
-//       ojcore 自动回退本地 tiny-lsm 模式，现有功能不受影响。
+//       ojcore 自动回退本地模式（登录/发布不可用，判题与题目浏览不受影响）。
 #pragma once
 #include <string>
 

@@ -3,7 +3,7 @@
 namespace author.DataAccess.Interop;
 
 /// <summary>
-/// ojcore.dll（判题核心，内含 MySQL 连接与 LSM 句柄等进程级全局状态）的 P/Invoke 声明。
+/// ojcore.dll（判题核心，内含 MySQL 连接等进程级全局状态）的 P/Invoke 声明。
 /// ojcore 的连接/句柄是进程内单例，并非为并发调用设计，因此这里提供 <see cref="Lock"/>，
 /// 所有 DAL 客户端对 ojcore 的调用都在该锁内串行执行（调用都很快；耗时的编译/评测走 authorcore）。
 /// </summary>
@@ -11,7 +11,7 @@ public static class OjCoreInterop
 {
     private const string Dll = "ojcore.dll";
 
-    /// <summary>串行化所有 ojcore 调用，保护其内部全局 MySQL/LSM 状态。</summary>
+    /// <summary>串行化所有 ojcore 调用，保护其内部全局 MySQL 状态。</summary>
     public static readonly object Lock = new();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]

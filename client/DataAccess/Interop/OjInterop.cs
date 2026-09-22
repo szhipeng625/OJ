@@ -15,6 +15,9 @@ public static class OJInterop
                                       [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int oj_init_redis([MarshalAs(UnmanagedType.LPUTF8Str)] string host, int port);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_get_problems();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -115,6 +118,10 @@ public static class OJInterop
     /// <summary>初始化引擎。problemDir 题目目录，dataDir 数据/临时目录。</summary>
     public static void Init(string problemDir, string dataDir)
         => oj_init(problemDir, dataDir);
+
+    /// <summary>连接远端 LSM 存储（RESP，Redis 协议，默认 6379）。失败不阻塞启动。</summary>
+    public static void InitRedis(string host, int port)
+        => oj_init_redis(host, port);
 
     public static string GetProblemsJson() => PtrToString(oj_get_problems());
 

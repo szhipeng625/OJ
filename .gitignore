@@ -83,6 +83,5 @@ _test_gen/
 _test_judge/
 _jd/
 
-# ===== LSM 运行时数据 / 本地生成配置 =====
+# ===== 运行时数据（题目缓存 / 临时文件，不入库） =====
 **/ojdata/
-author/Author/config.toml

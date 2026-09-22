@@ -3,8 +3,7 @@
 #include "judge.h"
 #include "mysql_dao.h"
 
-#include "lsm/engine.h"
-#include "lsm/level_iterator.h"
+#include "resp_client.h"
 
 #include <windows.h>
 
@@ -25,8 +24,8 @@ std::string g_problemDir;
 std::string g_dataDir;
 std::string g_tempDir;
 std::string g_lastError;                 // 最近一次 native 错误信息（供排查）
-std::unique_ptr<tiny_lsm::LSM> g_lsm;   // tiny-lsm 引擎（lsm_shared.dll）
-long long   g_submitSeq = 0;
+oj::RespClient g_redis;                 // 远端 LSM 存储客户端（RESP，6379）
+long long   g_submitSeq = 0;            // 远端不可用时的本地兜底序号
 
 std::string readFile(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -236,25 +235,23 @@ std::vector<ProblemInfo> scanProblems() {
 // ---- native 异常防护 ----
 // 任何 native 异常（C++ 异常 / 访问违例）都转成错误码返回，
 // 绝不穿过 P/Invoke 边界导致宿主进程崩溃。
-static int lsm_init_cpp(const std::string& dataDir, std::string& errOut) {
+static int redis_connect_cpp(const std::string& host, int port, std::string& errOut) {
     try {
-        tiny_lsm::LSM* p = new tiny_lsm::LSM(dataDir);
-        g_lsm.reset(p);
-        return 0;
+        return g_redis.connect(host, port) ? 0 : -1;
     } catch (const std::exception& e) {
         errOut = e.what();
         return -1;
     } catch (...) {
-        errOut = "unknown C++ exception during LSM init";
+        errOut = "unknown C++ exception during redis connect";
         return -1;
     }
 }
 
-static int init_lsm_safe(const std::string& dataDir, std::string& errOut) {
+static int init_redis_safe(const std::string& host, int port, std::string& errOut) {
     __try {
-        return lsm_init_cpp(dataDir, errOut);
+        return redis_connect_cpp(host, port, errOut);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        errOut = "native access violation during LSM init";
+        errOut = "native access violation during redis connect";
         return -2;
     }
 }
@@ -295,7 +292,8 @@ static const char* do_judge(int problem_id, const char* code,
         DeleteFileA(exe.c_str());
     }
 
-    long long sid = ++g_submitSeq;
+    long long sid = g_redis.incr("meta:seq");
+    if (sid <= 0) sid = ++g_submitSeq;
 
     // 提交时间戳
     SYSTEMTIME st;
@@ -325,11 +323,20 @@ static const char* do_judge(int problem_id, const char* code,
     }
     json += "]}";
 
-    // 落 tiny-lsm（WAL 先落盘再进 MemTable，超阈值刷 SST）；失败不影响判题结果返回
+    // 落远端 LSM 存储（RESP 6379）；失败不影响判题结果返回
+    std::string uname = (username && *username) ? username : "anonymous";
     try {
-        std::string sidKey = "submission:" + std::to_string(sid);
-        g_lsm->put(sidKey, json);
-        g_lsm->put("meta:seq", std::to_string(g_submitSeq));
+        g_redis.set("submission:" + std::to_string(sid), json);
+        // 便于按 (用户, 比赛, 题目) 直接取最近一次提交
+        g_redis.set("latest:" + uname + ":" + std::to_string(contest_id) + ":" + std::to_string(problem_id),
+                    std::to_string(sid));
+        // 用户在某比赛/练习下每题最近一次判定（哈希：field=pid, value=verdict）
+        g_redis.hset("progress:" + uname + ":" + std::to_string(contest_id),
+                     std::to_string(problem_id), verdict);
+        // 题目提交历史 / 比赛提交（哈希：field=sid, value=json）
+        g_redis.hset("problem_subs:" + std::to_string(problem_id), std::to_string(sid), json);
+        if (contest_id > 0)
+            g_redis.hset("contest_subs:" + std::to_string(contest_id), std::to_string(sid), json);
     } catch (...) { /* 存储失败仅记录，判题结果照常返回 */ }
 
     // 落 MySQL：同一用户同一题重复提交时，最后结果原地更新（upsert，不追加历史行）
@@ -338,7 +345,6 @@ static const char* do_judge(int problem_id, const char* code,
     try {
         if (oj::mysql_available()) {
             long long uid = 0;
-            std::string uname = (username && *username) ? username : "anonymous";
             if (!oj::mysql_user_id_by_name(uname, uid)) {
                 if (!oj::mysql_user_id_by_name("anonymous", uid)) uid = 0;
             }
@@ -356,50 +362,32 @@ static const char* do_judge(int problem_id, const char* code,
 
 // 按 (username, problem_id, contest_id) 取最近一次提交（id 最大）。无则返回空串。
 std::string latestSubmission(const std::string& uname, int problem_id, int contest_id) {
-    std::string best;
-    long long bestId = -1;
     try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind("submission:", 0) != 0) continue;
-            const std::string& val = kv.second;
-            if (jsonInt(val, "problemId") != problem_id) continue;
-            if (jsonInt(val, "contestId", 0) != contest_id) continue;
-            if (jsonStr(val, "username") != uname) continue;
-            long long id = jsonInt(val, "id");
-            if (best.empty() || id > bestId) { best = val; bestId = id; }
+        auto sid = g_redis.get("latest:" + uname + ":" + std::to_string(contest_id) + ":" + std::to_string(problem_id));
+        if (sid && !sid->empty()) {
+            auto v = g_redis.get("submission:" + *sid);
+            if (v) return *v;
         }
-    } catch (...) { /* 遍历失败返回空 */ }
-    return best;
+    } catch (...) { /* 存储不可用返回空 */ }
+    return "";
 }
 
 // 某用户在某比赛（0=练习）下每题最近一次提交结果，输出 JSON 数组
 std::string userProgressJson(const std::string& uname, int contest_id) {
-    std::map<int, std::string> latestVerdict;
-    std::map<int, long long> latestId;
+    std::map<long long, std::string> verdicts;   // pid -> verdict（按 pid 排序）
     try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind("submission:", 0) != 0) continue;
-            const std::string& val = kv.second;
-            if (jsonStr(val, "username") != uname) continue;
-            if (jsonInt(val, "contestId", 0) != contest_id) continue;
-            int pid = (int)jsonInt(val, "problemId");
-            long long id = jsonInt(val, "id");
-            auto li = latestId.find(pid);
-            if (li == latestId.end() || id > li->second) {
-                latestId[pid] = id;
-                latestVerdict[pid] = jsonStr(val, "verdict");
-            }
+        std::string hkey = "progress:" + uname + ":" + std::to_string(contest_id);
+        auto pids = g_redis.hkeys(hkey);
+        for (auto& p : pids) {
+            long long pid = atoll(p.c_str());
+            if (pid <= 0) continue;
+            auto v = g_redis.hget(hkey, p);
+            if (v) verdicts[pid] = *v;
         }
-    } catch (...) { /* 遍历失败返回空 */ }
+    } catch (...) { /* 存储不可用返回空 */ }
     std::string json = "[";
     bool first = true;
-    for (auto& kv : latestVerdict) {
+    for (auto& kv : verdicts) {
         if (!first) json += ",";
         first = false;
         bool ac = (kv.second == "AC");
@@ -413,6 +401,11 @@ std::string userProgressJson(const std::string& uname, int contest_id) {
 
 } // namespace
 
+// 报名哈希 key（放在 extern "C" 外，避免 C 链接返回 C++ 类型的告警）
+static std::string regKey(int cid) {
+    return "reg:" + std::to_string(cid);
+}
+
 extern "C" {
 
 OJ_API int oj_init(const char* problem_dir, const char* data_dir) {
@@ -422,17 +415,16 @@ OJ_API int oj_init(const char* problem_dir, const char* data_dir) {
     g_tempDir = g_dataDir + "\\temp";
     CreateDirectoryA(g_dataDir.c_str(), NULL);
     CreateDirectoryA(g_tempDir.c_str(), NULL);
-    // 打开 tiny-lsm 引擎（SEH 保护，任何 native 异常都不穿过 P/Invoke）
-    g_lastError.clear();
-    int rc = init_lsm_safe(g_dataDir, g_lastError);
-    if (rc != 0) return rc;
-    // 从 LSM 恢复提交序号
+    // 本地模式：仅设置目录，提交记录持久化由 oj_init_redis 连接远端 LSM（RESP）完成
     g_submitSeq = 0;
-    try {
-        auto seq = g_lsm->get("meta:seq");
-        if (seq.has_value()) g_submitSeq = atoll(seq->c_str());
-    } catch (...) { g_submitSeq = 0; }
     return 0;
+}
+
+// 连接远端 LSM 存储服务（RESP，默认端口 6379）。返回 0 成功，非 0 失败。
+OJ_API int oj_init_redis(const char* host, int port) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    g_lastError.clear();
+    return init_redis_safe(host ? host : "127.0.0.1", port > 0 ? port : 6379, g_lastError);
 }
 
 OJ_API const char* oj_get_problems(void) {
@@ -458,25 +450,19 @@ OJ_API const char* oj_get_submissions(int problem_id) {
     std::string json = "[";
     bool first = true;
     try {
-        // 遍历 LSM 全部记录，取 submission:* 且 problemId 匹配
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            std::string key = kv.first;
-            if (key.rfind("submission:", 0) != 0) continue;
-            // 解析 value 中的 "problemId":N
-            std::string val = kv.second;
-            std::string mark = "\"problemId\":";
-            size_t p = val.find(mark);
-            if (p == std::string::npos) continue;
-            long long pid = atoll(val.c_str() + p + mark.size());
-            if (pid != problem_id) continue;
+        std::string hkey = "problem_subs:" + std::to_string(problem_id);
+        auto sids = g_redis.hkeys(hkey);
+        std::vector<long long> ids;
+        for (auto& s : sids) ids.push_back(atoll(s.c_str()));
+        std::sort(ids.begin(), ids.end());
+        for (long long sid : ids) {
+            auto v = g_redis.hget(hkey, std::to_string(sid));
+            if (!v) continue;
             if (!first) json += ",";
             first = false;
-            json += val;
+            json += *v;
         }
-    } catch (...) { /* 遍历失败返回已收集部分 */ }
+    } catch (...) { /* 存储不可用返回空 */ }
     json += "]";
     return dup(json);
 }
@@ -609,18 +595,15 @@ OJ_API const char* oj_get_board(int cid) {
     // 虚拟参赛者：从报名时间开始计时；先扫描本场报名凭证
     std::map<std::string, time_t> virtRegTs;
     try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        std::string prefix = "reg:" + std::to_string(cid) + ":";
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind(prefix, 0) != 0) continue;
-            const std::string& val = kv.second;
-            std::string uname = jsonStr(val, "username");
-            if (uname.empty()) continue;
+        std::string rhkey = "reg:" + std::to_string(cid);
+        auto unames = g_redis.hkeys(rhkey);
+        for (auto& u : unames) {
+            auto v = g_redis.hget(rhkey, u);
+            if (!v) continue;
+            const std::string& val = *v;
             if (val.find("\"virtual\":true") == std::string::npos) continue;
             time_t t = parseTime(jsonStr(val, "ts"));
-            if (t > 0) virtRegTs[uname] = t;
+            if (t > 0) virtRegTs[u] = t;
         }
     } catch (...) {}
 
@@ -642,22 +625,13 @@ OJ_API const char* oj_get_board(int cid) {
     struct Sub { long long id; std::string uname; int pid; bool ac; bool virt; std::string ts; time_t baseline; };
     std::vector<Sub> subs;
     try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind("submission:", 0) != 0) continue;
-            std::string val = kv.second;
+        std::string shkey = "contest_subs:" + std::to_string(cid);
+        auto sids = g_redis.hkeys(shkey);
+        for (auto& sk : sids) {
+            auto sv = g_redis.hget(shkey, sk);
+            if (!sv) continue;
+            const std::string& val = *sv;
             long long pid = jsonInt(val, "problemId");
-            long long recCid = jsonInt(val, "contestId", 0);
-            bool inContest;
-            if (recCid > 0) {
-                inContest = (recCid == cid);          // 新记录：按 contestId 精确归属
-            } else {
-                inContest = false;                    // 老记录回退：按题目集合归属
-                for (int x : pids) if (x == pid) { inContest = true; break; }
-            }
-            if (!inContest) continue;
             std::string verdict = jsonStr(val, "verdict");
             bool ac = (verdict == "AC");
             std::string uname = jsonStr(val, "username");
@@ -722,11 +696,7 @@ OJ_API const char* oj_get_board(int cid) {
 
 // ===== 比赛报名 / 比赛提交记录 =====
 
-static std::string contestRegKey(int cid, const std::string& uname) {
-    return "reg:" + std::to_string(cid) + ":" + uname;
-}
-
-// 报名（幂等）。MySQL 可用时写 contest_registrations；LSM 始终写一份本地凭证。
+// 报名（幂等）。MySQL 可用时写 contest_registrations；远端 LSM 始终写一份本地凭证。
 OJ_API const char* oj_contest_register(int cid, const char* username, int virtual_) {
     std::string uname = (username && *username) ? username : "anonymous";
     SYSTEMTIME st; GetLocalTime(&st);
@@ -746,8 +716,8 @@ OJ_API const char* oj_contest_register(int cid, const char* username, int virtua
         std::string val = "{\"username\":\"" + jsonEscape(uname) + "\""
             + ",\"virtual\":" + (virt ? "true" : "false")
             + ",\"ts\":\"" + tbuf + "\"}";
-        g_lsm->put(contestRegKey(cid, uname), val);
-        ok = true;   // LSM 成功即视为报名成功
+        g_redis.hset(regKey(cid), uname, val);
+        ok = true;   // 远端 LSM 写入成功即视为报名成功
     } catch (...) {}
     return dup(std::string("{\"ok\":") + (ok ? "true" : "false")
              + ",\"registered\":true,\"virtual\":" + (virt ? "true" : "false") + "}");
@@ -768,8 +738,8 @@ OJ_API const char* oj_contest_registration(int cid, const char* username) {
     } catch (...) {}
     if (!registered) {
         try {
-            auto vv = g_lsm->get(contestRegKey(cid, uname));
-            if (vv.has_value() && !vv->empty()) {
+            auto vv = g_redis.hget(regKey(cid), uname);
+            if (vv && !vv->empty()) {
                 registered = true;
                 virt = vv->find("\"virtual\":true") != std::string::npos;
             }
@@ -788,29 +758,15 @@ OJ_API const char* oj_contest_submissions(int cid, const char* username, int vie
         std::string out;
         if (oj::mysql_contest_submissions(cid, uname, view_all != 0, out)) return dup(out);
     }
-    std::string craw = readFile(serverRoot() + "\\contests\\" + std::to_string(cid) + "\\contest.json");
-    std::vector<int> pids;
-    if (!craw.empty()) pids = parseIntArray(craw, "problems");
-
     struct Rec { long long id; std::string ts; std::string val; };
     std::vector<Rec> recs;
     try {
-        auto it = g_lsm->begin(0);
-        auto end = g_lsm->end();
-        for (; it != end; ++it) {
-            auto kv = *it;
-            if (kv.first.rfind("submission:", 0) != 0) continue;
-            const std::string& val = kv.second;
-            long long pid = jsonInt(val, "problemId");
-            long long recCid = jsonInt(val, "contestId", 0);
-            bool inContest;
-            if (recCid > 0) {
-                inContest = (recCid == cid);
-            } else {
-                inContest = false;
-                for (int x : pids) if (x == pid) { inContest = true; break; }
-            }
-            if (!inContest) continue;
+        std::string shkey = "contest_subs:" + std::to_string(cid);
+        auto sids = g_redis.hkeys(shkey);
+        for (auto& sk : sids) {
+            auto sv = g_redis.hget(shkey, sk);
+            if (!sv) continue;
+            const std::string& val = *sv;
             if (!view_all) {
                 std::string recUser = jsonStr(val, "username");
                 if (recUser != uname) continue;
@@ -850,14 +806,8 @@ OJ_API int oj_init_mysql(const char* host, int port, const char* user,
     bool ok = oj::mysql_connect(host ? host : "localhost", (unsigned)port,
                                 user ? user : "root", pass ? pass : "",
                                 db ? db : "oj", err);
-    // 本地 LSM 仍初始化（用于提交记录兜底）
-    g_lastError.clear();
-    int rc = init_lsm_safe(g_dataDir, g_lastError);
-    if (rc != 0) return rc;
-    try {
-        auto seq = g_lsm->get("meta:seq");
-        if (seq.has_value()) g_submitSeq = atoll(seq->c_str());
-    } catch (...) { g_submitSeq = 0; }
+    // 提交记录持久化由 oj_init_redis 连接远端 LSM（RESP）完成，此处不依赖本地存储
+    g_submitSeq = 0;
     return ok ? 0 : 1;   // 0 = MySQL 已连接；1 = 本地回退模式
 }
 

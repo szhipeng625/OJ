@@ -55,8 +55,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <PreprocessorDefinitions>OJCORE_EXPORTS;TINYLSM_USE_DLL;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)lsm\include;$(ProjectDir)lsm\third_party\spdlog\include;$(ProjectDir)lsm\third_party\toml11\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>OJCORE_EXPORTS;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <DisableSpecificWarnings>4251;4275;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
@@ -64,7 +63,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>shlwapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -92,26 +91,17 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="lsm\lsm_shared.vcxproj">
-      <Project>{A1B2C3D4-5E6F-4A7B-8C9D-0E1F2A3B4C5D}</Project>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="api.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="judge.cpp" />
     <ClCompile Include="mysql_dao.cpp" />
+    <ClCompile Include="resp_client.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ojcore.h" />
     <ClInclude Include="judge.h" />
     <ClInclude Include="mysql_dao.h" />
+    <ClInclude Include="resp_client.h" />
   </ItemGroup>
-  <ItemDefinitionGroup>
-    <PostBuildEvent>
-      <Command>copy /y "$(ProjectDir)lsm\bin\$(Configuration)\lsm_shared.dll" "$(OutDir)" &gt;nul</Command>
-      <Message>Copy lsm_shared.dll to output</Message>
-    </PostBuildEvent>
-  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

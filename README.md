@@ -1,17 +1,16 @@
 ﻿# OJ 在线判题系统
 
-WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S 一体化产品，全部用 Visual Studio 构建。
+WPF 客户端 + C++ 判题核心 + **远端 LSM 存储（RESP）**，全 C/S 一体化产品，全部用 Visual Studio 构建。
 
 ```
 ┌──────────────────────────────┐        P/Invoke         ┌──────────────────────────────┐
 │ WPF 客户端 (C#/.NET 8)        │ ◀────────────────────▶ │ ojcore.dll (C++/MSVC)        │
 │ HandyControl 界面             │                        │  · 判题：g++编译+限时运行+比对 │
-│ · 题目列表 / 描述             │                        │  · 提交记录 → tiny-lsm 引擎   │
+│ · 题目列表 / 描述             │                        │  · 提交记录 → 远端 LSM 存储    │
 │ · 深色代码编辑 / 提交看结果    │                        └──────────────┬───────────────┘
 └──────────────────────────────┘                                       ▼
-                                                    lsm_shared.dll (tiny-lsm, VS 构建)
-                                                    SkipList / MemTable / SST / WAL
-                                                    WiscKey 大值分离 / MVCC 事务 / Bloom Filter
+                                                    远端 LSM 存储服务（RESP，6379）
+                                                    SET / GET / INCR / HSET / HGET / HKEYS
 ```
 
 ## 目录结构
@@ -19,7 +18,7 @@ WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S �
 ```
 D:\OJ\
 ├── client\                      判题客户端（WPF，三层架构）
-│   ├── client.sln               客户端解决方案（client + HandyControl + ojcore + lsm_shared）
+│   ├── client.sln               客户端解决方案（client + HandyControl + ojcore）
 │   ├── Presentation\            UI 层：Views（窗口）/ Controls（CodeEditor 等）/ Helpers
 │   │   └── Highlighting\
 │   │       └── CppDarkPlus.xshd C++ 语法高亮插件（VS Code Dark+ 配色，内嵌资源，改色无需改代码）
@@ -29,7 +28,7 @@ D:\OJ\
 │   └── ojcore\                  C++ 判题核心（VS 2022 / v143，仅 x64）
 │       ├── ojcore.sln / ojcore.vcxproj   判题 DLL（oj_init/oj_get_problems/oj_submit）
 │       ├── judge.cpp            判题核心
-│       └── lsm\                 tiny-lsm 源码 → lsm_shared.dll（C++20）
+│       └── resp_client.h/.cpp   RESP 客户端（连接远端 LSM 存储，6379）
 ├── author\                      出题服务端（WPF + C++，三层架构，与 client 同构）
 │   ├── Author.sln
 │   ├── Author\                  WPF 出题工作台
@@ -51,8 +50,8 @@ D:\OJ\
 
 | 解决方案 | 内容 |
 |----------|------|
-| `D:\OJ\client\client.sln`   | **client**（WPF）+ **ojcore**（判题 DLL）+ **lsm_shared**（tiny-lsm）+ HandyControl，一体化解决方案 |
-| `D:\OJ\client\ojcore\ojcore.sln` | 判题核心独立解决方案：**lsm_shared**（tiny-lsm 动态库）+ **ojcore**（判题 DLL）+ **client**（WPF 客户端） |
+| `D:\OJ\client\client.sln`   | **client**（WPF）+ **ojcore**（判题 DLL）+ HandyControl，一体化解决方案 |
+| `D:\OJ\client\ojcore\ojcore.sln` | 判题核心独立解决方案：**ojcore**（判题 DLL）+ **client**（WPF 客户端） |
 | `D:\OJ\author\Author.sln`   | **authorcore**（出题 DLL）+ **Author**（WPF 出题工作台）+ HandyControl |
 
 构建顺序由工程依赖自动保证。
@@ -90,9 +89,9 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -All -Publish
 
 流程：
 
-1. MSBuild 构建 C++ 核心（Release **x64**）：`ojcore`、`lsm_shared`、`authorcore`
+1. MSBuild 构建 C++ 核心（Release **x64**）：`ojcore`、`authorcore`
 2. `dotnet publish` 客户端到 `dist\`、服务端到 `dist\author\`
-3. 自动补齐运行时原生依赖（ojcore.dll / lsm_shared.dll / libmysql.dll / mysql_config.json / authorcore.dll）
+3. 自动补齐运行时原生依赖（ojcore.dll / libmysql.dll / mysql_config.json / authorcore.dll）
 
 运行：`dist\client.exe`（客户端）、`dist\author\Author.exe`（服务端）。
 
@@ -142,18 +141,22 @@ cd D:\OJ\client
 dotnet run
 ```
 
-客户端启动时自动加载 `ojcore.dll` → `lsm_shared.dll`（已复制到输出目录）。
-题目目录复用 `D:\OJ\server\problems`；提交记录写入客户端目录 `ojdata\`（tiny-lsm：WAL 先落盘，MemTable 超阈值刷 SST）。
+客户端启动时自动加载 `ojcore.dll`。
+题目目录复用 `D:\OJ\server\problems`；提交记录经 RESP 写入远端 LSM 存储（见 `mysql_config.json` 的 `redisHost`/`redisPort`，默认 6379）。
 
-## tiny-lsm 用 VS 构建（本次改造）
+## 提交记录存储（远端 LSM / RESP）
 
-原来 tiny-lsm 用 **xmake** 构建；现在新增 `lsm\lsm_shared.vcxproj`，用 MSBuild/VS 直接编译：
+提交记录与比赛报名不再落本地 tiny-lsm，改为经 **RESP（Redis 协议）** 写入远端 LSM 存储服务（默认端口 6379）：
 
-- C++20（`/std:c++20`）+ `/utf-8`
-- 定义 `TINYLSM_EXPORTS` → `TINYLSM_API` 展开为 `dllexport`，导出 `tiny_lsm::LSM` 等
-- 依赖 spdlog / toml11（header-only），已放 `lsm\third_party\`
-- 输出 `lsm\bin\Release\lsm_shared.dll` + `.lib`
-- ojcore 通过 `TINYLSM_USE_DLL` + ProjectReference 动态链接它
+- 在 `mysql_config.json` 中配置 `redisHost` / `redisPort`（`redisHost` 缺省与 MySQL 同机）；
+- ojcore 内置轻量 RESP 客户端（`resp_client.h/.cpp`），只用 GET / SET / INCR / HSET / HGET / HKEYS；
+- 存储结构（用哈希作为可枚举集合，避免全量扫描）：
+  - `submission:{id}` → 提交完整 JSON（含代码）
+  - `latest:{user}:{cid}:{pid}` → 最近一次提交 id
+  - `progress:{user}:{cid}` → 哈希 {题目id → 判定}
+  - `problem_subs:{pid}` / `contest_subs:{cid}` → 哈希 {提交id → JSON}
+  - `reg:{cid}` → 哈希 {用户名 → 报名 JSON}
+  - `meta:seq` → 自增提交序号
 
 ## 已验证（实测）
 
@@ -162,27 +165,9 @@ dotnet run
 | 正确 A+B 代码 | **AC**，全测试点通过 |
 | 永远输出 0 | **WA**，普通文本比对 |
 | 浮点和（输出 `0.3`，未格式化） | **AC**，Special Judge 容差通过 |
-| 提交记录 | 经 tiny-lsm 落盘（`submission:{id}`），重启后可读 |
-| 崩溃恢复 | 进程被强杀后遗留的 0 字节 `tranc_id` / 截断 WAL，重启自动恢复，不再崩溃 |
-
-## 已知问题与防护（2026-09-19 修复）
-
-**现象**：client 启动时调用 `oj_init` 抛 `SEHException`，进程崩溃。
-**根因**：进程非正常退出（强杀/崩溃）后，tiny-lsm 数据目录遗留：
-1. **0 字节 `tranc_id` 文件** → `read_tranc_id_file()` 调 `read_uint64` 抛 `out_of_range`；
-2. **截断的 WAL 记录** → `Record::decode` 抛 `runtime_error`。
-
-这些 C++ 异常逃逸出 `extern "C"` 导出函数（`oj_init`），穿过 P/Invoke 边界后表现为 SEHException。
-
-**已修复**：
-- `lsm/src/lsm/transation.cpp`：`read_tranc_id_file` 对空/损坏文件容错（回退默认值）；`check_recover` 对空集合兜底；
-- `lsm/src/wal/record.cpp`：`Record::decode` 对尾部截断记录改为忽略（崩溃恢复语义）；
-- `ojcore/api.cpp`：`oj_init` 增加 SEH + C++ 双重异常防护，任何 native 异常转错误码返回，**绝不穿过 P/Invoke 崩溃宿主**；存储写入失败也不影响判题结果。
-
-数据目录无需手工清理——旧数据会自动恢复（WAL 中未完成事务重放）。
+| 提交记录 | 经 RESP 写入远端 LSM（`submission:{id}`），重启后可读 |
 
 ## 扩展方向
 
-- tiny-lsm 自带 **MVCC 事务 / WiscKey 大值分离 / Bloom Filter / Block Cache**，已在 DLL 中可用；
-- 需要分布式时，把判题调度做成多节点，提交记录走 tiny-lsm 的 WAL 同步复制；
+- MySQL 作为题目/用户/比赛/提交的权威存储，远端 LSM 作为提交记录与报名的共享 KV 缓存；
 - Special Judge 已内置：`problems/{id}/spj.cpp` 即启用（见上文）。

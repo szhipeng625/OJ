@@ -20,6 +20,9 @@
     <ClInclude Include="mysql_dao.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="resp_client.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="api.cpp">
@@ -32,6 +35,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="mysql_dao.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="resp_client.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

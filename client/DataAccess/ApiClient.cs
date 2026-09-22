@@ -45,6 +45,10 @@ public class ApiClient
             string user = root.GetProperty("user").GetString() ?? "root";
             string pass = root.GetProperty("pass").GetString() ?? "";
             string db = root.GetProperty("db").GetString() ?? "oj";
+            // 远端 LSM 存储（RESP）：redisHost 缺省与 MySQL 同机，端口默认 6379
+            string redisHost = root.TryGetProperty("redisHost", out var rh) ? rh.GetString() ?? host : host;
+            int redisPort = root.TryGetProperty("redisPort", out var rp) ? rp.GetInt32() : 6379;
+            try { OJInterop.InitRedis(redisHost, redisPort); } catch { /* LSM 不可用不阻塞启动 */ }
             int rc = OJInterop.InitMySQL(host, port, user, pass, db, problemDir, dataDir);
             MySqlEnabled = (rc == 0);
             if (MySqlEnabled)

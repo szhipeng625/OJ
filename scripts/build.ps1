@@ -4,14 +4,14 @@
 
 .DESCRIPTION
     构建顺序：
-      1. C++ 判题核心：client\ojcore（ojcore.dll + lsm_shared.dll，x64）
+      1. C++ 判题核心：client\ojcore（ojcore.dll，x64）
       2. C++ 出题核心：author\authorcore（authorcore.dll，x64）
       3. 客户端 WPF：client（三层架构）
       4. 服务端 WPF：author\Author（三层架构）
     -Publish 时发布到 dist：
       dist\          客户端（client.exe）
       dist\author\   服务端（Author.exe）
-    原生依赖（ojcore/lsm_shared/libmysql/mysql_config）由本脚本统一补齐。
+    原生依赖（ojcore/libmysql/mysql_config）由本脚本统一补齐。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -All -Publish
@@ -25,7 +25,7 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
 
-    # 只构建 C++ 核心（ojcore / lsm_shared / authorcore）
+    # 只构建 C++ 核心（ojcore / authorcore）
     [switch]$Core,
     # 只构建客户端 WPF
     [switch]$Client,
@@ -67,7 +67,6 @@ function Find-MSBuild {
 # ---------- 路径约定 ----------
 $OjcoreSln      = Join-Path $RepoRoot 'client\ojcore\ojcore.sln'
 $OjcoreVcx      = Join-Path $RepoRoot 'client\ojcore\ojcore.vcxproj'
-$LsmVcx         = Join-Path $RepoRoot 'client\ojcore\lsm\lsm_shared.vcxproj'
 $AuthorCoreVcx  = Join-Path $RepoRoot 'author\authorcore\authorcore.vcxproj'
 $ClientCsproj   = Join-Path $RepoRoot 'client\client.csproj'
 $AuthorCsproj   = Join-Path $RepoRoot 'author\Author\Author.csproj'
@@ -80,7 +79,7 @@ $DistAuthor     = Join-Path $RepoRoot 'dist\author'
 if ($Clean) {
     Write-Step '清理构建产物'
     $MSBuild = Find-MSBuild
-    foreach ($proj in @($OjcoreVcx, $LsmVcx, $AuthorCoreVcx)) {
+    foreach ($proj in @($OjcoreVcx, $AuthorCoreVcx)) {
         if (Test-Path $proj) {
             & $MSBuild $proj /t:Clean /p:Configuration=$Configuration /p:Platform=x64 /v:minimal /nologo
         }
@@ -91,8 +90,7 @@ if ($Clean) {
     foreach ($d in @((Join-Path $RepoRoot 'dist'),
                       (Join-Path $RepoRoot 'client\ojcore\x64'),
                       (Join-Path $RepoRoot 'author\authorcore\bin'),
-                      (Join-Path $RepoRoot 'author\authorcore\obj'),
-                      (Join-Path $RepoRoot 'client\ojcore\lsm\x64'))) {
+                      (Join-Path $RepoRoot 'author\authorcore\obj'))) {
         if (Test-Path $d) { Remove-Item $d -Recurse -Force; Write-Host "删除 $d" }
     }
     Write-Host '清理完成。' -ForegroundColor Green
@@ -112,8 +110,6 @@ if ($WantCore) {
     Write-Step "构建 C++ 核心（$Configuration|x64）"
     & $MSBuild $OjcoreVcx /p:Configuration=$Configuration /p:Platform=x64 /m /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { Die 'ojcore 构建失败。' }
-    & $MSBuild $LsmVcx /p:Configuration=$Configuration /p:Platform=x64 /m /v:minimal /nologo
-    if ($LASTEXITCODE -ne 0) { Die 'lsm_shared 构建失败。' }
     & $MSBuild $AuthorCoreVcx /p:Configuration=$Configuration /p:Platform=x64 /m /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { Die 'authorcore 构建失败。' }
 }
@@ -150,7 +146,7 @@ if ($WantAuthor) {
 # ---------- 4. 补齐运行时原生依赖 ----------
 function Sync-NativeAssets([string]$targetDir, [switch]$IsAuthor) {
     if (-not (Test-Path $targetDir)) { Die "目标目录不存在：$targetDir" }
-    foreach ($dll in @('ojcore.dll', 'lsm_shared.dll', 'libmysql.dll')) {
+    foreach ($dll in @('ojcore.dll', 'libmysql.dll')) {
         $src = Join-Path $OjcoreOut $dll
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $targetDir $dll) -Force

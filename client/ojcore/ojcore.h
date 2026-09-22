@@ -16,12 +16,16 @@ extern "C" {
 // data_dir 存储/临时数据目录。返回 0 成功，非 0 失败。
 OJ_API int oj_init(const char* problem_dir, const char* data_dir);
 
+// 连接远端 LSM 存储服务（RESP，Redis 协议，默认端口 6379），用于提交/报名等持久化。
+// 返回 0 成功，非 0 失败（失败时判题仍可用，只是提交记录不持久化）。
+OJ_API int oj_init_redis(const char* host, int port);
+
 // 获取题目列表，返回 JSON 字符串。调用方用完调 oj_free_string 释放。
 // [{"id":1,"title":"A+B","description":"...","sampleIn":"...","sampleOut":"...",
 //   "timeLimitMs":1000,"memLimitMB":256,"tags":["基础"]}]
 OJ_API const char* oj_get_problems(void);
 
-// 获取某道题的全部历史提交记录（从 LSM 存储扫描），返回 JSON 字符串。
+// 获取某道题的全部历史提交记录（从远端 LSM 存储读取），返回 JSON 字符串。
 // [{"id":1,"problemId":3,"verdict":"AC","detail":"...","timeMs":52,
 //   "cases":[...],"ts":"2026-09-19 17:20:00"}]
 OJ_API const char* oj_get_submissions(int problem_id);

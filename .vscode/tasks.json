@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "构建 C++ 核心 (ojcore/lsm/authorcore, x64)",
+      "label": "构建 C++ 核心 (ojcore/authorcore, x64)",
       "command": "powershell.exe",
       "args": [
         "-NoProfile",

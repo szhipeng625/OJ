@@ -22,12 +22,15 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
   "port": 3306,
   "user": "root",
   "pass": "你的密码",
-  "db": "oj"
+  "db": "oj",
+  "redisHost": "你的LSM服务器IP",
+  "redisPort": 6379
 }
 ```
 把 Connector/C 里的 `libmysql.dll` 复制到两个目录。
 - 首次连接时若 `oj` 库不存在，会自动 `CREATE DATABASE oj`（无需手工建库）。
 - 出题端与服务端共用同一份连接参数：出题端把发布的题目写入该库，客户端从该库拉取题目。
+- `redisHost` / `redisPort` 指向远端 LSM 存储服务（RESP 协议）；`redisHost` 缺省与 `host` 同机，`redisPort` 默认 6379。
 
 ## 三、使用
 
@@ -40,7 +43,7 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
 
 ## 四、判题结果落库（最后提交原地更新）
 
-- 每次判题结束后，结果除写入本地 tiny-lsm 外，还会 upsert 到 MySQL 的 `submissions` 表。
+- 每次判题结束后，结果除写入远端 LSM 存储外，还会 upsert 到 MySQL 的 `submissions` 表。
 - `submissions` 上有唯一键 `uq_user_problem (user_id, problem_id, contest_id)`，
   配合 `INSERT ... ON DUPLICATE KEY UPDATE`：**同一用户对同一题重复提交时，
   最后一次结果原地覆盖旧行**（verdict / detail / time_ms / virtual / created_at 全部更新），
