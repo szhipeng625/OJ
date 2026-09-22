@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   detail     TEXT,
   time_ms    INT,
   `virtual`  TINYINT NOT NULL DEFAULT 0,        -- 1 = 虚拟参赛
+  wrong_count INT NOT NULL DEFAULT 0,           -- AC 前错误次数（ICPC 罚时 +20 分钟/次）
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_problem (user_id, problem_id, contest_id),
   KEY idx_contest_problem (contest_id, problem_id),   -- 榜单 / 比赛提交查询
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS problems (
   mem_mb      INT NOT NULL DEFAULT 256,         -- 内存限制（MB）
   tags        TEXT,                             -- JSON 数组原文，如 ["基础","模拟"]
   std_code    MEDIUMTEXT,                       -- 标准程序源码（AES-256 密文，base64）
+  is_public   TINYINT NOT NULL DEFAULT 1,       -- 1=公开（客户端可见）0=未公开（仅服务端可见）
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

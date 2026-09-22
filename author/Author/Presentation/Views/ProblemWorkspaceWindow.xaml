@@ -269,6 +269,8 @@
                         <TextBox x:Name="TargetBox" Grid.Column="1" Text="server\problems"
                                  IsReadOnly="True" Background="#F5F7FA" ToolTip="发布目标目录固定为客户端题目目录，不可修改"/>
                     </Grid>
+                    <CheckBox x:Name="PublicBox" Margin="0,0,0,8" IsChecked="True"
+                              Content="公开（客户端可见）；取消勾选则为未公开，仅服务端可见"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="校验题目完整性" Width="130" Click="OnValidate"/>
                         <Button Content="发布到客户端" Width="130" Margin="8,0,0,0" Click="OnPublish"/>

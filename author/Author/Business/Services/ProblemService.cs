@@ -181,8 +181,8 @@ public sealed class ProblemService
             catch { return r; }
         });
 
-    /// <summary>发布题目到客户端题目目录（目录复制较慢，走后台任务），并同步到 MySQL。</summary>
-    public Task<JobResult> PublishAsync(int id, string target)
+    /// <summary>发布题目到客户端题目目录（目录复制较慢，走后台任务），并同步到 MySQL。isPublic=false 为未公开。</summary>
+    public Task<JobResult> PublishAsync(int id, string target, bool isPublic)
         => _build.RunAsync(Gate(id), () =>
         {
             if (string.IsNullOrWhiteSpace(target))
@@ -191,12 +191,17 @@ public sealed class ProblemService
             if (r.Contains("\"ok\":true"))
             {
                 string m = "";
-                try { m = _author.PublishToMySql(id); } catch { }
-                string msg = $"已发布到 {target.Trim()}\\{id} ✓（客户端启动后即可看到新题）";
-                if (m.Contains("\"ok\":true")) msg += "\n已同步到 MySQL 数据库 ✓";
+                try { m = _author.PublishToMySql(id, isPublic); } catch { }
+                string msg = $"已发布到 {target.Trim()}\\{id} ✓";
+                if (m.Contains("\"ok\":true"))
+                    msg += isPublic ? "\n已同步到 MySQL 数据库 ✓（公开，客户端可见）" : "\n已同步到 MySQL 数据库 ✓（未公开，仅服务端可见）";
                 else if (!string.IsNullOrEmpty(m)) msg += "\nMySQL 同步失败：" + AuthorClient.ParseError(m);
                 return new JobResult(true, msg);
             }
             return new JobResult(false, "发布失败：" + AuthorClient.ParseError(r));
         });
+
+    /// <summary>全部题目的公开状态（id → 是否公开）。</summary>
+    public Task<Dictionary<int, bool>> GetVisibilityAsync()
+        => _build.RunAsync("list", () => _author.GetProblemVisibility());
 }

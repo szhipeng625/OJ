@@ -56,6 +56,10 @@ bool RespClient::is_connected() const {
 bool RespClient::connectLockedUnsafe() {
     disconnectLockedUnsafe();
 
+    // 连接失败后退避 10 秒：期间不重复尝试，避免每次操作都阻塞 3 秒超时
+    if (std::chrono::steady_clock::now() < failUntil_) return false;
+    failUntil_ = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return false;
 
@@ -107,6 +111,7 @@ bool RespClient::connectLockedUnsafe() {
 
     sock_ = static_cast<uintptr_t>(s);
     connected_ = true;
+    failUntil_ = {};   // 连接成功，清除退避
     return true;
 }
 

@@ -132,10 +132,21 @@ public class ApiClient
             return new ContestRegistration(true, registered, v);
         });
 
-    /// <summary>比赛提交记录（时间倒序；每人每题保留最后一次结果）。viewAll=false 时只返回本人记录。</summary>
+    /// <summary>比赛提交记录（时间倒序；LSM 完整历史，MySQL 兜底）。viewAll=false 时只返回本人记录。</summary>
     public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int cid, string username, bool viewAll)
         => Task.Run(() => JsonSerializer.Deserialize<List<ContestSubmission>>(
             OJInterop.ContestSubmissionsJson(cid, username, viewAll), Opt));
+
+    /// <summary>获取某次比赛提交的完整详情（含代码与测试点）；不存在返回 null。</summary>
+    public Task<SubmissionDetail?> GetSubmissionDetailAsync(long sid)
+        => Task.Run(() =>
+        {
+            string raw = OJInterop.GetSubmissionDetailJson(sid);
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("found", out var f) && !f.GetBoolean()) return null;
+            return JsonSerializer.Deserialize<SubmissionDetail>(raw, Opt);
+        });
 
     // ---------- 用户体系 ----------
 

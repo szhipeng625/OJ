@@ -71,6 +71,7 @@
                                 <TextBlock FontWeight="Bold">
                                     <Run Text="P"/><Run Text="{Binding Id, Mode=OneWay}"/>
                                     <Run Text="  "/><Run Text="{Binding Title, Mode=OneWay}"/>
+                                    <Run Text="{Binding VisibilityText, Mode=OneWay}" Foreground="#D9534F"/>
                                 </TextBlock>
                                 <TextBlock Foreground="#888" FontSize="11" Text="{Binding DataText, Mode=OneWay}"/>
                             </StackPanel>

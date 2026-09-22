@@ -1,0 +1,28 @@
+<Window x:Class="client.Presentation.Views.CodeViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:client.Presentation.Controls"
+        Title="查看代码" Height="600" Width="820"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <DockPanel Margin="12">
+        <TextBlock x:Name="HeaderText" DockPanel.Dock="Top" FontWeight="SemiBold" FontSize="13"
+                   Margin="0,0,0,10" TextWrapping="Wrap" Foreground="#333"/>
+        <Border DockPanel.Dock="Bottom" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="4"
+                Padding="6" Margin="0,10,0,0" MaxHeight="220">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="测试点详情" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <ListView x:Name="CaseList">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="测试点" Width="160" DisplayMemberBinding="{Binding Name}"/>
+                            <GridViewColumn Header="结果" Width="80" DisplayMemberBinding="{Binding Result}"/>
+                            <GridViewColumn Header="用时" Width="90" DisplayMemberBinding="{Binding Time}"/>
+                            <GridViewColumn Header="备注" Width="240" DisplayMemberBinding="{Binding Info}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+        </Border>
+        <controls:CodeEditor x:Name="CodeBox" IsReadOnly="True"/>
+    </DockPanel>
+</Window>

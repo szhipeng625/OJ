@@ -292,9 +292,6 @@ static const char* do_judge(int problem_id, const char* code,
         DeleteFileA(exe.c_str());
     }
 
-    long long sid = g_redis.incr("meta:seq");
-    if (sid <= 0) sid = ++g_submitSeq;
-
     // 提交时间戳
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -302,11 +299,37 @@ static const char* do_judge(int problem_id, const char* code,
     snprintf(tsBuf, sizeof(tsBuf), "%04d-%02d-%02d %02d:%02d:%02d",
              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
 
+    std::string uname = (username && *username) ? username : "anonymous";
+
+    // 比赛提交先落 MySQL，用其 AUTO_INCREMENT id 作为本次提交 sid，
+    // 保证「提交列表（MySQL id）」与「双击详情（LSM submission:{id}）」键一一对应。
+    // 远端 LSM 的 INCR 目前不可靠（返回非递增），仅作 MySQL 不可用时的兜底。
+    long long sid = 0;
+    try {
+        if (contest_id > 0 && oj::mysql_available()) {
+            long long uid = 0;
+            if (!oj::mysql_user_id_by_name(uname, uid)) {
+                if (!oj::mysql_user_id_by_name("anonymous", uid)) uid = 0;
+            }
+            if (uid > 0) {
+                int totalMs = 0;
+                for (auto& c : cases) totalMs += (int)c.timeMs;
+                sid = oj::mysql_upsert_submission(uid, problem_id, contest_id, verdict, detail,
+                                                  totalMs, virtual_ != 0, tsBuf);
+            }
+        }
+    } catch (...) { /* MySQL 写入失败仅记录，判题结果照常返回 */ }
+
+    if (sid <= 0) {
+        sid = (contest_id > 0) ? g_redis.incr("meta:seq") : ++g_submitSeq;
+        if (sid <= 0) sid = ++g_submitSeq;
+    }
+
     // 拼结果 JSON（含 problemId / username / virtual / ts 供按题查询历史提交与榜单聚合）
     std::string json = "{\"id\":" + std::to_string(sid)
         + ",\"problemId\":" + std::to_string(problem_id)
         + ",\"contestId\":" + std::to_string(contest_id)
-        + ",\"username\":\"" + jsonEscape(username) + "\""
+        + ",\"username\":\"" + jsonEscape(uname) + "\""
         + ",\"virtual\":" + (virtual_ ? "true" : "false")
         + ",\"verdict\":\"" + verdict + "\""
         + ",\"detail\":\"" + jsonEscape(detail) + "\""
@@ -323,39 +346,29 @@ static const char* do_judge(int problem_id, const char* code,
     }
     json += "]}";
 
-    // 落远端 LSM 存储（RESP 6379）；失败不影响判题结果返回
-    std::string uname = (username && *username) ? username : "anonymous";
-    try {
-        g_redis.set("submission:" + std::to_string(sid), json);
-        // 便于按 (用户, 比赛, 题目) 直接取最近一次提交
-        g_redis.set("latest:" + uname + ":" + std::to_string(contest_id) + ":" + std::to_string(problem_id),
-                    std::to_string(sid));
-        // 用户在某比赛/练习下每题最近一次判定（哈希：field=pid, value=verdict）
-        g_redis.hset("progress:" + uname + ":" + std::to_string(contest_id),
-                     std::to_string(problem_id), verdict);
-        // 题目提交历史 / 比赛提交（哈希：field=sid, value=json）
-        g_redis.hset("problem_subs:" + std::to_string(problem_id), std::to_string(sid), json);
-        if (contest_id > 0)
-            g_redis.hset("contest_subs:" + std::to_string(contest_id), std::to_string(sid), json);
-    } catch (...) { /* 存储失败仅记录，判题结果照常返回 */ }
-
-    // 落 MySQL：同一用户同一题重复提交时，最后结果原地更新（upsert，不追加历史行）
-    // 用户名按登录账号解析；未登录/查无此人回退到 anonymous 默认用户。
-    // MySQL 未连接或写入失败不影响判题结果返回。
-    try {
-        if (oj::mysql_available()) {
-            long long uid = 0;
-            if (!oj::mysql_user_id_by_name(uname, uid)) {
-                if (!oj::mysql_user_id_by_name("anonymous", uid)) uid = 0;
-            }
-            if (uid > 0) {
-                int totalMs = 0;
-                for (auto& c : cases) totalMs += (int)c.timeMs;
-                oj::mysql_upsert_submission(uid, problem_id, contest_id, verdict, detail,
-                                            totalMs, virtual_ != 0, tsBuf);
-            }
-        }
-    } catch (...) { /* MySQL 写入失败仅记录，判题结果照常返回 */ }
+    // LSM 只持久化「比赛提交」（赛时代码）；练习提交不落 LSM。失败不影响判题结果返回。
+    if (contest_id > 0) {
+        try {
+            std::string sidKey = std::to_string(sid);
+            // 完整记录（含代码与测试点），供双击查看详情
+            g_redis.set("submission:" + sidKey, json);
+            // 便于按 (用户, 比赛, 题目) 直接取最近一次提交
+            g_redis.set("latest:" + uname + ":" + std::to_string(contest_id) + ":" + std::to_string(problem_id), sidKey);
+            // 列表用摘要（不含 code/cases，轻量），同时保留完整历史用于榜单罚时统计
+            std::string summary = "{\"id\":" + sidKey
+                + ",\"problemId\":" + std::to_string(problem_id)
+                + ",\"contestId\":" + std::to_string(contest_id)
+                + ",\"username\":\"" + jsonEscape(uname) + "\""
+                + ",\"virtual\":" + (virtual_ ? "true" : "false")
+                + ",\"verdict\":\"" + verdict + "\""
+                + ",\"detail\":\"" + jsonEscape(detail) + "\""
+                + ",\"ts\":\"" + tsBuf + "\"}";
+            g_redis.hset("contest_subs:" + std::to_string(contest_id), sidKey, summary);
+            // 用户在本场每题最近一次判定（哈希：field=pid, value=verdict）
+            g_redis.hset("progress:" + uname + ":" + std::to_string(contest_id),
+                         std::to_string(problem_id), verdict);
+        } catch (...) { /* 存储失败仅记录，判题结果照常返回 */ }
+    }
 
     return dup(json);
 }
@@ -404,6 +417,125 @@ std::string userProgressJson(const std::string& uname, int contest_id) {
 // 报名哈希 key（放在 extern "C" 外，避免 C 链接返回 C++ 类型的告警）
 static std::string regKey(int cid) {
     return "reg:" + std::to_string(cid);
+}
+
+// 从远端 LSM 聚合榜单：保留完整提交历史，能正确统计「AC 前的错误提交」罚时；
+// 虚拟参赛者以报名时间为计时基线。
+static std::string boardFromLsm(int cid, time_t startT) {
+    struct Cell { int wrong = 0; long long acMin = -1; };   // acMin<0 表示未 AC
+    struct UserStat {
+        std::string username;
+        std::map<int, Cell> cells;
+    };
+    std::map<std::string, UserStat> offUsers, virtUsers;
+
+    // 虚拟参赛者：从报名时间开始计时
+    std::map<std::string, time_t> virtRegTs;
+    try {
+        std::string rhkey = "reg:" + std::to_string(cid);
+        auto unames = g_redis.hkeys(rhkey);
+        for (auto& u : unames) {
+            auto v = g_redis.hget(rhkey, u);
+            if (!v) continue;
+            const std::string& val = *v;
+            if (val.find("\"virtual\":true") == std::string::npos) continue;
+            time_t t = parseTime(jsonStr(val, "ts"));
+            if (t > 0) virtRegTs[u] = t;
+        }
+    } catch (...) {}
+
+    auto consider = [&](std::map<std::string, UserStat>& table,
+                        const std::string& uname, int pid,
+                        bool ac, const std::string& ts, time_t baseline) {
+        if (table.find(uname) == table.end()) table[uname].username = uname;
+        Cell& c = table[uname].cells[pid];
+        if (c.acMin >= 0) return;          // 已 AC 不再计分
+        if (ac) {
+            time_t t = parseTime(ts);
+            c.acMin = (baseline > 0 && t > 0) ? (long long)difftime(t, baseline) / 60 : 0;
+        } else {
+            c.wrong++;
+        }
+    };
+
+    // 收集本场比赛全部提交，按提交 id（时间顺序）排序，保证「AC 之前的错误提交」统计正确
+    struct Sub { long long id; std::string uname; int pid; bool ac; bool virt; std::string ts; time_t baseline; };
+    std::vector<Sub> subs;
+    try {
+        std::string shkey = "contest_subs:" + std::to_string(cid);
+        auto sids = g_redis.hkeys(shkey);
+        for (auto& sk : sids) {
+            auto sv = g_redis.hget(shkey, sk);
+            if (!sv) continue;
+            const std::string& val = *sv;
+            long long pid = jsonInt(val, "problemId");
+            std::string verdict = jsonStr(val, "verdict");
+            bool ac = (verdict == "AC");
+            std::string uname = jsonStr(val, "username");
+            if (uname.empty()) uname = "anonymous";
+            std::string ts = jsonStr(val, "ts");
+            bool virt = val.find("\"virtual\":true") != std::string::npos;
+            time_t baseline = startT;
+            if (virt) {
+                auto ri = virtRegTs.find(uname);
+                if (ri != virtRegTs.end()) baseline = ri->second;
+            }
+            Sub s;
+            s.id = jsonInt(val, "id");
+            s.uname = uname;
+            s.pid = (int)pid;
+            s.ac = ac;
+            s.virt = virt;
+            s.ts = ts;
+            s.baseline = baseline;
+            subs.push_back(std::move(s));
+        }
+    } catch (...) {}
+    std::sort(subs.begin(), subs.end(), [](const Sub& a, const Sub& b) { return a.id < b.id; });
+    for (auto& s : subs) {
+        consider(s.virt ? virtUsers : offUsers, s.uname, s.pid, s.ac, s.ts, s.baseline);
+    }
+
+    // 聚合输出
+    auto emitTable = [&](const std::map<std::string, UserStat>& table) -> std::string {
+        struct Row { std::string name; int solved; long long penalty; };
+        std::vector<Row> rows;
+        for (auto& kv : table) {
+            Row r; r.name = kv.first; r.solved = 0; r.penalty = 0;
+            for (auto& cell : kv.second.cells) {
+                if (cell.second.acMin >= 0) {
+                    r.solved++;
+                    r.penalty += cell.second.acMin + (long long)cell.second.wrong * 20;
+                }
+            }
+            if (r.solved > 0 || !kv.second.cells.empty()) rows.push_back(r);
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+            if (a.solved != b.solved) return a.solved > b.solved;
+            return a.penalty < b.penalty;
+        });
+        std::string out = "[";
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i) out += ",";
+            out += "{\"rank\":" + std::to_string(i + 1)
+                 + ",\"username\":\"" + jsonEscape(rows[i].name) + "\""
+                 + ",\"solved\":" + std::to_string(rows[i].solved)
+                 + ",\"penalty\":" + std::to_string(rows[i].penalty) + "}";
+        }
+        out += "]";
+        return out;
+    };
+
+    return "{\"official\":" + emitTable(offUsers)
+         + ",\"virtual\":"  + emitTable(virtUsers) + "}";
+}
+
+// 每题最近一次判定结果：MySQL 优先（权威），比赛时回退远端 LSM
+static std::string progressJson(const std::string& uname, int contest_id) {
+    std::string out;
+    if (oj::mysql_available() && oj::mysql_user_progress(uname, contest_id, out))
+        return out;
+    return userProgressJson(uname, contest_id);
 }
 
 extern "C" {
@@ -479,13 +611,13 @@ OJ_API const char* oj_get_user_solution(int problem_id, const char* username, in
 // 某用户练习模式（contest_id=0）每题最近一次提交结果，用于题库通过/未通过标记
 OJ_API const char* oj_get_user_progress(const char* username) {
     std::string uname = (username && *username) ? username : "anonymous";
-    return dup(userProgressJson(uname, 0));
+    return dup(progressJson(uname, 0));
 }
 
 // 某用户在某场比赛下每题最近一次提交结果，用于比赛题目列表通过/未通过标记
 OJ_API const char* oj_get_user_contest_progress(int cid, const char* username) {
     std::string uname = (username && *username) ? username : "anonymous";
-    return dup(userProgressJson(uname, cid));
+    return dup(progressJson(uname, cid));
 }
 
 OJ_API const char* oj_submit(int problem_id, const char* code) {
@@ -506,6 +638,15 @@ OJ_API const char* oj_submit_contest(int problem_id, const char* code,
     return do_judge(problem_id, code,
                     (username && *username) ? username : "anonymous",
                     virtual_ ? 1 : 0, contest_id);
+}
+
+// 读取某次比赛提交的完整详情（含代码与测试点）
+OJ_API const char* oj_get_submission_detail(long long sid) {
+    try {
+        auto v = g_redis.get("submission:" + std::to_string(sid));
+        if (v && !v->empty()) return dup(*v);
+    } catch (...) {}
+    return dup("{\"found\":false}");
 }
 
 // 判题核心：跑题、构造结果 JSON、落 LSM。virtual_ 非 0 表示虚拟参赛。
@@ -571,7 +712,7 @@ OJ_API const char* oj_get_board(int cid) {
     std::string startStr = jsonStr(craw, "startTime");
     time_t startT = parseTime(startStr);
 
-    // MySQL 可用时榜单直接查库（跨进程持久），失败再回退 LSM
+    // MySQL 计算罚时（submissions.wrong_count + 最早 AC 时间），LSM 兜底
     if (oj::mysql_available()) {
         std::string csv;
         for (size_t i = 0; i < pids.size(); ++i) {
@@ -584,114 +725,11 @@ OJ_API const char* oj_get_board(int cid) {
             return dup("{\"official\":" + off + ",\"virtual\":" + virt + "}");
     }
 
-    // 2. 收集每个人每题的 AC 信息
-    struct Cell { int wrong = 0; long long acMin = -1; };   // acMin<0 表示未 AC
-    struct UserStat {
-        std::string username;
-        std::map<int, Cell> cells;
-    };
-    std::map<std::string, UserStat> offUsers, virtUsers;
+    // LSM 兜底：从完整提交历史现算错误次数与最早 AC 时间
+    if (g_redis.is_connected())
+        return dup(boardFromLsm(cid, startT));
 
-    // 虚拟参赛者：从报名时间开始计时；先扫描本场报名凭证
-    std::map<std::string, time_t> virtRegTs;
-    try {
-        std::string rhkey = "reg:" + std::to_string(cid);
-        auto unames = g_redis.hkeys(rhkey);
-        for (auto& u : unames) {
-            auto v = g_redis.hget(rhkey, u);
-            if (!v) continue;
-            const std::string& val = *v;
-            if (val.find("\"virtual\":true") == std::string::npos) continue;
-            time_t t = parseTime(jsonStr(val, "ts"));
-            if (t > 0) virtRegTs[u] = t;
-        }
-    } catch (...) {}
-
-    auto consider = [&](std::map<std::string, UserStat>& table,
-                        const std::string& uname, int pid,
-                        bool ac, const std::string& ts, time_t baseline) {
-        if (table.find(uname) == table.end()) table[uname].username = uname;
-        Cell& c = table[uname].cells[pid];
-        if (c.acMin >= 0) return;          // 已 AC 不再计分
-        if (ac) {
-            time_t t = parseTime(ts);
-            c.acMin = (baseline > 0 && t > 0) ? (long long)difftime(t, baseline) / 60 : 0;
-        } else {
-            c.wrong++;
-        }
-    };
-
-    // 收集本场比赛全部提交，按提交 id（时间顺序）排序，保证「AC 之前的错误提交」统计正确
-    struct Sub { long long id; std::string uname; int pid; bool ac; bool virt; std::string ts; time_t baseline; };
-    std::vector<Sub> subs;
-    try {
-        std::string shkey = "contest_subs:" + std::to_string(cid);
-        auto sids = g_redis.hkeys(shkey);
-        for (auto& sk : sids) {
-            auto sv = g_redis.hget(shkey, sk);
-            if (!sv) continue;
-            const std::string& val = *sv;
-            long long pid = jsonInt(val, "problemId");
-            std::string verdict = jsonStr(val, "verdict");
-            bool ac = (verdict == "AC");
-            std::string uname = jsonStr(val, "username");
-            if (uname.empty()) uname = "anonymous";
-            std::string ts = jsonStr(val, "ts");
-            bool virt = val.find("\"virtual\":true") != std::string::npos;
-            time_t baseline = startT;
-            if (virt) {
-                auto ri = virtRegTs.find(uname);
-                if (ri != virtRegTs.end()) baseline = ri->second;
-            }
-            Sub s;
-            s.id = jsonInt(val, "id");
-            s.uname = uname;
-            s.pid = (int)pid;
-            s.ac = ac;
-            s.virt = virt;
-            s.ts = ts;
-            s.baseline = baseline;
-            subs.push_back(std::move(s));
-        }
-    } catch (...) {}
-    std::sort(subs.begin(), subs.end(), [](const Sub& a, const Sub& b) { return a.id < b.id; });
-    for (auto& s : subs) {
-        consider(s.virt ? virtUsers : offUsers, s.uname, s.pid, s.ac, s.ts, s.baseline);
-    }
-
-    // 3. 聚合输出
-    auto emitTable = [&](const std::map<std::string, UserStat>& table) -> std::string {
-        struct Row { std::string name; int solved; long long penalty; };
-        std::vector<Row> rows;
-        for (auto& kv : table) {
-            Row r; r.name = kv.first; r.solved = 0; r.penalty = 0;
-            for (auto& cell : kv.second.cells) {
-                if (cell.second.acMin >= 0) {
-                    r.solved++;
-                    r.penalty += cell.second.acMin + (long long)cell.second.wrong * 20;
-                }
-            }
-            if (r.solved > 0 || !kv.second.cells.empty()) rows.push_back(r);
-        }
-        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
-            if (a.solved != b.solved) return a.solved > b.solved;
-            return a.penalty < b.penalty;
-        });
-        std::string out = "[";
-        for (size_t i = 0; i < rows.size(); ++i) {
-            if (i) out += ",";
-            out += "{\"rank\":" + std::to_string(i + 1)
-                 + ",\"username\":\"" + jsonEscape(rows[i].name) + "\""
-                 + ",\"solved\":" + std::to_string(rows[i].solved)
-                 + ",\"penalty\":" + std::to_string(rows[i].penalty) + "}";
-        }
-        out += "]";
-        return out;
-    };
-
-    std::string json = "{\"official\":" + emitTable(offUsers)
-                     + ",\"virtual\":"  + emitTable(virtUsers) + "}";
-    return dup(json);
+    return dup("{\"official\":[],\"virtual\":[]}");
 }
 
 // ===== 比赛报名 / 比赛提交记录 =====
@@ -749,46 +787,56 @@ OJ_API const char* oj_contest_registration(int cid, const char* username) {
              + ",\"virtual\":" + (virt ? "true" : "false") + "}");
 }
 
-// 比赛提交记录（按 contestId 精确归属，老记录回退题目集合），时间倒序
+// 比赛提交记录：LSM（保留完整历史）优先，时间倒序；MySQL 兜底（每人每题最后一发）
 // view_all=0 时只返回 username 本人记录（比赛进行中参赛者互不可见）
 OJ_API const char* oj_contest_submissions(int cid, const char* username, int view_all) {
     std::string uname = (username && *username) ? username : "anonymous";
-    // MySQL 可用时提交记录直接查库（每人每题最后一次结果），失败回退 LSM 全量历史
+
+    // LSM 保留本场全部提交历史，优先返回
+    if (g_redis.is_connected()) {
+        struct Rec { long long id; std::string ts; std::string val; };
+        std::vector<Rec> recs;
+        bool any = false;
+        try {
+            std::string shkey = "contest_subs:" + std::to_string(cid);
+            auto sids = g_redis.hkeys(shkey);
+            for (auto& sk : sids) {
+                auto sv = g_redis.hget(shkey, sk);
+                if (!sv) continue;
+                any = true;
+                const std::string& val = *sv;
+                if (!view_all) {
+                    std::string recUser = jsonStr(val, "username");
+                    if (recUser != uname) continue;
+                }
+                Rec r;
+                r.id = jsonInt(val, "id");
+                r.ts = jsonStr(val, "ts");
+                r.val = val;
+                recs.push_back(std::move(r));
+            }
+        } catch (...) {}
+        if (any) {   // 本场确有提交，直接返回（即使 view_all=0 过滤后可能为空）
+            std::sort(recs.begin(), recs.end(), [](const Rec& a, const Rec& b) {
+                if (a.ts != b.ts) return a.ts > b.ts;
+                return a.id > b.id;
+            });
+            std::string out = "[";
+            for (size_t i = 0; i < recs.size(); ++i) {
+                if (i) out += ",";
+                out += recs[i].val;
+            }
+            out += "]";
+            return dup(out);
+        }
+    }
+
+    // MySQL 兜底（每人每题最后一发）
     if (oj::mysql_available()) {
         std::string out;
         if (oj::mysql_contest_submissions(cid, uname, view_all != 0, out)) return dup(out);
     }
-    struct Rec { long long id; std::string ts; std::string val; };
-    std::vector<Rec> recs;
-    try {
-        std::string shkey = "contest_subs:" + std::to_string(cid);
-        auto sids = g_redis.hkeys(shkey);
-        for (auto& sk : sids) {
-            auto sv = g_redis.hget(shkey, sk);
-            if (!sv) continue;
-            const std::string& val = *sv;
-            if (!view_all) {
-                std::string recUser = jsonStr(val, "username");
-                if (recUser != uname) continue;
-            }
-            Rec r;
-            r.id = jsonInt(val, "id");
-            r.ts = jsonStr(val, "ts");
-            r.val = val;
-            recs.push_back(std::move(r));
-        }
-    } catch (...) {}
-    std::sort(recs.begin(), recs.end(), [](const Rec& a, const Rec& b) {
-        if (a.ts != b.ts) return a.ts > b.ts;
-        return a.id > b.id;
-    });
-    std::string out = "[";
-    for (size_t i = 0; i < recs.size(); ++i) {
-        if (i) out += ",";
-        out += recs[i].val;
-    }
-    out += "]";
-    return dup(out);
+    return dup("[]");
 }
 // ===== MySQL 用户体系 =====
 
@@ -819,7 +867,7 @@ OJ_API const char* oj_mysql_init_schema(void) {
 
 // ===== 题目 / 比赛发布与同步（MySQL 分发） =====
 
-OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir) {
+OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int is_public) {
     if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用（libmysql.dll 未加载）\"}");
     std::string dir = problem_dir ? problem_dir : "";
     if (dir.empty() || !exists(dir)) return dup("{\"ok\":false,\"error\":\"题目目录不存在\"}");
@@ -836,7 +884,8 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir) {
     std::string err;
     if (!oj::mysql_upsert_problem(id, title, desc, sampleIn, sampleOut,
                                   (int)meta.timeLimitMs, (int)meta.memLimitMB,
-                                  meta.tagsJson.empty() ? "[]" : meta.tagsJson, stdCode, err))
+                                  meta.tagsJson.empty() ? "[]" : meta.tagsJson, stdCode,
+                                  is_public != 0, err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     if (!oj::mysql_clear_problem_generators(id))
         return dup("{\"ok\":false,\"error\":\"清空旧生成器失败\"}");
@@ -922,6 +971,13 @@ OJ_API const char* oj_mysql_sync_problems(void) {
     if (!oj::mysql_sync_problems(g_problemDir, serverRoot(), err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     return dup("{\"ok\":true}");
+}
+
+OJ_API const char* oj_mysql_problem_visibility(void) {
+    if (!oj::mysql_available()) return dup("{}");
+    std::string out;
+    if (oj::mysql_problem_visibility(out)) return dup(out);
+    return dup("{}");
 }
 
 OJ_API const char* oj_register(const char* username, const char* password, const char* role) {

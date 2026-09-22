@@ -247,6 +247,8 @@
                                 </StackPanel>
                                 <TextBlock x:Name="RoomTitle" FontWeight="SemiBold" FontSize="14"
                                            VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="RoomCountdownText" FontWeight="Bold" FontSize="14"
+                                           Foreground="#2D7DF6" VerticalAlignment="Center" Margin="16,0,0,0"/>
                             </DockPanel>
                         </Border>
 
@@ -350,11 +352,12 @@
                             <DockPanel>
                                 <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                     <TextBlock x:Name="SubsHeaderText" VerticalAlignment="Center" FontWeight="SemiBold"
-                                               Text="本场提交记录（每人每题保留最后一次提交结果，按时间倒序）"/>
+                                               Text="本场全部提交记录（按时间倒序）"/>
                                     <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right"
                                             Click="OnRefreshSubmissions"/>
                                 </Grid>
-                                <ListView x:Name="SubmissionListView">
+                                <ListView x:Name="SubmissionListView"
+                                          MouseDoubleClick="SubmissionListView_OnDoubleClick">
                                     <ListView.View>
                                         <GridView>
                                             <GridViewColumn Header="提交时间" Width="160"

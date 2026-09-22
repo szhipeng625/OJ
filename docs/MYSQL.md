@@ -30,7 +30,7 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
 把 Connector/C 里的 `libmysql.dll` 复制到两个目录。
 - 首次连接时若 `oj` 库不存在，会自动 `CREATE DATABASE oj`（无需手工建库）。
 - 出题端与服务端共用同一份连接参数：出题端把发布的题目写入该库，客户端从该库拉取题目。
-- `redisHost` / `redisPort` 指向远端 LSM 存储服务（RESP 协议）；`redisHost` 缺省与 `host` 同机，`redisPort` 默认 6379。
+- `redisHost` / `redisPort` 指向远端 LSM 存储服务（RESP 协议）；`redisHost` 缺省与 `host` 同机，`redisPort` 默认 6380。
 
 ## 三、使用
 

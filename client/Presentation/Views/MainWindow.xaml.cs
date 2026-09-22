@@ -43,6 +43,10 @@ public partial class MainWindow : Window
     // 比赛开始倒计时刷新
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
+    // 比赛结束提示（只弹一次）与提交记录缓存（双击查看代码用）
+    private bool _roomEndPrompted;
+    private List<ContestSubmission> _contestSubs = new();
+
     public MainWindow(JudgeService judge, AuthService auth, LocalIdentityService identity)
     {
         InitializeComponent();
@@ -201,6 +205,31 @@ public partial class MainWindow : Window
 
     private void UpdateCountdown()
     {
+        // 房间内：距结束倒计时 + 一次性结束提示
+        if (_roomContest is { } rc)
+        {
+            string remain = ContestPolicy.Remaining(rc.EndTime);
+            if (!string.IsNullOrEmpty(remain))
+            {
+                RoomCountdownText.Text = "距结束 " + remain;
+                _roomEndPrompted = false;
+            }
+            else
+            {
+                RoomCountdownText.Text = "已结束";
+                if (!_roomEndPrompted)
+                {
+                    _roomEndPrompted = true;
+                    MessageBox.Show("本场比赛已结束！", "比赛结束", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+        }
+        else
+        {
+            RoomCountdownText.Text = "";
+        }
+
+        // 列表页：距开始倒计时
         if (_currentContest is { } c)
         {
             string cd = ContestPolicy.Countdown(c.StartTime);
@@ -286,10 +315,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private static ProblemRow MakeRow(Problem p, HashSet<int> acSet, Dictionary<int, string> verdictMap)
+    private static ProblemRow MakeRow(Problem p, HashSet<int> acSet, Dictionary<int, string> verdictMap, string? letter = null)
     {
         string tags = p.Tags is { Length: > 0 } ? $"  [{string.Join(",", p.Tags)}]" : "";
-        string display = $"[{p.Id}] {p.Title}{tags}";
+        string display = letter is null ? $"[{p.Id}] {p.Title}{tags}" : $"{letter}. {p.Title}{tags}";
         if (acSet.Contains(p.Id))
             return new ProblemRow(p, display, "✔", GreenBrush, "已通过");
         if (verdictMap.TryGetValue(p.Id, out var v))
@@ -385,7 +414,7 @@ public partial class MainWindow : Window
                 for (int i = 0; i < _contestProblemRows.Count; i++)
                 {
                     var old = _contestProblemRows[i];
-                    _contestProblemRows[i] = MakeRow(old.Problem, cAcSet, cVerdictMap);
+                    _contestProblemRows[i] = MakeRow(old.Problem, cAcSet, cVerdictMap, JudgeService.ProblemLabel(i));
                 }
             }
         }
@@ -443,14 +472,16 @@ public partial class MainWindow : Window
             {
                 RegisterBtn.Visibility = Visibility.Collapsed;
                 EnterContestBtn.Visibility = Visibility.Visible;
+                EnterContestBtn.Content = ended ? "查看比赛" : "进入比赛";
                 RegisterVirtualBox.IsChecked = reg.Virtual;
                 RegisterHint.Text = reg.Virtual ? "已报名：虚拟参赛" : "已报名：正式参赛";
             }
             else
             {
                 RegisterBtn.Visibility = Visibility.Visible;
+                RegisterBtn.Content = ended ? "虚拟报名" : "报名";
                 EnterContestBtn.Visibility = Visibility.Collapsed;
-                RegisterHint.Text = ended ? "比赛已结束，可查看比赛（报名后虚拟补赛）" : "报名后即可进入比赛";
+                RegisterHint.Text = ended ? "比赛已结束，可虚拟报名补赛" : "报名后即可进入比赛";
             }
             RegisterBtn.IsEnabled = true;
         }
@@ -515,8 +546,9 @@ public partial class MainWindow : Window
             var verdictMap = progress.ToDictionary(x => x.ProblemId, x => x.Verdict);
 
             _contestProblemRows.Clear();
-            foreach (var p in probs)
-                _contestProblemRows.Add(MakeRow(p, acSet, verdictMap));
+            for (int i = 0; i < probs.Count; i++)
+                _contestProblemRows.Add(MakeRow(probs[i], acSet, verdictMap, JudgeService.ProblemLabel(i)));
+            _roomEndPrompted = false;
 
             string status = ContestPolicy.Status(_roomContest.StartTime, _roomContest.EndTime);
             RoomTitle.Text = $"【C{_roomContest.Id}】{_roomContest.Name}（{(_roomVirtual ? "虚拟参赛" : "正式参赛")}）";
@@ -645,12 +677,14 @@ public partial class MainWindow : Window
         try
         {
             bool viewAll = _me?.Role == "admin" || ContestPolicy.IsEnded(_roomContest.EndTime);
-            var subs = await _judge.GetContestSubmissionsAsync(_roomContest.Id, _nickname, viewAll);
-            SubmissionListView.ItemsSource = (subs ?? new())
+            var subs = await _judge.GetContestSubmissionsAsync(_roomContest.Id, _nickname, viewAll) ?? new();
+            _contestSubs = subs;
+            var labelMap = BuildProblemLabelMap(_roomContest);
+            SubmissionListView.ItemsSource = subs
                 .Select(s => new
                 {
                     s.Ts,
-                    ProblemId = s.ProblemId,
+                    ProblemId = labelMap.TryGetValue(s.ProblemId, out var l) ? l : s.ProblemId.ToString(),
                     Username = s.Virtual ? s.Username + " *" : s.Username,
                     s.Verdict,
                     s.Detail,
@@ -658,10 +692,49 @@ public partial class MainWindow : Window
                 })
                 .ToList();
             SubsHeaderText.Text = viewAll
-                ? "本场提交记录（每人每题保留最后一次提交结果，按时间倒序）"
-                : "本场提交记录（比赛进行中，仅显示你自己的提交）";
+                ? "本场全部提交记录（按时间倒序；双击查看代码）"
+                : "本场提交记录（比赛进行中，仅显示你自己的提交；双击查看代码）";
         }
         catch { }
+    }
+
+    private static Dictionary<int, string> BuildProblemLabelMap(ContestDetail c)
+    {
+        var map = new Dictionary<int, string>();
+        for (int i = 0; i < c.Problems.Length; i++)
+            map[c.Problems[i]] = JudgeService.ProblemLabel(i);
+        return map;
+    }
+
+    private async void SubmissionListView_OnDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_roomContest is null) return;
+        int idx = SubmissionListView.SelectedIndex;
+        if (idx < 0 || idx >= _contestSubs.Count) return;
+        var sub = _contestSubs[idx];
+        try
+        {
+            // 列表只含摘要，双击才加载详情（代码 + 测试点）
+            var detail = await _judge.GetSubmissionDetailAsync(sub.Id);
+            if (detail is not null)
+            {
+                var labelMap = BuildProblemLabelMap(_roomContest);
+                string label = labelMap.TryGetValue(sub.ProblemId, out var l) ? l : sub.ProblemId.ToString();
+                var viewer = new CodeViewerWindow(
+                    $"C{_roomContest.Id} · {label} · {sub.Username} 的提交",
+                    $"比赛 C{_roomContest.Id} · 题目 {label} · {sub.Username} · {sub.Verdict} · {sub.Ts}",
+                    detail) { Owner = this };
+                viewer.ShowDialog();
+            }
+            else
+            {
+                MessageBox.Show("未找到该提交的详情（可能该提交不是比赛内提交）", "提示");
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("加载详情失败：" + ex.Message, "提示");
+        }
     }
 
     // 题目列表行（左侧列表与右侧个人信息列表共用）

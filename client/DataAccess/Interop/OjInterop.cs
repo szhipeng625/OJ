@@ -51,6 +51,9 @@ public static class OJInterop
     private static extern IntPtr oj_get_board(int cid);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_get_submission_detail(long sid);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_submit_contest(int problem_id,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string code,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string username,
@@ -145,6 +148,8 @@ public static class OJInterop
     public static string GetContestJson(int cid) => PtrToString(oj_get_contest(cid));
 
     public static string GetBoardJson(int cid) => PtrToString(oj_get_board(cid));
+
+    public static string GetSubmissionDetailJson(long sid) => PtrToString(oj_get_submission_detail(sid));
 
     public static string SubmitContestJson(int problemId, string code, string username, bool virt, int contestId)
         => PtrToString(oj_submit_contest(problemId, code, username, virt ? 1 : 0, contestId));

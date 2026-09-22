@@ -1,9 +1,10 @@
 ﻿namespace author.DataAccess.Models;
 
 /// <summary>题目列表项（对应 ac_list 返回）。</summary>
-public record ProblemInfo(int Id, string Title, int DataCount)
+public record ProblemInfo(int Id, string Title, int DataCount, bool IsPublic = true)
 {
     public string DataText => $"{DataCount} 组测试数据";
+    public string VisibilityText => IsPublic ? "" : "（未公开）";
 }
 
 /// <summary>题目元数据 meta.json。</summary>

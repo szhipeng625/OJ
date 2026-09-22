@@ -82,6 +82,9 @@ temp_login/
 _test_gen/
 _test_judge/
 _jd/
+_test_contest/
+_test_resp/
+_cleanup_mysql.sql
 
 # ===== 运行时数据（题目缓存 / 临时文件，不入库） =====
 **/ojdata/

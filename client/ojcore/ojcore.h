@@ -71,6 +71,10 @@ OJ_API const char* oj_get_board(int cid);
 OJ_API const char* oj_submit_contest(int problem_id, const char* code,
                                      const char* username, int virtual_,
                                      int contest_id);
+
+// 读取某次比赛提交的完整详情（含代码与测试点）。sid 为提交 id。
+// 无记录返回 {"found":false}；有则返回完整提交 JSON（含 code/cases）。
+OJ_API const char* oj_get_submission_detail(long long sid);
 OJ_API const char* oj_contest_register(int cid, const char* username, int virtual_);
 OJ_API const char* oj_contest_registration(int cid, const char* username);
 // view_all=0 时只返回 username 本人记录（比赛进行中参赛者互不可见）
@@ -108,9 +112,12 @@ OJ_API const char* oj_list_users(const char* token);
 
 // ===== 题目 / 比赛发布与同步（MySQL 分发） =====
 
-// 发布题目到 MySQL：读取 problem_dir 目录下的题面/元数据/测试数据文件，upsert 到 problems/problem_files。
-// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
-OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir);
+// 发布题目到 MySQL：读取 problem_dir 目录下的题面/元数据/测试数据文件，upsert 到 problems 表。
+// is_public=0 表示未公开（客户端不展示，仅服务端可见）。返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int is_public);
+
+// 全部题目的公开状态：{"id":true/false,...}（服务端展示未公开标记用）
+OJ_API const char* oj_mysql_problem_visibility(void);
 
 // 发布比赛到 MySQL：contest_json 为比赛 JSON（含 name/description/startTime/endTime/problems）。
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。

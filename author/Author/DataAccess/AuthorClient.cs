@@ -115,8 +115,23 @@ public sealed class AuthorClient
     public string Validate(int id) => AuthorCoreInterop.Validate(id);
     public string Publish(int id, string targetRoot) => AuthorCoreInterop.Publish(id, targetRoot);
 
-    /// <summary>把题目（题面 + 元数据 + 测试数据文件）发布到 MySQL，供客户端拉取。</summary>
-    public string PublishToMySql(int id) => OjCoreInterop.PublishProblemDir(id, ProblemDir(id));
+    /// <summary>把题目（题面 + 元数据 + 测试数据文件）发布到 MySQL，供客户端拉取。isPublic=false 为未公开。</summary>
+    public string PublishToMySql(int id, bool isPublic) => OjCoreInterop.PublishProblemDir(id, ProblemDir(id), isPublic);
+
+    /// <summary>全部题目的公开状态：id → 是否公开（缺省视为公开）。</summary>
+    public Dictionary<int, bool> GetProblemVisibility()
+    {
+        var map = new Dictionary<int, bool>();
+        try
+        {
+            using var doc = JsonDocument.Parse(OjCoreInterop.ProblemVisibilityJson());
+            foreach (var p in doc.RootElement.EnumerateObject())
+                if (int.TryParse(p.Name, out int id))
+                    map[id] = p.Value.ValueKind != JsonValueKind.False;
+        }
+        catch { }
+        return map;
+    }
 
     // ===== 测试数据文件 =====
     public List<DataPair> ListDataPairs(int id)

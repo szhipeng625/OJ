@@ -224,9 +224,10 @@ public partial class ProblemWorkspaceWindow : Window
     private async void OnPublish(object sender, RoutedEventArgs e)
     {
         string target = TargetBox.Text.Trim();
+        bool isPublic = PublicBox.IsChecked != false;
         await RunBusy("正在发布到客户端题目目录…", async () =>
         {
-            var r = await _wb.Problems.PublishAsync(_id, target);
+            var r = await _wb.Problems.PublishAsync(_id, target, isPublic);
             if (IsLoaded) PublishMsg.Text = r.Message;
             _mgr.NotifyProblemListChanged();
         });

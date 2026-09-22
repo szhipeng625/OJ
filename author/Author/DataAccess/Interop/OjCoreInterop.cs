@@ -34,7 +34,10 @@ public static class OjCoreInterop
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_publish_problem(int id,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir);
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir, int is_public);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_problem_visibility();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_publish_contest(int cid,
@@ -63,9 +66,15 @@ public static class OjCoreInterop
     }
 
     // ===== 题目 / 比赛发布到 MySQL =====
-    public static string PublishProblemDir(int id, string problemDir)
+    public static string PublishProblemDir(int id, string problemDir, bool isPublic)
     {
-        lock (Lock) return Take(oj_mysql_publish_problem(id, problemDir));
+        lock (Lock) return Take(oj_mysql_publish_problem(id, problemDir, isPublic ? 1 : 0));
+    }
+
+    /// <summary>全部题目的公开状态：{"id":true/false,...}。</summary>
+    public static string ProblemVisibilityJson()
+    {
+        lock (Lock) return Take(oj_mysql_problem_visibility());
     }
 
     public static string PublishContest(int cid, string contestJson)

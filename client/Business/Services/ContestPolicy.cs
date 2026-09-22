@@ -29,6 +29,17 @@ public static class ContestPolicy
             : $"{span.Hours} 小时 {span.Minutes} 分 {span.Seconds} 秒";
     }
 
+    /// <summary>距结束时间的倒计时文本（HH:MM:SS）；已结束返回空串。</summary>
+    public static string Remaining(string? end)
+    {
+        if (!DateTime.TryParse(end, out var et)) return "";
+        var span = et - DateTime.Now;
+        if (span <= TimeSpan.Zero) return "";
+        return span.TotalDays >= 1
+            ? $"{span.Days} 天 {span.Hours:00}:{span.Minutes:00}:{span.Seconds:00}"
+            : $"{span.Hours:00}:{span.Minutes:00}:{span.Seconds:00}";
+    }
+
     /// <summary>比赛是否已结束（用于默认勾选虚拟参赛）。</summary>
     public static bool IsEnded(string? end)
         => DateTime.TryParse(end, out var et) && DateTime.Now >= et;

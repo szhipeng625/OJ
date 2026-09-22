@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using client.Business.Services;
 using client.DataAccess.Models;
 using client.Presentation.Helpers;
@@ -22,6 +23,8 @@ public partial class SolveWindow : Window
 
     private readonly ObservableCollection<CaseResult> _cases = new();
     private bool _released;
+    private DispatcherTimer? _endTimer;
+    private bool _endPrompted;
 
     public SolveWindow(JudgeService judge, Problem problem, string username,
                        ContestDetail? contest, bool roomVirtual)
@@ -43,8 +46,15 @@ public partial class SolveWindow : Window
         else
         {
             string kind = roomVirtual ? "虚拟参赛" : "正式参赛";
-            Title = $"C{contest.Id} · P{problem.Id} {problem.Title} - 做题";
-            TitleText.Text = $"C{contest.Id} · P{problem.Id} {problem.Title}（{kind}）";
+            int idx = Array.IndexOf(contest.Problems, problem.Id);
+            string label = idx >= 0 ? JudgeService.ProblemLabel(idx) : $"P{problem.Id}";
+            Title = $"C{contest.Id} · {label}. {problem.Title} - 做题";
+            TitleText.Text = $"C{contest.Id} · {label}. {problem.Title}（{kind}）";
+
+            // 比赛结束提醒（只弹一次）
+            _endTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _endTimer.Tick += (_, _) => CheckContestEnd();
+            _endTimer.Start();
         }
 
         string tags = problem.Tags is { Length: > 0 } ? string.Join(", ", problem.Tags) : "无";
@@ -131,11 +141,24 @@ public partial class SolveWindow : Window
 
     private void OnBack(object sender, RoutedEventArgs e) => Close();
 
+    private void CheckContestEnd()
+    {
+        if (_contest is null || _endPrompted) return;
+        if (ContestPolicy.IsEnded(_contest.EndTime))
+        {
+            _endPrompted = true;
+            _endTimer?.Stop();
+            MessageBox.Show("本场比赛已结束！", "比赛结束", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
     /// <summary>窗口关闭时释放 WebBrowser / 代码编辑器 / 结果集合等资源。</summary>
     private void ReleaseResources()
     {
         if (_released) return;
         _released = true;
+        _endPrompted = true;
+        _endTimer?.Stop();
         try { DescBox.NavigateToString("about:blank"); } catch { }
         try { DescBox.Dispose(); } catch { }
         try { CodeBox.Text = ""; } catch { }

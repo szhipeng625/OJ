@@ -3,6 +3,7 @@
 // 仅实现 ojcore 需要的命令：SET / GET / DEL / INCR / HSET / HGET / HKEYS。
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -57,6 +58,7 @@ private:
     std::string host_;
     int port_ = 6379;
     bool connected_ = false;
+    std::chrono::steady_clock::time_point failUntil_{};   // 连接失败后的退避截止时间
 
     static constexpr uintptr_t kInvalidSocket = ~0ull;
 };

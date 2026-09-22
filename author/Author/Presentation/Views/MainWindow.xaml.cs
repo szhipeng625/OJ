@@ -53,6 +53,13 @@ public partial class MainWindow : Window
     private async Task RefreshProblems()
     {
         _problems = await _wb.Problems.ListAsync();
+        // 从 MySQL 读取公开状态，标记未公开题目（仅服务端可见，客户端不展示）
+        try
+        {
+            var vis = await _wb.Problems.GetVisibilityAsync();
+            _problems = _problems.Select(p => p with { IsPublic = vis.TryGetValue(p.Id, out var pub) ? pub : true }).ToList();
+        }
+        catch { }
         if (!IsLoaded) return;
         ProblemList.ItemsSource = null;
         ProblemList.ItemsSource = _problems;

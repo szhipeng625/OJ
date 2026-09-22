@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -504,6 +505,7 @@ bool mysql_init_schema(std::string& err) {
   detail TEXT,
   time_ms INT,
   `virtual` TINYINT NOT NULL DEFAULT 0,
+  wrong_count INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_problem (user_id, problem_id, contest_id),
   FOREIGN KEY (user_id) REFERENCES users(id)
@@ -527,6 +529,7 @@ bool mysql_init_schema(std::string& err) {
   mem_mb INT NOT NULL DEFAULT 256,
   tags TEXT,
   std_code MEDIUMTEXT,
+  is_public TINYINT NOT NULL DEFAULT 1,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ))SQL",
         R"SQL(CREATE TABLE IF NOT EXISTS generators (
@@ -585,6 +588,14 @@ bool mysql_init_schema(std::string& err) {
             if (!ExecSQL("ALTER TABLE submissions ADD UNIQUE KEY uq_user_problem (user_id, problem_id, contest_id)", &err)) return false;
         }
     }
+    // 2.5) 错误次数列：wrong_count（ICPC 罚时：AC 前每次错误 +20 分钟）
+    {
+        std::string hasWrong;
+        if (!QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                         "WHERE table_schema=DATABASE() AND table_name='submissions' AND column_name='wrong_count'",
+                         hasWrong)) hasWrong = "0";
+        if (hasWrong == "0" && !ExecSQL("ALTER TABLE submissions ADD COLUMN wrong_count INT NOT NULL DEFAULT 0", &err)) return false;
+    }
     // 3) 用户资料列：nickname / avatar（老库升级，新库 DDL 已包含）
     {
         std::string hasNick;
@@ -606,6 +617,14 @@ bool mysql_init_schema(std::string& err) {
                          "WHERE table_schema=DATABASE() AND table_name='problems' AND column_name='std_code'",
                          hasStd)) hasStd = "0";
         if (hasStd == "0" && !ExecSQL("ALTER TABLE problems ADD COLUMN std_code MEDIUMTEXT", &err)) return false;
+    }
+    // 3.6) 题目公开状态列：is_public（1=公开，客户端可见；0=未公开，仅服务端可见）
+    {
+        std::string hasPub;
+        if (!QueryScalar("SELECT COUNT(*) FROM information_schema.COLUMNS "
+                         "WHERE table_schema=DATABASE() AND table_name='problems' AND column_name='is_public'",
+                         hasPub)) hasPub = "0";
+        if (hasPub == "0" && !ExecSQL("ALTER TABLE problems ADD COLUMN is_public TINYINT NOT NULL DEFAULT 1", &err)) return false;
     }
     // 4) 匿名默认用户（未登录提交统一归到该账号；空哈希无法登录）
     if (!ExecSQL("INSERT IGNORE INTO users(username,password_hash,salt,role) VALUES('anonymous','','','user')", &err)) return false;
@@ -698,18 +717,80 @@ bool mysql_logout(const std::string& token) {
     return ExecSQL(sql);
 }
 
-bool mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
-                             const std::string& verdict, const std::string& detail,
-                             int time_ms, bool virt, const std::string& ts) {
-    // 唯一键 (user_id, problem_id, contest_id)：重复提交时原地更新最后结果，不追加新行
-    std::string sql = "INSERT INTO submissions(user_id,problem_id,contest_id,verdict,detail,time_ms,`virtual`,created_at) VALUES("
-        + std::to_string(user_id) + "," + std::to_string(problem_id) + ","
-        + std::to_string(contest_id > 0 ? contest_id : 0) + ",'"
-        + SqlEscape(verdict) + "','" + SqlEscape(detail) + "'," + std::to_string(time_ms) + ","
-        + (virt ? "1" : "0") + ",'" + SqlEscape(ts) + "') "
-        "ON DUPLICATE KEY UPDATE verdict=VALUES(verdict), detail=VALUES(detail), "
-        "time_ms=VALUES(time_ms), `virtual`=VALUES(`virtual`), created_at=VALUES(created_at)";
-    return ExecSQL(sql);
+long long mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
+                                  const std::string& verdict, const std::string& detail,
+                                  int time_ms, bool virt, const std::string& ts) {
+    // ICPC 语义：
+    //  · 已 AC 的题不再被后续提交改写（保持最早 AC 时间与罚时）；
+    //  · 首次 AC 时 created_at = 本次时间（最早 AC 时间），wrong_count 保留累计错误次数；
+    //  · AC 前每次错误提交 wrong_count+1（榜单罚时 +20 分钟/次）。
+    // 返回该行 submissions.id，供 LSM 侧用同一 id 作为 submission:{id} 的键，
+    // 保证提交列表（MySQL id）与双击详情（LSM submission:{id}）一一对应。
+    int cid = contest_id > 0 ? contest_id : 0;
+    bool ac = (verdict == "AC");
+
+    // 读当前该用户该题（本场比赛）的提交状态（含行 id）
+    std::string curVerdict;
+    long long existingId = 0;
+    bool exists = false;
+    {
+        std::string q = "SELECT id, verdict FROM submissions WHERE user_id="
+            + std::to_string(user_id) + " AND problem_id=" + std::to_string(problem_id)
+            + " AND contest_id=" + std::to_string(cid) + " LIMIT 1";
+        if (g_conn && g_sql.mysql_query && g_sql.mysql_store_result && g_sql.mysql_fetch_row) {
+            if (g_sql.mysql_query(g_conn, q.c_str()) == 0) {
+                void* res = g_sql.mysql_store_result(g_conn);
+                if (res) {
+                    char** row = g_sql.mysql_fetch_row(res);
+                    if (row) {
+                        exists = true;
+                        existingId = row[0] ? atoll(row[0]) : 0;
+                        curVerdict = row[1] ? row[1] : "";
+                    }
+                    g_sql.mysql_free_result(res);
+                }
+            }
+        }
+    }
+
+    // 已 AC：之后任何提交（对/错）都不再改动 MySQL，返回既有行 id
+    if (exists && curVerdict == "AC") return existingId;
+
+    if (!exists) {
+        // 首条记录：wrong_count = AC?0:1
+        long long wrong = ac ? 0 : 1;
+        std::string sql = "INSERT INTO submissions(user_id,problem_id,contest_id,verdict,detail,time_ms,`virtual`,wrong_count,created_at) VALUES("
+            + std::to_string(user_id) + "," + std::to_string(problem_id) + ","
+            + std::to_string(cid) + ",'" + SqlEscape(verdict) + "','" + SqlEscape(detail)
+            + "'," + std::to_string(time_ms) + "," + (virt ? "1" : "0") + ","
+            + std::to_string(wrong) + ",'" + SqlEscape(ts) + "')";
+        if (!ExecSQL(sql)) return 0;
+        return g_sql.mysql_insert_id ? (long long)g_sql.mysql_insert_id(g_conn) : 0;
+    }
+
+    if (ac) {
+        // 首次 AC：verdict=AC，created_at=本次时间（最早 AC 时间），wrong_count 保留累计错误次数
+        std::string sql = "UPDATE submissions SET verdict='AC', detail='" + SqlEscape(detail)
+            + "', time_ms=" + std::to_string(time_ms)
+            + ", `virtual`=" + (virt ? "1" : "0")
+            + ", created_at='" + SqlEscape(ts) + "'"
+            + " WHERE user_id=" + std::to_string(user_id)
+            + " AND problem_id=" + std::to_string(problem_id)
+            + " AND contest_id=" + std::to_string(cid);
+        if (!ExecSQL(sql)) return 0;
+        return existingId;
+    }
+
+    // AC 前的错误提交：wrong_count+1，verdict 更新为最新错误判定（供进度显示）
+    std::string sql = "UPDATE submissions SET verdict='" + SqlEscape(verdict)
+        + "', detail='" + SqlEscape(detail) + "', time_ms=" + std::to_string(time_ms)
+        + ", `virtual`=" + (virt ? "1" : "0")
+        + ", wrong_count=wrong_count+1"
+        + " WHERE user_id=" + std::to_string(user_id)
+        + " AND problem_id=" + std::to_string(problem_id)
+        + " AND contest_id=" + std::to_string(cid);
+    if (!ExecSQL(sql)) return 0;
+    return existingId;
 }
 
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id) {
@@ -793,65 +874,65 @@ bool mysql_contest_submissions(int cid, const std::string& username, bool view_a
     out_json += "]";
     return true;
 }
+
+bool mysql_user_progress(const std::string& username, int contest_id, std::string& out_json) {
+    long long uid = 0;
+    if (!mysql_user_id_by_name(username, uid)) { out_json = "[]"; return true; }
+    std::string sql = "SELECT problem_id, verdict FROM submissions WHERE user_id="
+        + std::to_string(uid) + " AND contest_id=" + std::to_string(contest_id)
+        + " ORDER BY problem_id";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "[";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        std::string v = row[1] ? row[1] : "";
+        bool ac = (v == "AC");
+        out_json += "{\"problemId\":" + std::string(row[0] ? row[0] : "0")
+                 + ",\"verdict\":\"" + jsonEscRow(v) + "\""
+                 + ",\"ac\":" + (ac ? "true" : "false") + "}";
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "]";
+    return true;
+}
 bool mysql_board(int cid, const std::string& start_str,
                 const std::string& problems_csv,
                 std::string& out_official, std::string& out_virtual) {
     // 排行榜罚时逻辑（ICPC）：
-    //   每题罚时 = 第一次 AC 相对基准时间（分钟） + AC 之前每次错误提交 * 20 分钟；
-    //   AC 之后的提交不再计分/计罚时。
+    //   每题罚时 = 第一次 AC 相对基准时间（分钟） + wrong_count * 20 分钟；
     //   正式选手基准 = 比赛开始时间；虚拟选手基准 = 其报名时间（无报名则回退比赛开始）。
     std::string startEsc = SqlEscape(start_str);
     std::string sql =
-        "SELECT u.username, s.problem_id, s.`virtual`, "
+        "SELECT u.username, s.`virtual`, s.wrong_count, "
         "  TIMESTAMPDIFF(MINUTE, IF(s.`virtual`=1, COALESCE(cr.registered_at, '" + startEsc + "'), '" + startEsc + "'), s.created_at) AS rel_min, "
         "  IF(s.verdict='AC', 1, 0) AS is_ac "
         "FROM submissions s JOIN users u ON u.id=s.user_id "
         "LEFT JOIN contest_registrations cr ON cr.user_id=s.user_id AND cr.contest_id=s.contest_id "
         "WHERE s.contest_id=" + std::to_string(cid) +
-        " AND s.problem_id IN (" + problems_csv + ") "
-        "ORDER BY u.username, s.problem_id, s.`virtual`, s.created_at, s.id";
+        " AND s.problem_id IN (" + problems_csv + ")";
     if (!ExecSQL(sql)) return false;
     void* res = g_sql.mysql_store_result(g_conn);
     if (!res) return false;
 
-    // 每人每题的聚合状态：第一次 AC 时间 + AC 之前的错误次数
-    struct Cell { long long firstAcMin = -1; long long wrong = 0; };
-    std::map<std::string, long long> solved, penalty;   // 按 username 汇总（总罚时）
+    std::map<std::string, long long> solved, penalty;
     std::map<std::string, bool> isVirt;
-
-    std::string curUser, curProblem;
-    int curVirt = -1;
-    bool hasCell = false;
-    Cell cell;
-
-    auto flush = [&]() {
-        if (!hasCell) return;
-        if (cell.firstAcMin >= 0) {
-            solved[curUser] += 1;
-            penalty[curUser] += cell.firstAcMin + cell.wrong * 20;
-            isVirt[curUser] = (curVirt == 1);
-        }
-    };
-
     char** row;
     while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
         std::string username = row[0] ? row[0] : "?";
-        std::string problem = row[1] ? row[1] : "0";
-        int virt = atoi(row[2]);
+        int virt = atoi(row[1]);
+        long long wrong = atoll(row[2]);
         long long relMin = atoll(row[3]);
         bool ac = atoi(row[4]) != 0;
-
-        if (!hasCell || curUser != username || curProblem != problem || curVirt != virt) {
-            flush();
-            curUser = username; curProblem = problem; curVirt = virt;
-            cell = Cell();
-            hasCell = true;
-        }
-        if (cell.firstAcMin >= 0) continue;   // 已 AC，之后提交不计
-        if (ac) cell.firstAcMin = relMin;
-        else cell.wrong++;
+        if (!ac) continue;   // 未 AC 的题不计入榜单（ICPC 只统计已解决题目）
+        solved[username] += 1;
+        penalty[username] += relMin + wrong * 20;
+        isVirt[username] = (virt == 1);
     }
-    flush();
     g_sql.mysql_free_result(res);
 
     auto emit = [&](bool virt) -> std::string {
@@ -909,18 +990,20 @@ bool mysql_list_users(std::string& out_json, std::string& err) {
 bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
                           const std::string& sample_in, const std::string& sample_out,
                           int time_ms, int mem_mb, const std::string& tags_json,
-                          const std::string& std_code, std::string& err) {
+                          const std::string& std_code, bool is_public, std::string& err) {
     if (time_ms <= 0) time_ms = 1000;
     if (mem_mb <= 0) mem_mb = 256;
     std::string tags = tags_json.empty() ? "[]" : tags_json;
     std::string encStd = std_code.empty() ? "" : encrypt_blob(std_code);
-    std::string sql = "INSERT INTO problems(id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code,updated_at) VALUES("
+    std::string sql = "INSERT INTO problems(id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code,is_public,updated_at) VALUES("
         + std::to_string(id) + ",'" + SqlEscape(title) + "','" + SqlEscape(desc) + "','"
         + SqlEscape(sample_in) + "','" + SqlEscape(sample_out) + "'," + std::to_string(time_ms) + ","
-        + std::to_string(mem_mb) + ",'" + SqlEscape(tags) + "','" + SqlEscape(encStd) + "',NOW()) "
+        + std::to_string(mem_mb) + ",'" + SqlEscape(tags) + "','" + SqlEscape(encStd) + "',"
+        + (is_public ? "1" : "0") + ",NOW()) "
         "ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), "
         "sample_in=VALUES(sample_in), sample_out=VALUES(sample_out), time_ms=VALUES(time_ms), "
-        "mem_mb=VALUES(mem_mb), tags=VALUES(tags), std_code=VALUES(std_code), updated_at=NOW()";
+        "mem_mb=VALUES(mem_mb), tags=VALUES(tags), std_code=VALUES(std_code), "
+        "is_public=VALUES(is_public), updated_at=NOW()";
     return ExecSQL(sql, &err);
 }
 
@@ -948,6 +1031,25 @@ void mysql_purge_orphan_generators() {
     ExecSQL("DELETE FROM generators WHERE id NOT IN (SELECT generator_id FROM problem_generators)");
 }
 
+bool mysql_problem_visibility(std::string& out_json) {
+    std::string sql = "SELECT id, is_public FROM problems ORDER BY id";
+    if (!ExecSQL(sql)) return false;
+    void* res = g_sql.mysql_store_result(g_conn);
+    if (!res) return false;
+    out_json = "{";
+    bool first = true;
+    char** row;
+    while ((row = g_sql.mysql_fetch_row(res)) != nullptr) {
+        if (!first) out_json += ",";
+        first = false;
+        out_json += "\"" + std::string(row[0] ? row[0] : "0") + "\":"
+                 + std::string(atoi(row[1]) ? "true" : "false");
+    }
+    g_sql.mysql_free_result(res);
+    out_json += "}";
+    return true;
+}
+
 bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err) {
     std::string sql = "INSERT INTO contests(id,content) VALUES("
         + std::to_string(cid) + ",'" + SqlEscape(contest_json) + "') "
@@ -955,13 +1057,65 @@ bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string&
     return ExecSQL(sql, &err);
 }
 
+// 解析 contest.json 中的 "problems":[1,2,3] 数组，返回题目编号列表
+static std::vector<int> parseContestProblems(const std::string& json) {
+    std::vector<int> ids;
+    std::string mark = "\"problems\"";
+    size_t p = json.find(mark);
+    if (p == std::string::npos) return ids;
+    p = json.find('[', p + mark.size());
+    if (p == std::string::npos) return ids;
+    size_t e = json.find(']', p);
+    if (e == std::string::npos) return ids;
+    std::string arr = json.substr(p + 1, e - p - 1);
+    std::istringstream iss(arr);
+    std::string tok;
+    while (std::getline(iss, tok, ',')) {
+        size_t a = tok.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) continue;
+        size_t b = tok.find_last_not_of(" \t\r\n");
+        tok = tok.substr(a, b - a + 1);
+        if (tok.empty()) continue;
+        int id = atoi(tok.c_str());
+        if (id > 0) ids.push_back(id);
+    }
+    return ids;
+}
+
 bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err) {
     if (!g_conn) { err = "MySQL not connected"; return false; }
     if (problem_dir.empty()) { err = "题目目录为空"; return false; }
     CreateDirectoryA(problem_dir.c_str(), nullptr);
 
-    // 1) 题目（含标程源码 std.cpp）
-    if (g_sql.mysql_query(g_conn, "SELECT id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code FROM problems ORDER BY id")) {
+    // 1) 题目（含标程源码 std.cpp）：公开题 + 被比赛引用的未公开题（比赛内客户端可见）
+    std::set<int> contestPids;
+    if (g_sql.mysql_query(g_conn, "SELECT content FROM contests") == 0) {
+        void* cres = g_sql.mysql_store_result(g_conn);
+        if (cres) {
+            char** crow;
+            while ((crow = g_sql.mysql_fetch_row(cres)) != nullptr) {
+                if (crow[0]) {
+                    auto ids = parseContestProblems(crow[0]);
+                    contestPids.insert(ids.begin(), ids.end());
+                }
+            }
+            g_sql.mysql_free_result(cres);
+        }
+    }
+    std::string probSql = "SELECT id,title,description,sample_in,sample_out,time_ms,mem_mb,tags,std_code "
+                          "FROM problems WHERE is_public=1";
+    if (!contestPids.empty()) {
+        probSql += " OR id IN (";
+        bool firstPid = true;
+        for (int pid : contestPids) {
+            if (!firstPid) probSql += ",";
+            firstPid = false;
+            probSql += std::to_string(pid);
+        }
+        probSql += ")";
+    }
+    probSql += " ORDER BY id";
+    if (g_sql.mysql_query(g_conn, probSql.c_str())) {
         if (g_sql.mysql_error) err = g_sql.mysql_error(g_conn);
         return false;
     }

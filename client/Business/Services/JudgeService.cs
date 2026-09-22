@@ -1,4 +1,5 @@
-﻿using client.DataAccess;
+﻿using System.Text;
+using client.DataAccess;
 using client.DataAccess.Models;
 
 namespace client.Business.Services;
@@ -48,10 +49,32 @@ public class JudgeService
     public Task<List<ContestSubmission>?> GetContestSubmissionsAsync(int contestId, string username, bool viewAll)
         => _api.GetContestSubmissionsAsync(contestId, username, viewAll);
 
-    /// <summary>按比赛配置的题目编号集合过滤出比赛题目（业务规则）。</summary>
+    /// <summary>获取某次比赛提交的完整详情（含代码与测试点）。</summary>
+    public Task<SubmissionDetail?> GetSubmissionDetailAsync(long sid)
+        => _api.GetSubmissionDetailAsync(sid);
+
+    /// <summary>按比赛配置的题目编号集合顺序返回比赛题目（业务规则）。</summary>
     public List<Problem> FilterContestProblems(List<Problem> all, IEnumerable<int> problemIds)
     {
-        var ids = new HashSet<int>(problemIds);
-        return all.Where(p => ids.Contains(p.Id)).ToList();
+        var map = all.ToDictionary(p => p.Id);
+        return problemIds
+            .Select(id => map.TryGetValue(id, out var p) ? p : null)
+            .Where(p => p is not null)
+            .Select(p => p!)
+            .ToList();
+    }
+
+    /// <summary>题目标签：0→A，1→B，…，25→Z，26→AA …（双射 26 进制）。</summary>
+    public static string ProblemLabel(int index)
+    {
+        var sb = new StringBuilder();
+        int n = index + 1;
+        while (n > 0)
+        {
+            n--;
+            sb.Insert(0, (char)('A' + n % 26));
+            n /= 26;
+        }
+        return sb.ToString();
     }
 }

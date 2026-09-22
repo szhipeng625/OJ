@@ -41,13 +41,18 @@ bool mysql_update_profile(long long user_id, const std::string& nickname,
                           const std::string& avatar, std::string& err);
 
 // 写提交记录：唯一键 (user_id, problem_id, contest_id)，
-// 同一用户同一题重复提交时原地更新最后结果（upsert，不追加历史行）
-bool mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
-                             const std::string& verdict, const std::string& detail,
-                             int time_ms, bool virt, const std::string& ts);
+// 同一用户同一题重复提交时原地更新最后结果（upsert，不追加历史行）。
+// 返回该行 submissions.id（AUTO_INCREMENT），失败或无法取得时返回 0。
+long long mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
+                                  const std::string& verdict, const std::string& detail,
+                                  int time_ms, bool virt, const std::string& ts);
 
 // 按用户名查用户 id（存在返回 true 并填 out_user_id）
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id);
+
+// 某用户在某比赛（0=练习）下每题最近一次判定结果，返回 JSON 数组
+// [{"problemId":1,"verdict":"AC","ac":true}, ...]
+bool mysql_user_progress(const std::string& username, int contest_id, std::string& out_json);
 
 // 比赛报名（幂等：重复报名更新虚拟标记）
 bool mysql_contest_register(long long user_id, int contest_id, bool virt, std::string& err);
@@ -76,10 +81,14 @@ std::string encrypt_blob(const std::string& plain);
 std::string decrypt_blob(const std::string& enc);
 
 // upsert 一道题的题面、元数据与标程源码（std_code 明文传入，内部加密存储）
+// is_public=false 表示未公开：客户端不展示，仅服务端可见
 bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
                           const std::string& sample_in, const std::string& sample_out,
                           int time_ms, int mem_mb, const std::string& tags_json,
-                          const std::string& std_code, std::string& err);
+                          const std::string& std_code, bool is_public, std::string& err);
+
+// 全部题目的公开状态，返回 JSON 对象：{"id":true/false, ...}
+bool mysql_problem_visibility(std::string& out_json);
 
 // 清空某题与生成器的全部关联（重新发布前调用，旧关联指向的生成器随后被清理）
 bool mysql_clear_problem_generators(int problem_id);
