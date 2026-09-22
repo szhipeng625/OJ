@@ -85,6 +85,7 @@ _jd/
 _test_contest/
 _test_resp/
 _cleanup_mysql.sql
+_lsm_analysis/
 
 # ===== 运行时数据（题目缓存 / 临时文件，不入库） =====
 **/ojdata/
