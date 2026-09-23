@@ -41,24 +41,15 @@ public class ApiClient
             if (!File.Exists(cfg)) { MySqlEnabled = false; return; }
             using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
             var root = doc.RootElement;
-            string host = root.GetProperty("host").GetString() ?? "localhost";
-            int port = root.TryGetProperty("port", out var pp) ? pp.GetInt32() : 3306;
-            string user = root.GetProperty("user").GetString() ?? "root";
-            string pass = root.GetProperty("pass").GetString() ?? "";
-            string db = root.GetProperty("db").GetString() ?? "oj";
-            // 远端 LSM 存储（RESP）：redisHost 缺省与 MySQL 同机，端口默认 6379
-            string redisHost = root.TryGetProperty("redisHost", out var rh) ? rh.GetString() ?? host : host;
-            int redisPort = root.TryGetProperty("redisPort", out var rp) ? rp.GetInt32() : 6379;
-            try { OJInterop.InitRedis(redisHost, redisPort); } catch { /* LSM 不可用不阻塞启动 */ }
-            int rc = OJInterop.InitMySQL(host, port, user, pass, db, problemDir, dataDir);
-            MySqlEnabled = (rc == 0);
-            if (MySqlEnabled)
-            {
-                // 首次建表（IF NOT EXISTS，幂等）
-                OJInterop.InitMysqlSchemaJson();
-                // 从 MySQL 拉取题目与比赛到本地目录（本地文件作为缓存，判题仍走文件）
-                try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败不阻塞启动，回退本地题目 */ }
-            }
+
+            // 统一走中间层（MySQL + LSM 都收口），middlewareUrl 必填
+            string mw = root.TryGetProperty("middlewareUrl", out var mv) ? mv.GetString() ?? "" : "";
+            if (string.IsNullOrWhiteSpace(mw)) { MySqlEnabled = false; return; }
+
+            OJInterop.InitMiddleware(mw.Trim(), problemDir, dataDir);
+            MySqlEnabled = true;
+            // 从中间层拉取题目/比赛到本地目录（本地文件作为缓存，判题仍走文件）
+            try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败不阻塞启动，回退本地题目 */ }
         }
         catch { MySqlEnabled = false; }
     }

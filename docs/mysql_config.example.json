@@ -5,5 +5,6 @@
   "pass": "your_password",
   "db": "oj",
   "redisHost": "127.0.0.1",
-  "redisPort": 6380
+  "redisPort": 6380,
+  "middlewareUrl": "http://47.253.41.10:8899"
 }

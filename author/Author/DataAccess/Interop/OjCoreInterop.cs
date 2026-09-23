@@ -23,6 +23,11 @@ public static class OjCoreInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int oj_init_middleware([MarshalAs(UnmanagedType.LPUTF8Str)] string url,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_login([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string p);
 
@@ -101,6 +106,9 @@ public static class OjCoreInterop
     // ===== 认证 / 初始化 =====
     public static int InitMysql(string host, int port, string user, string pass, string db, string problemDir, string dataDir)
         => oj_init_mysql(host, port, user, pass, db, problemDir, dataDir);
+
+    public static int InitMiddleware(string url, string problemDir, string dataDir)
+        => oj_init_middleware(url, problemDir, dataDir);
 
     public static string InitSchema()
     {

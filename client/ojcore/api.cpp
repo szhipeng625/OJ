@@ -874,6 +874,19 @@ OJ_API int oj_init_mysql(const char* host, int port, const char* user,
     return ok ? 0 : 1;   // 0 = MySQL 已连接；1 = 本地回退模式
 }
 
+// 初始化中间层 HTTP 模式（middlewareUrl 非空时使用，替代直连 MySQL）。
+OJ_API int oj_init_middleware(const char* url, const char* problem_dir, const char* data_dir) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    g_problemDir = problem_dir ? problem_dir : "";
+    g_dataDir = data_dir ? data_dir : "ojdata";
+    g_tempDir = g_dataDir + "\\temp";
+    CreateDirectoryA(g_dataDir.c_str(), NULL);
+    CreateDirectoryA(g_tempDir.c_str(), NULL);
+    g_submitSeq = 0;
+    oj::middleware_set_url(url ? url : "");
+    return 0;
+}
+
 OJ_API const char* oj_mysql_init_schema(void) {
     std::string err;
     if (oj::mysql_init_schema(err)) return dup("{\"ok\":true}");

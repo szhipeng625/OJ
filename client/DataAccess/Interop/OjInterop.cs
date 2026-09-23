@@ -88,6 +88,11 @@ public static class OJInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int oj_init_middleware([MarshalAs(UnmanagedType.LPUTF8Str)] string url,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_init_schema();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -179,6 +184,9 @@ public static class OJInterop
 
     public static int InitMySQL(string host, int port, string user, string pass, string db, string problemDir, string dataDir)
         => oj_init_mysql(host, port, user, pass, db, problemDir, dataDir);
+
+    public static int InitMiddleware(string url, string problemDir, string dataDir)
+        => oj_init_middleware(url, problemDir, dataDir);
 
     public static string InitMysqlSchemaJson() => PtrToString(oj_mysql_init_schema());
     public static string SyncProblemsJson() => PtrToString(oj_mysql_sync_problems());

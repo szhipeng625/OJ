@@ -11,7 +11,7 @@ namespace author.DataAccess;
 /// </summary>
 public sealed class AuthClient
 {
-    /// <summary>初始化 MySQL 连接并建表。false = 未配置或连接失败，服务端不允许进入。</summary>
+    /// <summary>初始化：统一走中间层（MySQL 收口）。false = 未配置或失败，服务端不允许进入。</summary>
     public bool Init(string problemDir, string dataDir)
     {
         try
@@ -20,19 +20,13 @@ public sealed class AuthClient
             if (!File.Exists(cfgPath)) return false;
             using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
             var r = doc.RootElement;
-            string host = r.TryGetProperty("host", out var h) ? h.GetString() ?? "localhost" : "localhost";
-            int port = r.TryGetProperty("port", out var pp) ? pp.GetInt32() : 3306;
-            string user = r.TryGetProperty("user", out var u) ? u.GetString() ?? "root" : "root";
-            string pass = r.TryGetProperty("pass", out var p) ? p.GetString() ?? "" : "";
-            string db = r.TryGetProperty("db", out var d) ? d.GetString() ?? "oj" : "oj";
 
-            int rc;
-            // oj_init_mysql 建立进程级单例连接，只在启动时调用一次（不进 OjCoreInterop 的调用锁）
+            // 统一走中间层，middlewareUrl 必填
+            string mw = r.TryGetProperty("middlewareUrl", out var mv) ? mv.GetString() ?? "" : "";
+            if (string.IsNullOrWhiteSpace(mw)) return false;
+
             lock (OjCoreInterop.Lock)
-                rc = OjCoreInterop.InitMysql(host, port, user, pass, db, problemDir, dataDir);
-            if (rc != 0) return false;
-
-            try { _ = OjCoreInterop.InitSchema(); } catch { /* 建表失败不阻塞登录 */ }
+                OjCoreInterop.InitMiddleware(mw.Trim(), problemDir, dataDir);
             return true;
         }
         catch

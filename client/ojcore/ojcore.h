@@ -98,6 +98,10 @@ OJ_API int oj_init_mysql(const char* host, int port, const char* user,
                          const char* pass, const char* db,
                          const char* problem_dir, const char* data_dir);
 
+// 初始化中间层 HTTP 模式（middlewareUrl 非空时使用，替代直连 MySQL）。
+// url 形如 http://47.253.41.10:8899。返回 0 成功。
+OJ_API int oj_init_middleware(const char* url, const char* problem_dir, const char* data_dir);
+
 // 首次初始化建表（users/sessions/submissions）。返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_init_schema(void);
 
