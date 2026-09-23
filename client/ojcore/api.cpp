@@ -278,6 +278,12 @@ static const char* do_judge(int problem_id, const char* code,
     std::string out  = g_tempDir + "\\__out.tmp";
     writeFile(src, code ? code : "");
 
+    // 判题前确保测试数据已生成（按需生成，耗时不计入判题计时）
+    if (oj::mysql_available()) {
+        std::string derr;
+        oj::ensure_problem_data(problem_id, g_problemDir, derr);
+    }
+
     std::string detail, verdict;
     std::vector<oj::CaseResult> cases;
 
@@ -967,6 +973,13 @@ OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json) {
 OJ_API const char* oj_mysql_sync_problems(void) {
     std::string err;
     if (!oj::mysql_sync_problems(g_problemDir, serverRoot(), err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    return dup("{\"ok\":true}");
+}
+
+OJ_API const char* oj_ensure_problem_data(int problem_id) {
+    std::string err;
+    if (!oj::ensure_problem_data(problem_id, g_problemDir, err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     return dup("{\"ok\":true}");
 }

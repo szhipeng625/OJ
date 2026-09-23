@@ -35,30 +35,47 @@ namespace {
 std::string g_temp;
 
 std::string genProblemRoot(int id) { return g_root + "\\" + std::to_string(id); }
-// 生成器子目录
+// 生成器目录名安全化：非 ASCII 名字（如中文）经 ANSI 文件 API 会编码错乱，
+// 统一映射为 "g_" + FNV-1a64(名字 UTF-8 字节) 的 ASCII 目录名。C# LoadFromMySql 用同样算法。
+std::string safeName(const std::string& name) {
+    for (unsigned char c : name) {
+        if (c >= 0x80) {
+            unsigned long long h = 1469598103934665603ull; // FNV-1a offset basis
+            for (unsigned char b : name) { h ^= b; h *= 1099511628211ull; }
+            char buf[32];
+            snprintf(buf, sizeof(buf), "g_%016llx", h);
+            return buf;
+        }
+    }
+    return name;
+}
+
+// 生成器子目录（名字合法性：拒绝路径分隔符/Windows 非法字符/保留名，允许非 ASCII）
 bool validGenName(const std::string& name) {
     if (name.empty() || name == "." || name == "..") return false;
-    for (char c : name) {
-        if (!isalnum((unsigned char)c) && c != '_' && c != '-' && c != '.') return false;
+    for (unsigned char c : name) {
+        if (c < 0x20) return false;
+        if (c == '\\' || c == '/' || c == ':' || c == '*' ||
+            c == '?' || c == '"' || c == '<' || c == '>' || c == '|') return false;
     }
     // 不允许个别保留目录名（防止与系统目录冲突）
     if (name == "history" || name == "gen_history" || name == "temp") return false;
     return true;
 }
-std::string genDir(int id, const std::string& name) { return genProblemRoot(id) + "\\" + name; }
+std::string genDir(int id, const std::string& name) { return genProblemRoot(id) + "\\" + safeName(name); }
 std::string genSrcPath(int id, const std::string& name) { return genDir(id, name) + "\\gen.cpp"; }
 std::string genDescPath(int id, const std::string& name) { return genDir(id, name) + "\\desc.txt"; }
 std::string genExePath(int id, const std::string& name) {
-    return g_temp + "\\" + std::to_string(id) + "\\" + name + ".exe";
+    return g_temp + "\\" + std::to_string(id) + "\\" + safeName(name) + ".exe";
 }
 
 // 数据输出目录 = 生成器目录本身（即判题数据源）
 std::string genOutDir(int id, const std::string& name) { return genDir(id, name); }
 
 // 本地测试工作区（DB 代码 → 临时目录编译运行，不触碰题库目录）
-std::string testSrcPath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name + ".cpp"; }
-std::string testExePath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name + ".exe"; }
-std::string testOutDir(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + name; }
+std::string testSrcPath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + safeName(name) + ".cpp"; }
+std::string testExePath(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + safeName(name) + ".exe"; }
+std::string testOutDir(int id, const std::string& name) { return g_temp + "\\" + std::to_string(id) + "\\" + safeName(name); }
 
 const char* kGenTemplate =
     "// 数据生成器 {name}.cpp\n"

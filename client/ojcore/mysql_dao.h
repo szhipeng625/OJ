@@ -61,6 +61,8 @@ bool mysql_list_problems(std::string& out_json);
 bool mysql_get_problem(int id, std::string& out_json);
 bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err);
 bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err);
+// 判题前按需生成数据（初始化不再预生成）；生成耗时不计入判题计时。
+bool ensure_problem_data(int problem_id, const std::string& problem_dir, std::string& err);
 
 // 生成器
 bool mysql_list_generators(std::string& out_json);

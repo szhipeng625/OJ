@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -123,7 +124,9 @@ ProcResult RunRedirect(const std::string& exe, const std::string& args,
 }
 
 // 生成器信息（用于本地重新生成判题数据）
-struct GenInfo { std::string name; int count; int seedBase; std::string marker; std::string hash; };
+// name: 原始生成器名（用于 seedBase 哈希与错误信息）
+// dirName: 磁盘目录名（ASCII 安全，避免中文名经 ANSI API 出现编码问题）
+struct GenInfo { std::string name; std::string dirName; int count; int seedBase; std::string marker; std::string hash; };
 
 // 重新生成某题的判题数据：编译标程 + 编译运行各生成器（确定性种子）→ .in，再跑标程 → .out。
 bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& gens,
@@ -136,7 +139,7 @@ bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& g
     if (!oj::compile_cpp(stdSrc, stdExe, cerr)) { errOut = "标程编译失败：" + cerr; return false; }
 
     for (auto& g : gens) {
-        std::string gdir = dir + "\\" + g.name;
+        std::string gdir = dir + "\\" + g.dirName;
         Mkdirs(gdir);
         std::string gexe = gdir + "\\gen.exe";
         if (!oj::compile_cpp(gdir + "\\gen.cpp", gexe, cerr)) {
@@ -303,10 +306,12 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
         WriteFileBin(dir + "\\meta.json", meta);
         if (!stdCode.empty()) WriteFileBin(dir + "\\std.cpp", stdCode);
 
-        std::vector<GenInfo> allGens, regenGens;
+        // 仅物化生成器源码与元数据（不生成数据）；数据在判题时按需生成（ensure_problem_data）
+        std::vector<std::string> knownDirs;
         for (auto& g : p.value("generators", json::array())) {
             std::string name = g.value("name", "");
             int count = g.value("genCount", 0);
+            int gid = g.value("id", 0);
             std::string code = g.value("code", "");
             std::string gdesc = g.value("description", "");
             if (name.empty() || count <= 0) continue;
@@ -315,30 +320,17 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
             unsigned long long gh = HashString(name);
             int seedBase = (int)(((unsigned long long)id * 1000003ull + gh) & 0x7fffffff);
 
-            std::string gdir = dir + "\\" + name;
+            // 目录名用生成器 id（纯 ASCII），避免中文名经 ANSI 文件 API 出现编码问题
+            std::string dirName = gid > 0 ? ("g" + std::to_string(gid))
+                                          : ("g_" + ToHex(gh));
+            std::string gdir = dir + "\\" + dirName;
             Mkdirs(gdir);
             WriteFileBin(gdir + "\\gen.cpp", code);
             WriteFileBin(gdir + "\\desc.txt", gdesc);
-
-            std::string hashInput = code + "|" + std::to_string(count)
-                + "|" + std::to_string(seedBase) + "|" + stdCode;
-            GenInfo gi;
-            gi.name = name; gi.count = count; gi.seedBase = seedBase;
-            gi.hash = ToHex(HashString(hashInput));
-            gi.marker = gdir + "\\.genhash";
-            bool complete = ExistsFile(gdir + "\\" + std::to_string(count) + ".in")
-                         && ExistsFile(gdir + "\\" + std::to_string(count) + ".out");
-            allGens.push_back(gi);
-            if (ReadFileText(gi.marker) != gi.hash || !complete)
-                regenGens.push_back(gi);
-        }
-        if (!regenGens.empty() && !stdCode.empty()) {
-            std::string rerr;
-            if (RegenerateProblemData(dir, regenGens, rerr)) {
-                for (auto& gi : regenGens) WriteFileBin(gi.marker, gi.hash);
-            } else if (err.empty()) {
-                err = "题目 " + std::to_string(id) + " 数据生成失败：" + rerr;
-            }
+            // 持久化生成参数，供判题时按需生成数据
+            json gm = {{"count", count}, {"seedBase", seedBase}, {"name", name}};
+            WriteFileBin(gdir + "\\genmeta.txt", gm.dump());
+            knownDirs.push_back(dirName);
         }
         // 清理已删除的生成器目录
         {
@@ -350,7 +342,7 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
                     std::string n = fd.cFileName;
                     if (n == "." || n == "..") continue;
                     bool known = false;
-                    for (auto& gi : allGens) if (gi.name == n) { known = true; break; }
+                    for (auto& kd : knownDirs) if (kd == n) { known = true; break; }
                     if (!known && ExistsFile(dir + "\\" + n + "\\gen.cpp"))
                         RemoveDir(dir + "\\" + n);
                 } while (FindNextFileA(h, &fd));
@@ -389,7 +381,6 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
             } catch (...) {}
         }
     }
-    err.clear();
     return true;
 }
 
@@ -603,6 +594,57 @@ bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string&
 
 bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err) {
     return middleware_sync_problems(problem_dir, server_root, err);
+}
+
+// 判题前按需生成数据：读本地 gen.cpp / genmeta.txt / std.cpp，缓存过期或缺失时重新生成。
+// 生成耗时发生在 run_tests 之前，不计入判题（测试点）计时。
+bool ensure_problem_data(int problem_id, const std::string& problem_dir, std::string& errOut) {
+    static std::mutex g_gen_mtx;
+    std::lock_guard<std::mutex> lock(g_gen_mtx);
+
+    std::string dir = problem_dir + "\\" + std::to_string(problem_id);
+    if (!ExistsFile(dir)) { errOut = "题目目录不存在"; return false; }
+    std::string stdCode = ReadFileText(dir + "\\std.cpp");
+    if (stdCode.empty()) { errOut = "标程不存在"; return false; }
+
+    std::vector<GenInfo> regenGens;
+    std::string pat = dir + "\\*";
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) { errOut = "枚举题目目录失败"; return false; }
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        std::string dn = fd.cFileName;
+        if (dn == "." || dn == "..") continue;
+        std::string gdir = dir + "\\" + dn;
+        std::string metaPath = gdir + "\\genmeta.txt";
+        if (!ExistsFile(metaPath)) continue;   // 不是生成器目录（无 genmeta.txt）
+        json mj;
+        try { mj = json::parse(ReadFileText(metaPath)); } catch (...) { continue; }
+        int count = mj.value("count", 0);
+        int seedBase = mj.value("seedBase", 0);
+        std::string name = mj.value("name", "");
+        std::string code = ReadFileText(gdir + "\\gen.cpp");
+        if (count <= 0 || code.empty()) continue;
+
+        std::string hashInput = code + "|" + std::to_string(count)
+            + "|" + std::to_string(seedBase) + "|" + stdCode;
+        GenInfo gi;
+        gi.name = name; gi.dirName = dn; gi.count = count; gi.seedBase = seedBase;
+        gi.hash = ToHex(HashString(hashInput));
+        gi.marker = gdir + "\\.genhash";
+        bool complete = ExistsFile(gdir + "\\" + std::to_string(count) + ".in")
+                     && ExistsFile(gdir + "\\" + std::to_string(count) + ".out");
+        if (ReadFileText(gi.marker) != gi.hash || !complete)
+            regenGens.push_back(gi);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+
+    if (regenGens.empty()) { errOut.clear(); return true; }
+    std::string rerr;
+    if (!RegenerateProblemData(dir, regenGens, rerr)) { errOut = rerr; return false; }
+    for (auto& gi : regenGens) WriteFileBin(gi.marker, gi.hash);
+    errOut.clear();
+    return true;
 }
 
 // ---------- 生成器 ----------

@@ -38,6 +38,26 @@ public sealed class AuthorClient
     public string GenExePath(int id, string name) => Path.Combine(TempRoot, id.ToString(), name + ".exe");
     public string StdExePath(int id) => Path.Combine(TempRoot, id.ToString(), "std.exe");
 
+    /// <summary>
+    /// 与 authorcore/gen.cpp 的 safeName 一致：非 ASCII 生成器名映射为 "g_" + FNV-1a64(名字 UTF-8 字节)，
+    /// 避免中文名经 ANSI 文件 API 编码错乱。
+    /// </summary>
+    public static string SafeGenName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        bool ascii = true;
+        foreach (char c in name) if (c > 0x7F) { ascii = false; break; }
+        if (ascii) return name;
+
+        ulong h = 1469598103934665603ul; // FNV-1a offset basis
+        foreach (byte b in System.Text.Encoding.UTF8.GetBytes(name))
+        {
+            h ^= b;
+            h *= 1099511628211ul;
+        }
+        return "g_" + h.ToString("x16");
+    }
+
     // ===== 题目列表 / 创建 =====
     public List<ProblemInfo> List()
     {
@@ -176,7 +196,7 @@ public sealed class AuthorClient
                     string code = g.TryGetProperty("code", out var cd) ? cd.GetString() ?? "" : "";
                     string gdesc = g.TryGetProperty("description", out var gd) ? gd.GetString() ?? "" : "";
                     if (string.IsNullOrEmpty(name)) continue;
-                    string gdir = Path.Combine(dir, name);
+                    string gdir = Path.Combine(dir, SafeGenName(name));
                     Directory.CreateDirectory(gdir);
                     File.WriteAllText(Path.Combine(gdir, "gen.cpp"), code);
                     File.WriteAllText(Path.Combine(gdir, "desc.txt"), gdesc);

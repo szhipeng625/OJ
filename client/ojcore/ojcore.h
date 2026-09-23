@@ -184,6 +184,10 @@ OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json);
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_sync_problems(void);
 
+// 判题前按需生成某题的测试数据（初始化不再预生成）。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_ensure_problem_data(int problem_id);
+
 // 释放 oj_get_problems / oj_submit 返回的字符串。
 OJ_API void oj_free_string(const char* s);
 
