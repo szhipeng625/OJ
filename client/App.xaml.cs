@@ -56,6 +56,11 @@ public partial class App : Application
                     me = login.Session;
                 }
                 Log("登录成功: " + me?.Username);
+
+                // 登录完成后再同步题目/比赛（避免阻塞登录窗口弹出）
+                Log("同步题目开始");
+                await Task.Run(() => api.SyncProblems());
+                Log("同步题目完成");
             }
 
             // ---- UI 层 ----

@@ -48,10 +48,16 @@ public class ApiClient
 
             OJInterop.InitMiddleware(mw.Trim(), problemDir, dataDir);
             MySqlEnabled = true;
-            // 从中间层拉取题目/比赛到本地目录（本地文件作为缓存，判题仍走文件）
-            try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败不阻塞启动，回退本地题目 */ }
+            // 题目/比赛同步延迟到登录后由 SyncProblems() 执行，避免阻塞启动与登录窗口弹出
         }
         catch { MySqlEnabled = false; }
+    }
+
+    /// <summary>从中间层拉取题目/比赛到本地目录（本地文件作为缓存，判题仍走文件）。</summary>
+    public void SyncProblems()
+    {
+        if (!MySqlEnabled) return;
+        try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败回退本地题目 */ }
     }
 
     // ---------- 题库 / 判题 ----------

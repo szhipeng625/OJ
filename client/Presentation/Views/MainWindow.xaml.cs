@@ -160,16 +160,8 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog() != true) return;
         try
         {
-            byte[] bytes = File.ReadAllBytes(dlg.FileName);
-            string ext = (Path.GetExtension(dlg.FileName) ?? ".png").ToLowerInvariant();
-            string mime = ext switch
-            {
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".gif" => "image/gif",
-                ".bmp" => "image/bmp",
-                _ => "image/png"
-            };
-            string dataUrl = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+            // 上传前压缩：缩放到 256x256 以内并转 JPEG，避免大头像让 whoami/login 每次传输过慢
+            string dataUrl = CompressAvatar(dlg.FileName);
             bool ok = await _auth.UpdateProfileAsync(_me.Token, _me.Nickname, dataUrl);
             if (!ok) { MessageBox.Show("上传头像失败"); return; }
             _me = _me with { Avatar = dataUrl };
@@ -179,6 +171,31 @@ public partial class MainWindow : Window
         {
             MessageBox.Show("读取图片失败：" + ex.Message);
         }
+    }
+
+    /// <summary>头像压缩：中心裁成正方形、缩放到 256x256、JPEG 质量 80，输出 data URL。</summary>
+    private static string CompressAvatar(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        var frame = decoder.Frames[0];
+
+        // 中心裁剪为正方形
+        int srcW = frame.PixelWidth, srcH = frame.PixelHeight;
+        int side = Math.Min(srcW, srcH);
+        int offX = (srcW - side) / 2, offY = (srcH - side) / 2;
+        var cropped = new CroppedBitmap(frame, new Int32Rect(offX, offY, side, side));
+
+        double scale = Math.Min(1.0, 256.0 / side);
+        var transformed = scale < 1.0
+            ? new TransformedBitmap(cropped, new ScaleTransform(scale, scale))
+            : (BitmapSource)cropped;
+
+        var encoder = new JpegBitmapEncoder { QualityLevel = 80 };
+        encoder.Frames.Add(BitmapFrame.Create(transformed));
+        using var ms = new MemoryStream();
+        encoder.Save(ms);
+        return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
     }
 
     private string? PromptText(string title, string message, string initial)
