@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <RootNamespace>OJInstaller</RootNamespace>
+    <AssemblyName>OJInstaller</AssemblyName>
+    <Version>1.0.0</Version>
+    <!-- 自包含单文件：目标机器无需安装 .NET 即可运行安装器 -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- 安装包下载地址前缀（以 / 结尾）。打包脚本可用 -p:InstallerBaseUrl=... 覆盖 -->
+    <InstallerBaseUrl Condition="'$(InstallerBaseUrl)' == ''">http://YOUR-SERVER/oj/</InstallerBaseUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="InstallerBaseUrl" Value="$(InstallerBaseUrl)" />
+  </ItemGroup>
+
+</Project>

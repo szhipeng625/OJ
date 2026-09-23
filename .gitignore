@@ -72,6 +72,7 @@ test_upsert/
 client.csproj.user
 dist/
 store/
+installer_out/
 **/problems/
 
 # ===== 本地测试脚手架（不上传） =====
