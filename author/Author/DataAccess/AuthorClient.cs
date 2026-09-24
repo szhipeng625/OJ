@@ -190,6 +190,7 @@ public sealed class AuthorClient
 
             if (r.TryGetProperty("generators", out var gens) && gens.ValueKind == JsonValueKind.Array)
             {
+                var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var g in gens.EnumerateArray())
                 {
                     string name = g.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
@@ -200,6 +201,18 @@ public sealed class AuthorClient
                     Directory.CreateDirectory(gdir);
                     File.WriteAllText(Path.Combine(gdir, "gen.cpp"), code);
                     File.WriteAllText(Path.Combine(gdir, "desc.txt"), gdesc);
+                    expected.Add(Path.GetFileName(gdir));
+                }
+                // 清理本地遗留的、已不在本题绑定集合中的生成器目录（含其 .in/.out），避免出现多余生成器
+                if (Directory.Exists(dir))
+                {
+                    foreach (var sub in Directory.GetDirectories(dir))
+                    {
+                        string dn = Path.GetFileName(sub);
+                        if (expected.Contains(dn)) continue;
+                        if (!File.Exists(Path.Combine(sub, "gen.cpp"))) continue;   // 只清理生成器目录
+                        try { Directory.Delete(sub, true); } catch { }
+                    }
                 }
             }
 

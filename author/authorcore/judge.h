@@ -30,6 +30,9 @@ struct RunOutcome { int status; DWORD exitCode; long long ms; };
 RunOutcome run_one(const std::string& exe, const std::string& inFile,
                    const std::string& userOut, DWORD timeoutMs, SIZE_T memBytes);
 
+// 崩溃类退出码（NTSTATUS 异常码）→ 中文描述；非崩溃返回 nullptr
+const char* crash_desc(DWORD code);
+
 // 对 testDir 下每个 *.in 运行 exe，返回逐测试点结果（文本比对）。
 std::vector<CaseResult> run_tests(const std::string& exeFile,
                                   const std::string& testDir,

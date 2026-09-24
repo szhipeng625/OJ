@@ -45,16 +45,26 @@ public partial class SolveWindow : Window
         }
         else
         {
-            string kind = roomVirtual ? "虚拟参赛" : "正式参赛";
+            string kind = roomVirtual ? "打星参加" : "正式参赛";
             int idx = Array.IndexOf(contest.Problems, problem.Id);
             string label = idx >= 0 ? JudgeService.ProblemLabel(idx) : $"P{problem.Id}";
             Title = $"C{contest.Id} · {label}. {problem.Title} - 做题";
             TitleText.Text = $"C{contest.Id} · {label}. {problem.Title}（{kind}）";
 
-            // 比赛结束提醒（只弹一次）
-            _endTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _endTimer.Tick += (_, _) => CheckContestEnd();
-            _endTimer.Start();
+            // 已结束的比赛进入仅作查看：不弹结束提醒、禁用提交
+            _endPrompted = ContestPolicy.IsEnded(contest.EndTime);
+            if (_endPrompted)
+            {
+                SubmitBtn.IsEnabled = false;
+                SubmitBtn.Content = "比赛已结束";
+                StatusText.Text = "比赛已结束，仅可查看";
+            }
+            else
+            {
+                _endTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _endTimer.Tick += (_, _) => CheckContestEnd();
+                _endTimer.Start();
+            }
         }
 
         string tags = problem.Tags is { Length: > 0 } ? string.Join(", ", problem.Tags) : "无";
@@ -91,6 +101,10 @@ public partial class SolveWindow : Window
             CodeBox.Text = DefaultCode;
             StatusText.Text = "载入历史代码失败";
         }
+
+        // 已结束的比赛保持“仅可查看”提示，不被代码载入状态覆盖
+        if (_contest is not null && ContestPolicy.IsEnded(_contest.EndTime))
+            StatusText.Text = "比赛已结束，仅可查看";
     }
 
     private async void SubmitBtn_OnClick(object sender, RoutedEventArgs e)
@@ -113,7 +127,7 @@ public partial class SolveWindow : Window
             }
             else
             {
-                if (!ContestPolicy.CanSubmitOfficial(_contest.StartTime, _contest.EndTime, _roomVirtual, out var reason))
+                if (!ContestPolicy.CanSubmit(_contest.StartTime, _contest.EndTime, out var reason))
                 {
                     MessageBox.Show(reason);
                     StatusText.Text = "";
@@ -136,7 +150,17 @@ public partial class SolveWindow : Window
             VerdictText.Text = "结果：请求失败";
             StatusText.Text = ex.Message;
         }
-        finally { SubmitBtn.IsEnabled = true; }
+        finally
+        {
+            // 比赛已结束后不再重新启用提交按钮（只能查看题目）
+            bool ended = _contest is not null && ContestPolicy.IsEnded(_contest.EndTime);
+            SubmitBtn.IsEnabled = !ended;
+            if (ended)
+            {
+                SubmitBtn.Content = "比赛已结束";
+                StatusText.Text = "比赛已结束，仅可查看";
+            }
+        }
     }
 
     private void ImportSample(int index)
@@ -225,7 +249,9 @@ public partial class SolveWindow : Window
         {
             _endPrompted = true;
             _endTimer?.Stop();
-            MessageBox.Show("本场比赛已结束！", "比赛结束", MessageBoxButton.OK, MessageBoxImage.Information);
+            SubmitBtn.IsEnabled = false;
+            SubmitBtn.Content = "比赛已结束";
+            StatusText.Text = "比赛已结束，仅可查看";
         }
     }
 

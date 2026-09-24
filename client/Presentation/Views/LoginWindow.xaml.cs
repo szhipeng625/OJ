@@ -42,4 +42,16 @@ public partial class LoginWindow : Window
         }
         finally { LoginBtn.IsEnabled = true; }
     }
+
+    private void RegisterBtn_OnClick(object sender, RoutedEventArgs e)
+    {
+        var reg = new RegisterWindow(_auth) { Owner = this };
+        if (reg.ShowDialog() == true && reg.RegisteredUsername is { } u)
+        {
+            UserBox.Text = u;
+            PassBox.Clear();
+            ErrText.Text = "注册成功，请输入密码登录";
+            PassBox.Focus();
+        }
+    }
 }

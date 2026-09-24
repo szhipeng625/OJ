@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS users (
   role          ENUM('admin','author','user') NOT NULL DEFAULT 'user',
   nickname      VARCHAR(64)  NOT NULL DEFAULT '',
   avatar        MEDIUMTEXT,                     -- base64 data URL
+  email         VARCHAR(128) NOT NULL DEFAULT '',  -- 邮箱（注册填写）
+  `name`        VARCHAR(64)  NOT NULL DEFAULT '',  -- 姓名（个人主页展示「学校 姓名」）
+  school        VARCHAR(128) NOT NULL DEFAULT '',  -- 学校
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -57,6 +60,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   contest_id INT NOT NULL DEFAULT 0,
   verdict    VARCHAR(16) NOT NULL,              -- AC / WA / TLE / RE / CE / SE
   detail     TEXT,
+  code       MEDIUMTEXT,                       -- 用户代码（AC 后锁定维护，非 AC 每次覆盖）
   time_ms    INT,
   `virtual`  TINYINT NOT NULL DEFAULT 0,        -- 1 = 虚拟参赛
   wrong_count INT NOT NULL DEFAULT 0,           -- AC 前错误次数（ICPC 罚时 +20 分钟/次）

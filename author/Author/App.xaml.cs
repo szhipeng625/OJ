@@ -1,4 +1,6 @@
 ﻿using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using System.Windows;
 using author.Business.Services;
 using author.DataAccess;
@@ -9,6 +11,29 @@ namespace author;
 
 public partial class App : Application
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectory(string lpPathName);
+
+    // 分层目录：UI 程序集放 ui/，原生 DLL 放 native/；目录不存在时自动回退到 exe 根目录。
+    static App()
+    {
+        string baseDir = AppContext.BaseDirectory;
+        string nativeDir = Path.Combine(baseDir, "native");
+        string uiDir = Path.Combine(baseDir, "ui");
+
+        // 原生 DLL（ojcore/authorcore/OpenSSL）统一从 native/ 加载，含其传递依赖
+        if (Directory.Exists(nativeDir))
+            SetDllDirectory(nativeDir);
+
+        // 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 ui/ 加载
+        AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+        {
+            if (name.Name is null) return null;
+            string p = Path.Combine(uiDir, name.Name + ".dll");
+            return File.Exists(p) ? ctx.LoadFromAssemblyPath(p) : null;
+        };
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -60,7 +85,7 @@ public partial class App : Application
             if (!await auth.InitAsync(serverProblemDir, dataDir))
             {
                 MessageBox.Show("未配置 MySQL 连接（缺少 mysql_config.json 或连不上数据库），服务端无法启动。\n请参考 docs/MYSQL.md。",
-                    "OJ 服务端", MessageBoxButton.OK, MessageBoxImage.Error);
+                    "ACMDOG 服务端", MessageBoxButton.OK, MessageBoxImage.Error);
                 Shutdown();
                 return;
             }

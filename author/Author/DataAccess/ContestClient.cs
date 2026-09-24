@@ -4,7 +4,7 @@ using author.DataAccess.Models;
 
 namespace author.DataAccess;
 
-/// <summary>比赛数据访问：authorcore 的 contests 目录读写与发布。</summary>
+/// <summary>比赛数据访问：全部走 MySQL 云端（不再本地保存 contests 目录）。</summary>
 public sealed class ContestClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
@@ -13,28 +13,32 @@ public sealed class ContestClient
     {
         try
         {
-            return JsonSerializer.Deserialize<List<ContestInfo>>(AuthorCoreInterop.ContestList(), JsonOpts) ?? new();
+            return JsonSerializer.Deserialize<List<ContestInfo>>(OjCoreInterop.ListContestsJson(), JsonOpts) ?? new();
         }
         catch { return new(); }
     }
 
-    public string Save(ContestDraft draft)
+    /// <summary>把比赛配置直接发布到 MySQL 云端（客户端从此拉取），不写本地文件。</summary>
+    public string PublishDraft(ContestDraft draft)
     {
-        string problemsJson = "[" + string.Join(",", draft.ProblemIds) + "]";
-        return AuthorCoreInterop.ContestCreate(draft.Id, draft.Name, "", draft.StartTime, draft.EndTime, problemsJson);
+        string json = JsonSerializer.Serialize(new
+        {
+            id = draft.Id,
+            name = draft.Name,
+            description = "",
+            startTime = draft.StartTime,
+            endTime = draft.EndTime,
+            problems = draft.ProblemIds
+        });
+        return OjCoreInterop.PublishContest(draft.Id, json);
     }
 
-    public string Publish(int cid, string targetRoot) => AuthorCoreInterop.ContestPublish(cid, targetRoot);
-
-    /// <summary>把比赛配置发布到 MySQL，供客户端拉取（contest.json 经 ContestGet 读取）。</summary>
-    public string PublishToMySql(int cid) => OjCoreInterop.PublishContest(cid, AuthorCoreInterop.ContestGet(cid));
-
-    /// <summary>读取一场比赛的可编辑草稿（用于在比赛管理中再次编辑），失败返回 null。</summary>
+    /// <summary>读取一场比赛的可编辑草稿（从 MySQL），失败返回 null。</summary>
     public ContestDraft? GetDraft(int cid)
     {
         try
         {
-            using var doc = JsonDocument.Parse(AuthorCoreInterop.ContestGet(cid));
+            using var doc = JsonDocument.Parse(OjCoreInterop.GetContestJson(cid));
             var root = doc.RootElement;
             if (!root.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) return null;
             string name = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
@@ -44,24 +48,6 @@ public sealed class ContestClient
                 ? p.EnumerateArray().Select(x => x.GetInt32()).ToArray()
                 : Array.Empty<int>();
             return new ContestDraft(cid, name, start, end, ids);
-        }
-        catch { return null; }
-    }
-
-    /// <summary>读取比赛详情，返回可直接展示的文本；失败返回 null。</summary>
-    public string? GetDetailText(int cid)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(AuthorCoreInterop.ContestGet(cid));
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("ok", out var ok) || !ok.GetBoolean()) return null;
-            string name = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-            string desc = root.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
-            string start = root.TryGetProperty("startTime", out var s) ? s.GetString() ?? "" : "";
-            string end = root.TryGetProperty("endTime", out var en) ? en.GetString() ?? "" : "";
-            string problems = root.TryGetProperty("problems", out var p) ? p.GetRawText() : "[]";
-            return $"比赛 C{cid}：{name}\n时间：{start} ~ {end}\n题目 IDs：{problems}\n\n{desc}";
         }
         catch { return null; }
     }

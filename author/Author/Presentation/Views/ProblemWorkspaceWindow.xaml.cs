@@ -154,6 +154,21 @@ public partial class ProblemWorkspaceWindow : Window
         });
     }
 
+    // ---------- 导入选中数据为样例输入/输出 ----------
+    private async void OnImportSampleFromSelected(object sender, RoutedEventArgs e)
+    {
+        if (DataGroupView.SelectedItem is not DataRow row)
+        {
+            DataMsg.Text = "请先在下方列表中选择一组数据";
+            return;
+        }
+        await RunBusy("正在导入样例…", async () =>
+        {
+            var r = await _wb.Problems.ImportSampleFromDataAsync(_id, row.GroupKey, row.InFile, row.OutFile);
+            if (IsLoaded) DataMsg.Text = r.Message;
+        });
+    }
+
     private async void OnDataRowDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (DataGroupView.SelectedItem is not DataRow row) return;
@@ -181,7 +196,9 @@ public partial class ProblemWorkspaceWindow : Window
         await RunBusy("正在校验题目完整性…", async () =>
         {
             var msg = await _wb.Problems.ValidateAsync(_id);
-            if (IsLoaded) PublishMsg.Text = msg;
+            int tc = 0;
+            try { tc = (await _wb.Generators.ListTestcasesAsync(_id)).Count; } catch { }
+            if (IsLoaded) PublishMsg.Text = $"测试用例：{tc} 个\n\n" + msg;
         });
     }
 
@@ -333,6 +350,24 @@ public partial class ProblemWorkspaceWindow : Window
         {
             var r = await _wb.Generators.CompileAsync(_id, _genId, _genName, code);
             if (IsLoaded) GenMsg.Text = r.Message;
+        });
+    }
+
+    private async void OnGenDelete(object sender, RoutedEventArgs e)
+    {
+        if (_genId <= 0) { GenMsg.Text = "请先双击一个生成器打开编辑器"; return; }
+        var confirm = MessageBox.Show(
+            $"确定删除生成器「{_genName}」吗？将同时解除与所有题目的绑定。",
+            "删除生成器", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        await RunBusy("正在删除生成器…", async () =>
+        {
+            var r = await _wb.Generators.DeleteAsync(_genId);
+            if (IsLoaded) GenMsg.Text = r.Message;
+            await LoadGenAsync();          // 刷新生成器列表
+            await RefreshDataList();       // 刷新「生成标准答案」数据列表
+            _mgr.NotifyProblemListChanged();
         });
     }
 

@@ -40,36 +40,40 @@ public static class ContestPolicy
             : $"{span.Hours:00}:{span.Minutes:00}:{span.Seconds:00}";
     }
 
-    /// <summary>比赛是否已结束（用于默认勾选虚拟参赛）。</summary>
+    /// <summary>比赛是否已结束。</summary>
     public static bool IsEnded(string? end)
         => DateTime.TryParse(end, out var et) && DateTime.Now >= et;
 
+    /// <summary>比赛是否已开始。</summary>
+    public static bool IsStarted(string? start)
+        => DateTime.TryParse(start, out var st) && DateTime.Now >= st;
+
     /// <summary>
-    /// 正式（非虚拟）提交是否在允许的时间窗口内；不允许时 reason 给出提示。
+    /// 提交是否在允许的时间窗口内（仅比赛进行期间允许提交，打星/正式一致）。
     /// </summary>
-    public static bool CanSubmitOfficial(string start, string end, bool virt, out string reason)
+    public static bool CanSubmit(string start, string end, out string reason)
     {
         reason = "";
         var now = DateTime.Now;
         var st = DateTime.Parse(start);
         var et = DateTime.Parse(end);
-        if (now < st && !virt)
+        if (now < st)
         {
-            reason = "比赛尚未开始。勾选「虚拟参赛」可提前模拟。";
+            reason = "比赛尚未开始，无法提交";
             return false;
         }
-        if (now >= et && !virt)
+        if (now >= et)
         {
-            reason = "比赛已结束。勾选「虚拟参赛」可进行虚拟参与。";
+            reason = "比赛已结束，无法提交";
             return false;
         }
         return true;
     }
 
     /// <summary>
-    /// 合并正式榜与虚拟榜为一张榜：按 AC 数降序、罚时升序排列（同名次正式选手在前）。
-    /// 正式选手名次按其在正式选手中的先后编号；虚拟选手不编号（Rank=0），
-    /// 但行位置严格按成绩插入，UI 据此把虚拟选手显示为带 *、无名次的占位行。
+    /// 合并正式榜与打星榜为一张榜：按 AC 数降序、罚时升序排列（同名次正式选手在前）。
+    /// 正式选手名次按其在正式选手中的先后编号；打星选手不编号（Rank=0），
+    /// 但行位置严格按成绩插入，UI 据此把打星选手显示为带 *、无名次的占位行。
     /// </summary>
     public static List<BoardEntry> MergeBoard(BoardData? board)
     {

@@ -20,8 +20,9 @@ public class AuthService
     public Task<LoginResult?> LoginAsync(string username, string password)
         => _api.LoginAsync(username, password);
 
-    public Task<bool> RegisterAsync(string username, string password, string role)
-        => _api.RegisterAsync(username, password, role);
+    /// <summary>注册（仅 user 角色），需邮箱/姓名/学校。</summary>
+    public Task<bool> RegisterAsync(string username, string password, string email, string name, string school)
+        => _api.RegisterAsync(username, password, email, name, school);
 
     /// <summary>更新当前用户资料（昵称 / 头像 data URL）。</summary>
     public Task<bool> UpdateProfileAsync(string token, string nickname, string avatar)
@@ -48,5 +49,16 @@ public class AuthService
         Directory.CreateDirectory(Path.GetDirectoryName(SessionPath)!);
         File.WriteAllText(SessionPath, me.Token);
         CurrentUser = me;
+    }
+
+    /// <summary>退出登录：调用服务端登出并清除本地保存的 token。</summary>
+    public async Task LogoutAsync()
+    {
+        if (CurrentUser is { } me)
+        {
+            try { await _api.LogoutAsync(me.Token); } catch { /* 服务端登出失败不阻塞本地清理 */ }
+        }
+        CurrentUser = null;
+        try { if (File.Exists(SessionPath)) File.Delete(SessionPath); } catch { }
     }
 }

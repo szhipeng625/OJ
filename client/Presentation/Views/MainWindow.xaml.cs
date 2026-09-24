@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private ContestDetail? _currentContest;      // 列表页选中的比赛
     private ContestDetail? _roomContest;         // 已进入工作台的比赛
     private bool _roomVirtual;
+    private bool _roomViewOnly;                   // 未报名仅查看模式
     private Problem? _currentContestProblem;
     private readonly ObservableCollection<ProblemRow> _contestProblemRows = new();
     private readonly ListCollectionView _contestProblemView;
@@ -43,8 +44,7 @@ public partial class MainWindow : Window
     // 比赛开始倒计时刷新
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
-    // 比赛结束提示（只弹一次）与提交记录缓存（双击查看代码用）
-    private bool _roomEndPrompted;
+    // 提交记录缓存（双击查看代码用）
     private List<ContestSubmission> _contestSubs = new();
 
     public MainWindow(JudgeService judge, AuthService auth, LocalIdentityService identity)
@@ -88,11 +88,13 @@ public partial class MainWindow : Window
     {
         if (_me is { } me)
         {
-            string display = string.IsNullOrWhiteSpace(me.Nickname) ? me.Username : me.Nickname;
-            ProfileName.Text = display;
-            ProfileRole.Text = $"{me.Role} · {me.Username}";
+            ProfileName.Text = ProfileDisplay(me);
+            ProfileRole.Text = string.IsNullOrWhiteSpace(me.Email)
+                ? $"{me.Role} · {me.Username}"
+                : $"{me.Role} · {me.Username} · {me.Email}";
             EditNickBtn.Visibility = Visibility.Visible;
             UploadAvatarBtn.Visibility = Visibility.Visible;
+            LogoutBtn.Visibility = Visibility.Visible;
         }
         else
         {
@@ -100,8 +102,19 @@ public partial class MainWindow : Window
             ProfileRole.Text = "本地用户";
             EditNickBtn.Visibility = Visibility.Collapsed;
             UploadAvatarBtn.Visibility = Visibility.Collapsed;
+            LogoutBtn.Visibility = Visibility.Collapsed;
         }
         ApplyAvatar(_me?.Avatar);
+    }
+
+    /// <summary>个人主页展示「学校 姓名」，学校/姓名缺失时回退昵称/用户名。</summary>
+    private static string ProfileDisplay(LoginResult me)
+    {
+        if (!string.IsNullOrWhiteSpace(me.School) && !string.IsNullOrWhiteSpace(me.Name))
+            return $"{me.School.Trim()} {me.Name.Trim()}";
+        if (!string.IsNullOrWhiteSpace(me.Name)) return me.Name.Trim();
+        if (!string.IsNullOrWhiteSpace(me.School)) return me.School.Trim();
+        return string.IsNullOrWhiteSpace(me.Nickname) ? me.Username : me.Nickname;
     }
 
     private void ApplyAvatar(string? avatar)
@@ -134,6 +147,20 @@ public partial class MainWindow : Window
             AvatarImage.Visibility = Visibility.Collapsed;
             AvatarFallback.Visibility = Visibility.Visible;
         }
+    }
+
+    private async void OnLogout(object sender, RoutedEventArgs e)
+    {
+        if (_me is null) return;
+        var confirm = MessageBox.Show("确定要退出登录吗？", "退出登录",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        // 清除服务端会话与本地 token
+        await _auth.LogoutAsync();
+
+        // 退出登录后直接关闭主界面，下次启动再走登录流程（不回落为默认本地用户）
+        Close();
     }
 
     private async void OnEditNickname(object sender, RoutedEventArgs e)
@@ -222,24 +249,11 @@ public partial class MainWindow : Window
 
     private void UpdateCountdown()
     {
-        // 房间内：距结束倒计时 + 一次性结束提示
+        // 房间内：距结束倒计时；已结束则不弹窗，仅更新文字
         if (_roomContest is { } rc)
         {
             string remain = ContestPolicy.Remaining(rc.EndTime);
-            if (!string.IsNullOrEmpty(remain))
-            {
-                RoomCountdownText.Text = "距结束 " + remain;
-                _roomEndPrompted = false;
-            }
-            else
-            {
-                RoomCountdownText.Text = "已结束";
-                if (!_roomEndPrompted)
-                {
-                    _roomEndPrompted = true;
-                    MessageBox.Show("本场比赛已结束！", "比赛结束", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
+            RoomCountdownText.Text = string.IsNullOrEmpty(remain) ? "已结束" : "距结束 " + remain;
         }
         else
         {
@@ -480,27 +494,14 @@ public partial class MainWindow : Window
             MarkdownRenderer.Render(ContestListDesc, _currentContest.Description);
 
             bool ended = ContestPolicy.IsEnded(_currentContest.EndTime);
-            RegisterVirtualBox.IsChecked = ended;
-            RegisterVirtualBox.IsEnabled = false;   // 参赛身份由比赛时间窗决定，报名时锁定
+            bool started = ContestPolicy.IsStarted(_currentContest.StartTime);
+            RegisterVirtualBox.IsChecked = false;
+            // 打星参加仅在比赛开始前可选（是否可勾选由 SetContestEntryState 根据报名状态决定）
+            RegisterVirtualBox.Visibility = started ? Visibility.Collapsed : Visibility.Visible;
 
             // 查询报名状态
             var reg = await _judge.GetContestRegistrationAsync(_currentContest.Id, _nickname);
-            if (reg.Registered)
-            {
-                RegisterBtn.Visibility = Visibility.Collapsed;
-                EnterContestBtn.Visibility = Visibility.Visible;
-                EnterContestBtn.Content = ended ? "查看比赛" : "进入比赛";
-                RegisterVirtualBox.IsChecked = reg.Virtual;
-                RegisterHint.Text = reg.Virtual ? "已报名：虚拟参赛" : "已报名：正式参赛";
-            }
-            else
-            {
-                RegisterBtn.Visibility = Visibility.Visible;
-                RegisterBtn.Content = ended ? "虚拟报名" : "报名";
-                EnterContestBtn.Visibility = Visibility.Collapsed;
-                RegisterHint.Text = ended ? "比赛已结束，可虚拟报名补赛" : "报名后即可进入比赛";
-            }
-            RegisterBtn.IsEnabled = true;
+            SetContestEntryState(reg.Registered, reg.Virtual, started, ended);
         }
         catch (Exception ex)
         {
@@ -513,13 +514,13 @@ public partial class MainWindow : Window
         if (_currentContest is null) return;
         try
         {
-            bool virt = RegisterVirtualBox.IsChecked == true;
-            if (!ContestPolicy.CanSubmitOfficial(_currentContest.StartTime, _currentContest.EndTime, virt, out var reason))
+            bool started = ContestPolicy.IsStarted(_currentContest.StartTime);
+            if (started)
             {
-                // 未开始/进行中要求正式参赛；结束后只能虚拟
-                MessageBox.Show(reason);
+                MessageBox.Show("比赛已开始，无法报名，只能查看比赛");
                 return;
             }
+            bool virt = RegisterVirtualBox.IsChecked == true;
             RegisterBtn.IsEnabled = false;
             RegisterHint.Text = "报名中...";
             var reg = await _judge.RegisterContestAsync(_currentContest.Id, _nickname, virt);
@@ -529,16 +530,63 @@ public partial class MainWindow : Window
                 RegisterBtn.IsEnabled = true;
                 return;
             }
-            RegisterBtn.Visibility = Visibility.Collapsed;
-            EnterContestBtn.Visibility = Visibility.Visible;
             _roomVirtual = reg.Virtual;
-            RegisterHint.Text = reg.Virtual ? "已报名：虚拟参赛" : "已报名：正式参赛";
+            bool ended = ContestPolicy.IsEnded(_currentContest.EndTime);
+            SetContestEntryState(true, reg.Virtual, started, ended);
         }
         catch (Exception ex)
         {
             RegisterHint.Text = "报名失败：" + ex.Message;
             RegisterBtn.IsEnabled = true;
         }
+    }
+
+    // 根据报名状态与比赛阶段设置报名/进入按钮：
+    // 未开始→可报名（正式/打星）；已开始后未报名只能查看；已报名未开始→等待；已开始→进入比赛/查看比赛
+    private void SetContestEntryState(bool registered, bool virt, bool started, bool ended)
+    {
+        if (registered)
+        {
+            RegisterBtn.Visibility = Visibility.Collapsed;
+            EnterContestBtn.Visibility = Visibility.Visible;
+            RegisterVirtualBox.IsChecked = virt;
+            RegisterVirtualBox.IsEnabled = false;   // 已报名后身份锁定
+            if (!started)
+            {
+                EnterContestBtn.Content = "已报名";
+                EnterContestBtn.IsEnabled = false;
+            }
+            else if (ended)
+            {
+                EnterContestBtn.Content = "查看比赛";
+                EnterContestBtn.IsEnabled = true;
+            }
+            else
+            {
+                EnterContestBtn.Content = "进入比赛";
+                EnterContestBtn.IsEnabled = true;
+            }
+            RegisterHint.Text = virt ? "已报名：打星参加" : "已报名：正式参赛";
+        }
+        else if (!started)
+        {
+            // 报名窗口：仅比赛开始前可报名
+            RegisterBtn.Visibility = Visibility.Visible;
+            EnterContestBtn.Visibility = Visibility.Collapsed;
+            RegisterBtn.Content = "报名";
+            RegisterVirtualBox.IsEnabled = true;    // 报名时可选打星
+            RegisterHint.Text = "报名后即可进入比赛（比赛开始后无法报名）";
+        }
+        else
+        {
+            // 比赛已开始/已结束：未报名者不能再报名，只能查看
+            RegisterBtn.Visibility = Visibility.Collapsed;
+            EnterContestBtn.Visibility = Visibility.Visible;
+            EnterContestBtn.Content = "查看比赛";
+            EnterContestBtn.IsEnabled = true;
+            RegisterHint.Text = ended ? "比赛已结束，只能查看" : "比赛已开始，未报名仅可查看";
+        }
+        RegisterBtn.IsEnabled = true;
     }
 
     // 报名后进入工作台：此时才加载本场题目
@@ -548,12 +596,25 @@ public partial class MainWindow : Window
         try
         {
             var reg = await _judge.GetContestRegistrationAsync(_currentContest.Id, _nickname);
+            bool started = ContestPolicy.IsStarted(_currentContest.StartTime);
+            bool viewOnly = false;
             if (!reg.Registered)
             {
-                MessageBox.Show("请先报名再进入比赛");
+                // 未报名：比赛开始前不允许进入；开始后仅可查看
+                if (!started)
+                {
+                    MessageBox.Show("请先报名再进入比赛");
+                    return;
+                }
+                viewOnly = true;
+            }
+            else if (!started)
+            {
+                MessageBox.Show("比赛尚未开始，请稍后再进入");
                 return;
             }
             _roomVirtual = reg.Virtual;
+            _roomViewOnly = viewOnly;
             _roomContest = _currentContest;
 
             var all = await _judge.GetProblemsAsync() ?? new();
@@ -565,11 +626,14 @@ public partial class MainWindow : Window
             _contestProblemRows.Clear();
             for (int i = 0; i < probs.Count; i++)
                 _contestProblemRows.Add(MakeRow(probs[i], acSet, verdictMap, JudgeService.ProblemLabel(i)));
-            _roomEndPrompted = false;
 
             string status = ContestPolicy.Status(_roomContest.StartTime, _roomContest.EndTime);
-            RoomTitle.Text = $"【C{_roomContest.Id}】{_roomContest.Name}（{(_roomVirtual ? "虚拟参赛" : "正式参赛")}）";
-            ContestInfoText.Text = $"{_roomContest.StartTime} ~ {_roomContest.EndTime}  ·  {status}  ·  你正在以{(_roomVirtual ? "虚拟" : "正式")}身份参赛";
+            RoomTitle.Text = viewOnly
+                ? $"【C{_roomContest.Id}】{_roomContest.Name}（查看比赛）"
+                : $"【C{_roomContest.Id}】{_roomContest.Name}（{(_roomVirtual ? "打星参加" : "正式参赛")}）";
+            ContestInfoText.Text = viewOnly
+                ? $"{_roomContest.StartTime} ~ {_roomContest.EndTime}  ·  {status}  ·  未报名，仅可查看题面与榜单"
+                : $"{_roomContest.StartTime} ~ {_roomContest.EndTime}  ·  {status}  ·  你正在以{(_roomVirtual ? "打星" : "正式")}身份参赛";
 
             _currentContestProblem = null;
             ContestProblemList.SelectedIndex = -1;
@@ -592,6 +656,7 @@ public partial class MainWindow : Window
         _solveWindow?.Close();
         _solveWindow = null;
         _roomContest = null;
+        _roomViewOnly = false;
         _currentContestProblem = null;
         _contestProblemRows.Clear();
         BoardListView.ItemsSource = null;
@@ -642,6 +707,11 @@ public partial class MainWindow : Window
     private void ContestProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (_roomContest is null) return;
+        if (_roomViewOnly)
+        {
+            MessageBox.Show("未报名，仅可查看题面，无法提交");
+            return;
+        }
         if (ContestProblemList.SelectedItem is ProblemRow row)
             OpenSolveWindow(row.Problem, _roomContest, _roomVirtual);
     }
@@ -672,7 +742,7 @@ public partial class MainWindow : Window
         try
         {
             var board = await _judge.GetBoardAsync(_roomContest.Id);
-            // 正式/虚拟合并为一张榜：虚拟行无名次（显示 —），名字带 *，位置按成绩排列
+            // 正式/打星合并为一张榜：打星行无名次（显示 —），名字带 *，位置按成绩排列
             BoardListView.ItemsSource = ContestPolicy.MergeBoard(board)
                 .Select(e => new
                 {
@@ -705,7 +775,7 @@ public partial class MainWindow : Window
                     Username = s.Virtual ? s.Username + " *" : s.Username,
                     s.Verdict,
                     s.Detail,
-                    Kind = s.Virtual ? "虚拟" : "正式"
+                    Kind = s.Virtual ? "打星" : "正式"
                 })
                 .ToList();
             SubsHeaderText.Text = viewAll

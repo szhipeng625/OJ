@@ -1,10 +1,10 @@
 # Reproduce the client's startup sync to capture the actual error returned by ojcore.dll
 $ErrorActionPreference = "Stop"
 
-$dll = "D:/OJ/client/bin/Debug/net8.0-windows/ojcore.dll"
-$problemDir = "D:/OJ/client/bin/Debug/net8.0-windows/problems"
-$dataDir = "D:/OJ/client/bin/Debug/net8.0-windows/ojdata"
-$mwUrl = "http://47.253.41.10:8899"
+$dll = "D:/OJ/client/bin/Debug/native/ojcore.dll"
+$problemDir = "D:/OJ/client/bin/Debug/problems"
+$dataDir = "D:/OJ/client/bin/Debug/ojdata"
+$mwUrl = "https://47.253.41.10:8899"
 
 Add-Type -TypeDefinition @"
 using System;

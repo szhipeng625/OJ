@@ -320,22 +320,17 @@ static const char* do_judge(int problem_id, const char* code,
 
     std::string uname = (username && *username) ? username : "anonymous";
 
-    // 比赛提交先落 MySQL，用其 AUTO_INCREMENT id 作为本次提交 sid，
+    // 提交统一先落 MySQL（练习/比赛），用其 AUTO_INCREMENT id 作为本次提交 sid，
     // 保证「提交列表（MySQL id）」与「双击详情（LSM submission:{id}）」键一一对应。
     // 远端 LSM 的 INCR 目前不可靠（返回非递增），仅作 MySQL 不可用时的兜底。
     long long sid = 0;
     try {
-        if (contest_id > 0 && oj::mysql_available()) {
-            long long uid = 0;
-            if (!oj::mysql_user_id_by_name(uname, uid)) {
-                if (!oj::mysql_user_id_by_name("anonymous", uid)) uid = 0;
-            }
-            if (uid > 0) {
-                int totalMs = 0;
-                for (auto& c : cases) totalMs += (int)c.timeMs;
-                sid = oj::mysql_upsert_submission(uid, problem_id, contest_id, verdict, detail,
-                                                  totalMs, virtual_ != 0, tsBuf);
-            }
+        if (oj::mysql_available()) {
+            int totalMs = 0;
+            for (auto& c : cases) totalMs += (int)c.timeMs;
+            sid = oj::mysql_upsert_submission(problem_id, contest_id, verdict, detail,
+                                              totalMs, virtual_ != 0, tsBuf,
+                                              code ? code : "");
         }
     } catch (...) { /* MySQL 写入失败仅记录，判题结果照常返回 */ }
 
@@ -624,6 +619,12 @@ OJ_API const char* oj_get_submissions(int problem_id) {
 // 无记录返回 {"found":false}；有则 {"found":true,"id":..,"verdict":"..","code":"..",...}
 OJ_API const char* oj_get_user_solution(int problem_id, const char* username, int contest_id) {
     std::string uname = (username && *username) ? username : "anonymous";
+    // 优先从 MySQL 读取（含 AC 锁定代码）；失败或无记录回退 LSM
+    if (oj::mysql_available()) {
+        std::string out;
+        if (oj::mysql_user_solution(problem_id, contest_id, out) && !out.empty())
+            return dup(out);
+    }
     std::string val = latestSubmission(uname, problem_id, contest_id);
     if (val.empty()) return dup("{\"found\":false}");
     return dup("{\"found\":true," + val.substr(1));
@@ -1005,6 +1006,20 @@ OJ_API const char* oj_mysql_get_problem(int id) {
     return dup("{\"ok\":false,\"error\":\"查询失败\"}");
 }
 
+OJ_API const char* oj_mysql_list_contests(void) {
+    if (!oj::mysql_available()) return dup("[]");
+    std::string out;
+    if (oj::mysql_list_contests(out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_mysql_get_contest(int cid) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string out;
+    if (oj::mysql_get_contest(cid, out)) return dup(out);
+    return dup("{\"ok\":false,\"error\":\"比赛不存在\"}");
+}
+
 // ===== 生成器库（全局 generators 表） =====
 
 OJ_API const char* oj_mysql_list_generators(void) {
@@ -1040,6 +1055,12 @@ OJ_API const char* oj_mysql_update_generator(int id, const char* code, const cha
     if (oj::mysql_update_generator(id, code ? code : "", description ? description : "", err))
         return dup("{\"ok\":true}");
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_mysql_delete_generator(int id) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    if (oj::mysql_delete_generator(id)) return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"删除失败\"}");
 }
 
 OJ_API const char* oj_mysql_problem_generators(int problem_id) {
@@ -1123,47 +1144,58 @@ OJ_API const char* oj_debug_test(const char* code, int problem_id, int timeout_m
     return dup(json);
 }
 
-OJ_API const char* oj_register(const char* username, const char* password, const char* role) {
+OJ_API const char* oj_register(const char* username, const char* password,
+                               const char* email, const char* name, const char* school) {
     std::string err;
     if (oj::mysql_register(username ? username : "", password ? password : "",
-                           role ? role : "user", err))
+                           email ? email : "", name ? name : "",
+                           school ? school : "", err))
         return dup("{\"ok\":true}");
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
 OJ_API const char* oj_login(const char* username, const char* password) {
-    std::string token, role, uname, nickname, avatar, err;
+    std::string token, role, uname, nickname, avatar, email, name, school, err;
     long long uid = 0;
     if (oj::mysql_login(username ? username : "", password ? password : "",
-                        token, uid, role, uname, nickname, avatar, err)) {
+                        token, uid, role, uname, nickname, avatar,
+                        email, name, school, err)) {
         return dup(std::string("{\"ok\":true,\"token\":\"" + token + "\"")
                  + ",\"userId\":" + std::to_string(uid)
                  + ",\"role\":\"" + role + "\""
                  + ",\"username\":\"" + jsonEscape(uname) + "\""
                  + ",\"nickname\":\"" + jsonEscape(nickname) + "\""
-                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\"}");
+                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\""
+                 + ",\"email\":\"" + jsonEscape(email) + "\""
+                 + ",\"name\":\"" + jsonEscape(name) + "\""
+                 + ",\"school\":\"" + jsonEscape(school) + "\"}");
     }
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
 OJ_API const char* oj_whoami(const char* token) {
-    std::string role, uname, nickname, avatar, err;
+    std::string role, uname, nickname, avatar, email, name, school, err;
     long long uid = 0;
-    if (oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar, err)) {
+    if (oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar,
+                         email, name, school, err)) {
         return dup(std::string("{\"ok\":true,\"userId\":" + std::to_string(uid))
                  + ",\"role\":\"" + role + "\""
                  + ",\"username\":\"" + jsonEscape(uname) + "\""
                  + ",\"nickname\":\"" + jsonEscape(nickname) + "\""
-                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\"}");
+                 + ",\"avatar\":\"" + jsonEscape(avatar) + "\""
+                 + ",\"email\":\"" + jsonEscape(email) + "\""
+                 + ",\"name\":\"" + jsonEscape(name) + "\""
+                 + ",\"school\":\"" + jsonEscape(school) + "\"}");
     }
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
 // 更新当前用户资料（昵称 / 头像，头像为 data URL 或空串）
 OJ_API const char* oj_update_profile(const char* token, const char* nickname, const char* avatar) {
-    std::string role, uname, nk, av, err;
+    std::string role, uname, nk, av, email, name, school, err;
     long long uid = 0;
-    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nk, av, err)) {
+    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nk, av,
+                          email, name, school, err)) {
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err.empty() ? "会话无效或已过期" : err) + "\"}");
     }
     if (!oj::mysql_update_profile(uid, nickname ? nickname : "", avatar ? avatar : "", err))
@@ -1177,9 +1209,10 @@ OJ_API const char* oj_logout(const char* token) {
 }
 
 OJ_API const char* oj_list_users(const char* token) {
-    std::string role, uname, nickname, avatar, err;
+    std::string role, uname, nickname, avatar, email, name, school, err;
     long long uid = 0;
-    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar, err) || role != "admin") {
+    if (!oj::mysql_whoami(token ? token : "", uid, role, uname, nickname, avatar,
+                          email, name, school, err) || role != "admin") {
         return dup("{\"ok\":false,\"error\":\"需要 admin 权限\"}");
     }
     std::string out;

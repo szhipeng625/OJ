@@ -34,6 +34,29 @@ bool exists(const std::string& path) {
     return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
+// 递归删除目录（不借助 cmd，避免闪出控制台窗口）
+void removeTree(const std::string& dir) {
+    if (!exists(dir)) return;
+    std::string pattern = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            std::string name = fd.cFileName;
+            if (name == "." || name == "..") continue;
+            std::string full = dir + "\\" + name;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                removeTree(full);
+            else {
+                SetFileAttributesA(full.c_str(), FILE_ATTRIBUTE_NORMAL);
+                DeleteFileA(full.c_str());
+            }
+        } while (FindNextFileA(hFind, &fd));
+        FindClose(hFind);
+    }
+    RemoveDirectoryA(dir.c_str());
+}
+
 std::string jsonEscape(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 8);
@@ -352,7 +375,7 @@ AC_API const char* ac_gen_outputs(int id, const char* std_exe) {
             oj::RunOutcome r = oj::run_one(std_exe ? std_exe : "", inFile, outFile, 2000, 256ull * 1024 * 1024);
             std::string status = "OK";
             if (r.status == 1) status = "TLE";
-            else if (r.status == 2) status = "RE";
+            else if (r.status == 2) { const char* d = oj::crash_desc(r.exitCode); status = d ? std::string("RE:") + d : "RE"; }
             else if (r.status == 3) status = "SE";
             if (!first) json += ",";
             first = false;
@@ -443,10 +466,7 @@ AC_API const char* ac_publish(int id, const char* target_root) {
     CreateDirectoryA(dstRoot.c_str(), NULL);
     std::string dst = dstRoot + "\\" + std::to_string(id);
     // 目标已存在则先清空再复制，保证与题库一致
-    if (exists(dst)) {
-        std::string cmd = "rmdir /s /q \"" + dst + "\"";
-        system(cmd.c_str());
-    }
+    removeTree(dst);
     bool ok = copyDir(src, dst);
     if (!ok) {
         std::string err = "复制到 " + dst + " 失败";
@@ -566,10 +586,7 @@ AC_API const char* ac_contest_publish(int cid, const char* target_root) {
     }
     CreateDirectoryA(dstRoot.c_str(), NULL);
     std::string dst = dstRoot + "\\contests\\" + std::to_string(cid);
-    if (exists(dst)) {
-        std::string cmd = "rmdir /s /q \"" + dst + "\"";
-        system(cmd.c_str());
-    }
+    removeTree(dst);
     bool ok = copyDir(src, dst);
     if (!ok) {
         std::string err = "复制到 " + dst + " 失败";

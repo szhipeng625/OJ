@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   contest_id INT NOT NULL DEFAULT 0,        -- 0 = 练习提交；>0 = 比赛 id
   verdict VARCHAR(16) NOT NULL,             -- AC / WA / TLE / RE / CE ...
   detail TEXT,
+  code MEDIUMTEXT,                           -- 用户代码（AC 后锁定维护）
   time_ms INT,
   `virtual` TINYINT NOT NULL DEFAULT 0,       -- 1 = 虚拟参赛
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

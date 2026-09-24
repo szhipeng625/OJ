@@ -42,7 +42,9 @@ param(
     [int]$MysqlPort = 3306,
     [string]$MysqlUser = 'root',
     [string]$MysqlPass = '12345678',
-    [string]$MysqlDb = 'oj'
+    [string]$MysqlDb = 'oj',
+    # 中间层地址（生成 mysql_config.json 时写入 middlewareUrl，客户端/服务端统一走中间层）
+    [string]$MiddlewareUrl = 'https://47.253.41.10:8899'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,6 +76,7 @@ $OjcoreOut      = Join-Path $RepoRoot "client\ojcore\x64\$Configuration"
 $AuthorCoreOut  = Join-Path $RepoRoot "author\authorcore\bin\$Configuration"
 $DistClient     = Join-Path $RepoRoot 'dist'
 $DistAuthor     = Join-Path $RepoRoot 'dist\author'
+$OpenSslBin     = 'D:\OpenSSL-Win64\bin'
 
 # ---------- Clean ----------
 if ($Clean) {
@@ -146,12 +149,21 @@ if ($WantAuthor) {
 # ---------- 4. 补齐运行时原生依赖 ----------
 function Sync-NativeAssets([string]$targetDir, [switch]$IsAuthor) {
     if (-not (Test-Path $targetDir)) { Die "目标目录不存在：$targetDir" }
-    foreach ($dll in @('ojcore.dll', 'libmysql.dll')) {
+    foreach ($dll in @('ojcore.dll')) {
         $src = Join-Path $OjcoreOut $dll
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $targetDir $dll) -Force
         } else {
             Write-Host "  [警告] 缺少 $src，请先执行 -Core 构建。" -ForegroundColor Yellow
+        }
+    }
+    # OpenSSL 运行库（ojcore 走 HTTPS 时依赖）
+    foreach ($dll in @('libssl-3-x64.dll', 'libcrypto-3-x64.dll')) {
+        $src = Join-Path $OpenSslBin $dll
+        if (Test-Path $src) {
+            Copy-Item $src (Join-Path $targetDir $dll) -Force
+        } else {
+            Write-Host "  [警告] 缺少 $src（HTTPS 将不可用）" -ForegroundColor Yellow
         }
     }
     # authorcore.dll（服务端目录才需要）
@@ -169,30 +181,58 @@ function Sync-NativeAssets([string]$targetDir, [switch]$IsAuthor) {
             user = $MysqlUser
             pass = $MysqlPass
             db   = $MysqlDb
+            middlewareUrl = $MiddlewareUrl
         }
         ($cfgObj | ConvertTo-Json) | Set-Content -Path $cfg -Encoding UTF8
         Write-Host "  已生成本地 mysql_config.json（账号 $MysqlUser，库 $MysqlDb）"
     }
 }
 
+# 将 UI 程序集与原生 DLL 分层到子目录（ui/、native/），应用入口与配置留在根目录
+function Organize-LayeredOutput([string]$targetDir) {
+    if (-not (Test-Path $targetDir)) { return }
+    $uiDir     = Join-Path $targetDir 'ui'
+    $nativeDir = Join-Path $targetDir 'native'
+    New-Item -ItemType Directory -Force -Path $uiDir, $nativeDir | Out-Null
+
+    foreach ($f in @('HandyControl.dll', 'HandyControl.pdb', 'ICSharpCode.AvalonEdit.dll', 'Markdig.dll', 'OjEditorCore.dll', 'OjEditorCore.pdb')) {
+        $src = Join-Path $targetDir $f
+        if (Test-Path $src) { Move-Item $src (Join-Path $uiDir $f) -Force }
+    }
+    # HandyControl 卫星资源（本地化，<culture>\HandyControl.resources.dll）随主程序集移入 ui/
+    Get-ChildItem $targetDir -Directory | Where-Object {
+        Test-Path (Join-Path $_.FullName 'HandyControl.resources.dll')
+    } | ForEach-Object {
+        $dest = Join-Path $uiDir $_.Name
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        Move-Item $_.FullName $dest -Force
+    }
+    foreach ($f in @('ojcore.dll', 'authorcore.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll')) {
+        $src = Join-Path $targetDir $f
+        if (Test-Path $src) { Move-Item $src (Join-Path $nativeDir $f) -Force }
+    }
+}
+
 # WPF 输出目录（bin 下调试运行也需要原生 DLL）
-$ClientBin = Join-Path $RepoRoot "client\bin\$Configuration\net8.0-windows"
-$AuthorBin = Join-Path $RepoRoot "author\Author\bin\$Configuration\net8.0-windows"
+$ClientBin = Join-Path $RepoRoot "client\bin\$Configuration"
+$AuthorBin = Join-Path $RepoRoot "author\Author\bin\$Configuration"
 
 if ($Publish) {
     Write-Step '补齐运行时原生依赖'
     if ($WantClient) {
         Sync-NativeAssets $DistClient
+        Organize-LayeredOutput $DistClient
         Write-Host "客户端 -> $DistClient"
     }
     if ($WantAuthor) {
         Sync-NativeAssets $DistAuthor -IsAuthor
+        Organize-LayeredOutput $DistAuthor
         Write-Host "服务端 -> $DistAuthor"
     }
 } else {
     Write-Step '补齐 bin 目录原生依赖'
-    if ($WantClient -and (Test-Path $ClientBin)) { Sync-NativeAssets $ClientBin }
-    if ($WantAuthor -and (Test-Path $AuthorBin)) { Sync-NativeAssets $AuthorBin -IsAuthor }
+    if ($WantClient -and (Test-Path $ClientBin)) { Sync-NativeAssets $ClientBin; Organize-LayeredOutput $ClientBin }
+    if ($WantAuthor -and (Test-Path $AuthorBin)) { Sync-NativeAssets $AuthorBin -IsAuthor; Organize-LayeredOutput $AuthorBin }
 }
 
 Write-Host "`n全部完成 ✔（Configuration=$Configuration, Publish=$Publish）" -ForegroundColor Green

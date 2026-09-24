@@ -65,6 +65,9 @@ public static class OjCoreInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string code, [MarshalAs(UnmanagedType.LPUTF8Str)] string description);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_delete_generator(int id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_problem_generators(int problem_id);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -89,6 +92,12 @@ public static class OjCoreInterop
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_publish_contest(int cid,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string contest_json);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_list_contests();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_get_contest(int cid);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void oj_free_string(IntPtr s);
@@ -160,6 +169,12 @@ public static class OjCoreInterop
         lock (Lock) return Take(oj_mysql_update_generator(id, code, desc));
     }
 
+    /// <summary>删除生成器（并解除与所有题目的绑定）。</summary>
+    public static string DeleteGeneratorJson(int id)
+    {
+        lock (Lock) return Take(oj_mysql_delete_generator(id));
+    }
+
     public static string ProblemGeneratorsJson(int problemId)
     {
         lock (Lock) return Take(oj_mysql_problem_generators(problemId));
@@ -199,6 +214,18 @@ public static class OjCoreInterop
     public static string PublishContest(int cid, string contestJson)
     {
         lock (Lock) return Take(oj_mysql_publish_contest(cid, contestJson));
+    }
+
+    /// <summary>比赛列表（MySQL 云端）：[{"id":1,"name":"...","problemCount":3,"startTime":"...","endTime":"..."}, ...]</summary>
+    public static string ListContestsJson()
+    {
+        lock (Lock) return Take(oj_mysql_list_contests());
+    }
+
+    /// <summary>单场比赛详情（MySQL 云端）：{"ok":true,...} 或 {"ok":false,...}</summary>
+    public static string GetContestJson(int cid)
+    {
+        lock (Lock) return Take(oj_mysql_get_contest(cid));
     }
 
     public static string LoginJson(string u, string p)

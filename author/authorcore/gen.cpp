@@ -145,7 +145,7 @@ RunRedirect runRedirect(const std::string& exe, const std::string& args,
     std::string cmd = "\"" + exe + "\" " + args;
     std::vector<char> cmdBuf(cmd.begin(), cmd.end());
     cmdBuf.push_back('\0');
-    if (!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
+    if (!CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
                          workDir.empty() ? NULL : workDir.c_str(), &si, &pi)) {
         CloseHandle(hOut); CloseHandle(hErrRead); CloseHandle(hErrWrite);
         r.errText = "启动失败";

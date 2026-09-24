@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ApplicationIcon>..\..\assets\ACMOJ.ico</ApplicationIcon>
     <RootNamespace>author</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
@@ -20,6 +22,7 @@
   <!-- 公共 HandyControl 控件库 -->
   <ItemGroup>
     <ProjectReference Include="..\..\shared\HandyControl\HandyControl.csproj" />
+    <ProjectReference Include="..\..\shared\OjEditorCore\OjEditorCore.csproj" />
   </ItemGroup>
 
   <!-- NuGet 包 -->
@@ -30,6 +33,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Presentation\Highlighting\CppDarkPlus.xshd" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\ACMOJ.png" Link="Assets\ACMOJ.png" />
   </ItemGroup>
 
 </Project>

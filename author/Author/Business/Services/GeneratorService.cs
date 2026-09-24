@@ -78,6 +78,14 @@ public sealed class GeneratorService
             return new JobResult(ok, ok ? "描述已更新" : msg);
         });
 
+    /// <summary>删除生成器（从全局库删除，并解除与所有题目的绑定）。</summary>
+    public Task<JobResult> DeleteAsync(int id)
+        => _build.RunAsync(LibGate, () =>
+        {
+            var (ok, msg) = _db.Delete(id);
+            return new JobResult(ok, ok ? "已删除生成器" : msg);
+        });
+
     // ===== 绑定 / 解绑 =====
     public Task<JobResult> BindAsync(int problemId, int generatorId, int genCount)
         => _build.RunAsync(LibGate, () =>

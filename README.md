@@ -1,4 +1,4 @@
-﻿# OJ 在线判题系统
+﻿# ACMDOG
 
 WPF 客户端 + C++ 判题核心 + **远端 LSM 存储（RESP）**，全 C/S 一体化产品，全部用 Visual Studio 构建。
 

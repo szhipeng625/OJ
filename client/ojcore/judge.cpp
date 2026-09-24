@@ -64,6 +64,18 @@ static std::string normalize(const std::string& raw) {
     return out;
 }
 
+// 崩溃类退出码（NTSTATUS 异常码）→ 中文描述，便于区分段错误/除零等
+static const char* crashDesc(DWORD code) {
+    switch (code) {
+        case 0xC0000005: return "段错误（越界/空指针访问）";
+        case 0xC0000094: return "整数除零异常";
+        case 0xC00000FD: return "栈溢出";
+        case 0xC0000374: return "堆损坏";
+        case 0xC0000409: return "栈缓冲区溢出";
+        default: return nullptr;
+    }
+}
+
 // 运行一个 exe，重定向 stdin/stdout，限时/限内存。
 // status: 0=正常 1=TLE 2=崩溃/非零退出 3=启动失败
 struct RunOutcome { int status; DWORD exitCode; long long ms; };
@@ -114,7 +126,7 @@ static RunOutcome run_one(const std::string& exe, const std::string& inFile,
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
 
-    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
     if (!ok) {
         CloseHandle(hIn); CloseHandle(hOut);
         if (!bomCopy.empty()) DeleteFileA(bomCopy.c_str());
@@ -235,7 +247,11 @@ std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string&
         c.timeMs = r.ms;
         if (r.status == 3)      { c.verdict = "SE";  c.passed = false; c.info = genDesc; }
         else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; c.info = genDesc; }
-        else if (r.status == 2) { c.verdict = "RE";  c.passed = false; c.info = genDesc; }
+        else if (r.status == 2) {
+            c.verdict = "RE"; c.passed = false;
+            const char* cd = crashDesc(r.exitCode);
+            c.info = cd ? cd : (genDesc.empty() ? "运行时错误（非零退出）" : genDesc);
+        }
         else {
             std::string u = normalize(readAll(tempOut));
             std::string a = normalize(readAll(ansFile));
@@ -310,7 +326,7 @@ DebugResult debug_run(const std::string& workDir, const std::string& code,
 
     std::string cmd = "\"" + exe + "\"";
     std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
-    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
+    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
                                   workDir.empty() ? NULL : workDir.c_str(), &si, &pi);
     CloseHandle(hIn); CloseHandle(hOut); CloseHandle(hErr);
     if (!started) {
@@ -385,7 +401,7 @@ DebugTestResult debug_test(const std::string& workDir, const std::string& code,
 
     std::string cmd = "\"" + exe + "\"";
     std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
-    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, 0, NULL,
+    BOOL started = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
                                   workDir.empty() ? NULL : workDir.c_str(), &si, &pi);
     CloseHandle(hIn); CloseHandle(hOut); CloseHandle(hErr);
     if (!started) {

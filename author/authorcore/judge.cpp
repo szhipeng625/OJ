@@ -64,6 +64,18 @@ static std::string normalize(const std::string& raw) {
     return out;
 }
 
+// 崩溃类退出码（NTSTATUS 异常码）→ 中文描述，便于区分段错误/除零等
+const char* crash_desc(DWORD code) {
+    switch (code) {
+        case 0xC0000005: return "段错误（越界/空指针访问）";
+        case 0xC0000094: return "整数除零异常";
+        case 0xC00000FD: return "栈溢出";
+        case 0xC0000374: return "堆损坏";
+        case 0xC0000409: return "栈缓冲区溢出";
+        default: return nullptr;
+    }
+}
+
 // 运行一个 exe，重定向 stdin/stdout，限时/限内存。
 // status: 0=正常 1=TLE 2=崩溃/非零退出 3=启动失败
 RunOutcome run_one(const std::string& exe, const std::string& inFile,
@@ -113,7 +125,7 @@ RunOutcome run_one(const std::string& exe, const std::string& inFile,
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
 
-    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
     if (!ok) {
         CloseHandle(hIn); CloseHandle(hOut);
         if (!bomCopy.empty()) DeleteFileA(bomCopy.c_str());
@@ -194,7 +206,7 @@ std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string&
         c.timeMs = r.ms;
         if (r.status == 3)      { c.verdict = "SE"; c.passed = false; }
         else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; }
-        else if (r.status == 2) { c.verdict = "RE"; c.passed = false; }
+        else if (r.status == 2) { c.verdict = "RE"; c.passed = false; const char* d = crash_desc(r.exitCode); if (d) c.info = d; }
         else {
             std::string u = normalize(readAll(tempOut));
             std::string a = normalize(readAll(ansFile));

@@ -101,7 +101,9 @@ public static class OJInterop
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_register([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string p,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string role);
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string email,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string school);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_login([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
@@ -190,7 +192,8 @@ public static class OJInterop
 
     public static string InitMysqlSchemaJson() => PtrToString(oj_mysql_init_schema());
     public static string SyncProblemsJson() => PtrToString(oj_mysql_sync_problems());
-    public static string RegisterJson(string u, string p, string role) => PtrToString(oj_register(u, p, role));
+    public static string RegisterJson(string u, string p, string email, string name, string school)
+        => PtrToString(oj_register(u, p, email, name, school));
     public static string LoginJson(string u, string p) => PtrToString(oj_login(u, p));
     public static string WhoamiJson(string token) => PtrToString(oj_whoami(token));
     public static string UpdateProfileJson(string token, string nickname, string avatar)

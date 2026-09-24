@@ -179,13 +179,16 @@ public class ApiClient
                 j.TryGetProperty("username", out var un) ? un.GetString() ?? "" : "",
                 j.TryGetProperty("nickname", out var nn) ? nn.GetString() ?? "" : "",
                 j.TryGetProperty("avatar", out var av) ? av.GetString() ?? "" : "",
+                j.TryGetProperty("email", out var em) ? em.GetString() ?? "" : "",
+                j.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                j.TryGetProperty("school", out var sc) ? sc.GetString() ?? "" : "",
                 j.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "");
         });
 
-    public Task<bool> RegisterAsync(string u, string p, string role)
+    public Task<bool> RegisterAsync(string u, string p, string email, string name, string school)
         => Task.Run(() =>
         {
-            var j = JsonDocument.Parse(OJInterop.RegisterJson(u, p, role)).RootElement;
+            var j = JsonDocument.Parse(OJInterop.RegisterJson(u, p, email, name, school)).RootElement;
             return j.GetProperty("ok").GetBoolean();
         });
 
@@ -201,6 +204,9 @@ public class ApiClient
                 j.TryGetProperty("username", out var un) ? un.GetString() ?? "" : "",
                 j.TryGetProperty("nickname", out var nn) ? nn.GetString() ?? "" : "",
                 j.TryGetProperty("avatar", out var av) ? av.GetString() ?? "" : "",
+                j.TryGetProperty("email", out var em) ? em.GetString() ?? "" : "",
+                j.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                j.TryGetProperty("school", out var sc) ? sc.GetString() ?? "" : "",
                 j.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "");
         });
 

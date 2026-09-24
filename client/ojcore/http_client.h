@@ -12,7 +12,7 @@ struct HttpResp {
     std::string body;
 };
 
-// 发起 HTTP 请求（GET/POST，仅明文 HTTP）。token 非空时带 Authorization: Bearer。
+// 发起 HTTP 请求（GET/POST，支持 http/https）。token 非空时带 Authorization: Bearer。
 inline bool http_request(const std::string& method, const std::string& baseUrl,
                          const std::string& pathQuery, const std::string& body,
                          const std::string& token, HttpResp& out, std::string& err) {
@@ -20,6 +20,10 @@ inline bool http_request(const std::string& method, const std::string& baseUrl,
     cli.set_connection_timeout(8, 0);
     cli.set_read_timeout(8, 0);
     cli.set_write_timeout(8, 0);
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    // 服务端为自签证书，跳过证书校验
+    cli.enable_server_certificate_verification(false);
+#endif
 
     httplib::Headers headers;
     if (!token.empty()) headers.emplace("Authorization", "Bearer " + token);

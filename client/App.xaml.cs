@@ -1,4 +1,6 @@
 ﻿using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using System.Windows;
 using System.Windows.Threading;
 using client.Business.Services;
@@ -11,6 +13,29 @@ namespace client;
 public partial class App : Application
 {
     private static readonly string LogPath = Path.Combine(AppContext.BaseDirectory, "startup.log");
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectory(string lpPathName);
+
+    // 分层目录：UI 程序集放 ui/，原生 DLL 放 native/；目录不存在时自动回退到 exe 根目录。
+    static App()
+    {
+        string baseDir = AppContext.BaseDirectory;
+        string nativeDir = Path.Combine(baseDir, "native");
+        string uiDir = Path.Combine(baseDir, "ui");
+
+        // 原生 DLL（ojcore/OpenSSL）统一从 native/ 加载，含其传递依赖
+        if (Directory.Exists(nativeDir))
+            SetDllDirectory(nativeDir);
+
+        // 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 ui/ 加载
+        AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+        {
+            if (name.Name is null) return null;
+            string p = Path.Combine(uiDir, name.Name + ".dll");
+            return File.Exists(p) ? ctx.LoadFromAssemblyPath(p) : null;
+        };
+    }
 
     private static void Log(string msg)
     {

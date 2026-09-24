@@ -89,6 +89,8 @@
                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                             <Button Content="生成标准答案" Click="OnGenerateAnswers" Width="130" Margin="0,0,6,0"
                                     ToolTip="编译标程 → 运行标程为所有 .in 生成对应 .out"/>
+                            <Button Content="导入选中数据为样例" Click="OnImportSampleFromSelected" Margin="0,0,6,0"
+                                    ToolTip="将下方列表中选中一行的输入/输出导入为题目的样例（sample.in / sample.out）"/>
                             <TextBlock Text="勾选需要作为题目样例的输入/输出，自动上传到数据库" Foreground="#888" VerticalAlignment="Center"/>
                         </WrapPanel>
                         <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
@@ -215,6 +217,8 @@
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                         <Button Content="保存代码" Width="90" Click="OnGenSave"/>
                                         <Button Content="编译" Width="70" Margin="6,0,0,0" Click="OnGenCompile"/>
+                                        <Button Content="删除生成器" Width="96" Margin="6,0,0,0" Click="OnGenDelete"
+                                                Foreground="#D9534F" ToolTip="从全局库删除该生成器，并解除与所有题目的绑定"/>
                                         <Button Content="关闭编辑器" Width="96" Margin="6,0,0,0" Click="OnCloseGenEdit"/>
                                     </StackPanel>
                                 </DockPanel>

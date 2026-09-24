@@ -4,13 +4,15 @@
 import base64
 import io
 import json
+import ssl
 import sys
 import urllib.request
 
 from PIL import Image
 
-MW = "http://47.253.41.10:8899"
-SESSION = r"d:\OJ\client\bin\Debug\net8.0-windows\ojdata\session.txt"
+MW = "https://47.253.41.10:8899"
+_ctx = ssl._create_unverified_context()
+SESSION = r"d:\OJ\client\bin\Debug\ojdata\session.txt"
 
 tok = open(SESSION, encoding="utf-8").read().strip()
 if not tok:
@@ -24,7 +26,7 @@ if os.path.exists(whoami_file):
     raw = open(whoami_file, encoding="utf-8").read()
 else:
     req = urllib.request.Request(MW + "/api/whoami", headers={"Authorization": "Bearer " + tok})
-    raw = urllib.request.urlopen(req, timeout=180).read().decode("utf-8")
+    raw = urllib.request.urlopen(req, timeout=180, context=_ctx).read().decode("utf-8")
 j = json.loads(raw)
 if not j.get("ok"):
     print("whoami failed:", j)
@@ -53,5 +55,5 @@ req2 = urllib.request.Request(
     method="POST",
     headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok},
 )
-resp = urllib.request.urlopen(req2, timeout=180)
+resp = urllib.request.urlopen(req2, timeout=180, context=_ctx)
 print("profile response:", resp.read().decode("utf-8"))

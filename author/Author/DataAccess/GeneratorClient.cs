@@ -60,7 +60,12 @@ public sealed class GeneratorClient
         if (r.Contains("\"ok\":true")) return (true, "已保存");
         return (false, ParseError(r));
     }
-
+    public (bool Ok, string Message) Delete(int id)
+    {
+        string r = OjCoreInterop.DeleteGeneratorJson(id);
+        if (r.Contains("\"ok\":true")) return (true, "已删除生成器");
+        return (false, ParseError(r));
+    }
     public (bool Ok, string Message) Bind(int problemId, int generatorId, int genCount)
     {
         string r = OjCoreInterop.BindGeneratorJson(problemId, generatorId, genCount);

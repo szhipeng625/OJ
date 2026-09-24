@@ -1,6 +1,6 @@
 # Connectivity & stability test for OJ middleware (HTTP mode)
 $ErrorActionPreference = "Continue"
-$MW = "http://47.253.41.10:8899"
+$MW = "https://47.253.41.10:8899"
 $user = "conn_test_" + (Get-Date -Format "MMddHHmmss")
 $pass = "test123456"
 
@@ -8,16 +8,16 @@ function Post-Json($path, $obj, $token) {
     $file = "$env:TEMP\oj_body.json"
     ($obj | ConvertTo-Json -Compress) | Set-Content -Path $file -Encoding ascii -NoNewline
     if ($token) {
-        return curl.exe -s -m 15 -X POST "$MW$path" -H "Content-Type: application/json" -H "Authorization: Bearer $token" --data-binary "@$file"
+        return curl.exe -sk -m 15 -X POST "$MW$path" -H "Content-Type: application/json" -H "Authorization: Bearer $token" --data-binary "@$file"
     } else {
-        return curl.exe -s -m 15 -X POST "$MW$path" -H "Content-Type: application/json" --data-binary "@$file"
+        return curl.exe -sk -m 15 -X POST "$MW$path" -H "Content-Type: application/json" --data-binary "@$file"
     }
 }
 function Get-Api($path, $token) {
     if ($token) {
-        return curl.exe -s -m 15 "$MW$path" -H "Authorization: Bearer $token"
+        return curl.exe -sk -m 15 "$MW$path" -H "Authorization: Bearer $token"
     } else {
-        return curl.exe -s -m 15 "$MW$path"
+        return curl.exe -sk -m 15 "$MW$path"
     }
 }
 
@@ -82,14 +82,14 @@ Post-Json "/api/lsm/incr" @{key=$ik} $tok
 "========== 9. Unauthorized LSM (should fail ok=false) =========="
 $file = "$env:TEMP\oj_body.json"
 (@{key="x"} | ConvertTo-Json -Compress) | Set-Content -Path $file -Encoding ascii -NoNewline
-curl.exe -s -m 15 -X POST "$MW/api/lsm/get" -H "Content-Type: application/json" --data-binary "@$file"
+curl.exe -sk -m 15 -X POST "$MW/api/lsm/get" -H "Content-Type: application/json" --data-binary "@$file"
 ""
 ""
 
 "========== 10. Stability: 20x contests + 20x lsm/get loop =========="
 $fail = 0
 for ($i=1; $i -le 20; $i++) {
-    $c = curl.exe -s -o NUL -w "%{http_code}" -m 15 "$MW/api/contests"
+    $c = curl.exe -sk -o NUL -w "%{http_code}" -m 15 "$MW/api/contests"
     if ($c -ne "200") { $fail++; "contests iter $i -> HTTP $c" }
 }
 "contests loop: 20 requests, $fail failures"
@@ -103,6 +103,6 @@ for ($i=1; $i -le 20; $i++) {
 ""
 
 "========== 11. Cleanup: logout =========="
-curl.exe -s -m 15 -X POST "$MW/api/logout" -H "Content-Type: application/json" -H "Authorization: Bearer $tok" -d '{}'
+curl.exe -sk -m 15 -X POST "$MW/api/logout" -H "Content-Type: application/json" -H "Authorization: Bearer $tok" -d '{}'
 ""
 "done. test user: $user"

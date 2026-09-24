@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ApplicationIcon>..\assets\ACMOJ.ico</ApplicationIcon>
     <RootNamespace>client</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>AnyCPU;ARM64</Platforms>
@@ -14,6 +16,7 @@
   <!-- C++ 判题核心 DLL 复制见下方 CopyNativeLibraries（构建顺序由 client.sln 的项目依赖保证） -->
   <ItemGroup>
     <ProjectReference Include="..\shared\HandyControl\HandyControl.csproj" />
+    <ProjectReference Include="..\shared\OjEditorCore\OjEditorCore.csproj" />
   </ItemGroup>
 
   <!-- NuGet 包 -->
@@ -38,6 +41,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Presentation\Highlighting\CppDarkPlus.xshd" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\assets\ACMOJ.png" Link="Assets\ACMOJ.png" />
   </ItemGroup>
 
 </Project>

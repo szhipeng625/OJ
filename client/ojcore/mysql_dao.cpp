@@ -37,8 +37,24 @@ void WriteFileBin(const std::string& path, const std::string& content) {
 
 void RemoveDir(const std::string& dir) {
     if (GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES) return;
-    std::string cmd = "rmdir /s /q \"" + dir + "\"";
-    system(cmd.c_str());
+    std::string pattern = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            std::string name = fd.cFileName;
+            if (name == "." || name == "..") continue;
+            std::string full = dir + "\\" + name;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                RemoveDir(full);
+            } else {
+                SetFileAttributesA(full.c_str(), FILE_ATTRIBUTE_NORMAL);
+                DeleteFileA(full.c_str());
+            }
+        } while (FindNextFileA(hFind, &fd));
+        FindClose(hFind);
+    }
+    RemoveDirectoryA(dir.c_str());
 }
 
 bool ExistsFile(const std::string& p) {
@@ -401,8 +417,10 @@ bool mysql_init_schema(std::string& err) {
 
 // ---------- 认证 ----------
 bool mysql_register(const std::string& username, const std::string& password,
-                    const std::string& role, std::string& err) {
-    json b{{"username", username}, {"password", password}, {"role", role.empty() ? "user" : role}};
+                    const std::string& email, const std::string& name,
+                    const std::string& school, std::string& err) {
+    json b{{"username", username}, {"password", password},
+           {"email", email}, {"name", name}, {"school", school}};
     std::string resp, e;
     if (!mw_req("POST", "/api/register", b.dump(), resp, e)) { err = e; return false; }
     return mw_ok(resp, "注册失败", err);
@@ -411,7 +429,9 @@ bool mysql_register(const std::string& username, const std::string& password,
 bool mysql_login(const std::string& username, const std::string& password,
                  std::string& out_token, long long& out_user_id,
                  std::string& out_role, std::string& out_username,
-                 std::string& out_nickname, std::string& out_avatar, std::string& err) {
+                 std::string& out_nickname, std::string& out_avatar,
+                 std::string& out_email, std::string& out_name,
+                 std::string& out_school, std::string& err) {
     json b{{"username", username}, {"password", password}};
     std::string resp, e;
     if (!mw_req("POST", "/api/login", b.dump(), resp, e)) { err = e; return false; }
@@ -423,13 +443,18 @@ bool mysql_login(const std::string& username, const std::string& password,
     out_username = jstr(j, "username");
     out_nickname = jstr(j, "nickname");
     out_avatar = jstr(j, "avatar");
+    out_email = jstr(j, "email");
+    out_name = jstr(j, "name");
+    out_school = jstr(j, "school");
     g_middleware_token = out_token;
     return !out_token.empty();
 }
 
 bool mysql_whoami(const std::string& token, long long& out_user_id,
                   std::string& out_role, std::string& out_username,
-                  std::string& out_nickname, std::string& out_avatar, std::string& err) {
+                  std::string& out_nickname, std::string& out_avatar,
+                  std::string& out_email, std::string& out_name,
+                  std::string& out_school, std::string& err) {
     g_middleware_token = token;
     std::string resp, e;
     if (!mw_req("GET", "/api/whoami", "", resp, e)) { err = e; return false; }
@@ -440,6 +465,9 @@ bool mysql_whoami(const std::string& token, long long& out_user_id,
     out_username = jstr(j, "username");
     out_nickname = jstr(j, "nickname");
     out_avatar = jstr(j, "avatar");
+    out_email = jstr(j, "email");
+    out_name = jstr(j, "name");
+    out_school = jstr(j, "school");
     return true;
 }
 
@@ -460,13 +488,14 @@ bool mysql_update_profile(long long user_id, const std::string& nickname,
 }
 
 // ---------- 提交 / 进度 / 榜单 ----------
-long long mysql_upsert_submission(long long user_id, int problem_id, int contest_id,
+long long mysql_upsert_submission(int problem_id, int contest_id,
                                   const std::string& verdict, const std::string& detail,
-                                  int time_ms, bool virt, const std::string& ts) {
-    (void)user_id;
+                                  int time_ms, bool virt, const std::string& ts,
+                                  const std::string& code) {
     int cid = contest_id > 0 ? contest_id : 0;
     json b{{"problemId", problem_id}, {"contestId", cid}, {"verdict", verdict},
-           {"detail", detail}, {"timeMs", time_ms}, {"virtual", virt}, {"ts", ts}};
+           {"detail", detail}, {"timeMs", time_ms}, {"virtual", virt}, {"ts", ts},
+           {"code", code}};
     std::string resp, e;
     if (!mw_req("POST", "/api/submit", b.dump(), resp, e)) return 0;
     try {
@@ -493,6 +522,16 @@ bool mysql_user_progress(const std::string& username, int contest_id, std::strin
     if (!mw_req("GET", "/api/progress?username=" + UrlEncode(username) + "&cid=" + std::to_string(contest_id),
                 "", resp, e)) return false;
     if (resp.empty() || resp[0] != '[') return false;
+    out_json = resp;
+    return true;
+}
+
+bool mysql_user_solution(int problem_id, int contest_id, std::string& out_json) {
+    std::string q = "/api/user_solution?problemId=" + std::to_string(problem_id)
+        + "&contestId=" + std::to_string(contest_id);
+    std::string resp, e;
+    if (!mw_req("GET", q, "", resp, e)) return false;
+    if (resp.empty()) return false;
     out_json = resp;
     return true;
 }
@@ -592,6 +631,51 @@ bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string&
     return mw_ok(resp, "发布比赛失败", err);
 }
 
+bool mysql_list_contests(std::string& out_json) {
+    std::string resp, e;
+    if (!mw_req("GET", "/api/contests", "", resp, e)) return false;
+    try {
+        json arr = json::parse(resp);
+        json out = json::array();
+        if (arr.is_array()) {
+            for (auto& c : arr) {
+                int cid = c.value("id", 0);
+                std::string content = c.value("content", "");
+                if (cid <= 0 || content.empty()) continue;
+                try {
+                    json cc = json::parse(content);
+                    auto p = cc.value("problems", json::array());
+                    int pc = p.is_array() ? (int)p.size() : 0;
+                    out.push_back({{"id", cid}, {"name", cc.value("name", "")},
+                                   {"problemCount", pc},
+                                   {"startTime", cc.value("startTime", "")},
+                                   {"endTime", cc.value("endTime", "")}});
+                } catch (...) { continue; }
+            }
+        }
+        out_json = out.dump();
+        return true;
+    } catch (...) { return false; }
+}
+
+bool mysql_get_contest(int cid, std::string& out_json) {
+    std::string resp, e;
+    if (!mw_req("GET", "/api/contest?id=" + std::to_string(cid), "", resp, e)) return false;
+    try {
+        json j = json::parse(resp);
+        if (!j.value("ok", false)) return false;
+        std::string content = j.value("content", "");
+        if (content.empty()) return false;
+        json cc = json::parse(content);
+        out_json = (json{{"ok", true}, {"id", cid}, {"name", cc.value("name", "")},
+                         {"description", cc.value("description", "")},
+                         {"startTime", cc.value("startTime", "")},
+                         {"endTime", cc.value("endTime", "")},
+                         {"problems", cc.value("problems", json::array())}}).dump();
+        return true;
+    } catch (...) { return false; }
+}
+
 bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err) {
     return middleware_sync_problems(problem_dir, server_root, err);
 }
@@ -683,6 +767,13 @@ bool mysql_update_generator(int id, const std::string& code, const std::string& 
     std::string resp, e;
     if (!mw_req("POST", "/api/generator/update", b.dump(), resp, e)) { err = e; return false; }
     return mw_ok(resp, "更新生成器失败", err);
+}
+
+bool mysql_delete_generator(int id) {
+    json b{{"id", id}};
+    std::string resp, e;
+    if (!mw_req("POST", "/api/generator/delete", b.dump(), resp, e)) return false;
+    return mw_ok(resp, "删除生成器失败", e);
 }
 
 bool mysql_problem_generators(int problem_id, std::string& out_json) {

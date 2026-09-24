@@ -13,6 +13,8 @@ using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 using System.IO;
 using System.Xml;
+using System.Windows.Threading;
+using OjEditorCore;
 
 namespace client.Presentation.Controls
 {
@@ -121,32 +123,7 @@ namespace client.Presentation.Controls
             ['{'] = "}", ['('] = ")", ['['] = "]", ['"'] = "\"", ['\''] = "'"
         };
 
-        // C++ 基础语法补全项（轻量：只保留基础关键字与常用语句）
-        private static readonly List<CompletionData> BasicKeywords = new()
-        {
-            // 基础类型 / 修饰
-            new("int", "整型"), new("long", "长整型"), new("short", "短整型"),
-            new("double", "双精度浮点"), new("float", "单精度浮点"),
-            new("char", "字符型"), new("bool", "布尔型"), new("void", "空类型"),
-            new("auto", "自动类型推导"), new("const", "常量修饰"), new("static", "静态修饰"),
-            // 控制流
-            new("return", "返回"), new("if", "if 语句"), new("else", "else 分支"),
-            new("for", "for 循环"), new("while", "while 循环"), new("do", "do-while 循环"),
-            new("switch", "switch 语句"), new("case", "case 分支"), new("default", "默认分支"),
-            new("break", "跳出循环"), new("continue", "继续循环"), new("goto", "跳转"),
-            // 结构
-            new("namespace", "命名空间"), new("using", "using 声明"),
-            new("class", "类定义"), new("struct", "结构体"), new("enum", "枚举"),
-            new("template", "模板"), new("typedef", "类型别名"), new("typename", "类型名"),
-            new("public", "公有"), new("private", "私有"), new("protected", "保护"),
-            // 表达式 / 内存
-            new("new", "动态分配"), new("delete", "释放内存"), new("sizeof", "大小运算符"),
-            new("this", "当前对象指针"), new("nullptr", "空指针"),
-            new("true", "真"), new("false", "假"),
-            // 常用
-            new("cin", "std::cin 标准输入"), new("cout", "std::cout 标准输出"),
-            new("endl", "std::endl 换行"), new("std", "std 命名空间"),
-        };
+        // C++ 补全规则统一由 OjEditorCore.CppCompletionEngine 提供（关键字 + 用户自定义标识符）
 
         private void TextArea_TextEntering(object sender, TextCompositionEventArgs e)
         {
@@ -166,10 +143,13 @@ namespace client.Presentation.Controls
 
             if (_completionWindow != null)
             {
-                if (!char.IsLetterOrDigit(e.Text[0]) && e.Text[0] != '_')
+                if (char.IsLetterOrDigit(e.Text[0]) || e.Text[0] == '_')
                 {
-                    _completionWindow.CompletionList.RequestInsertion(e);
+                    // 让字符先写入，再按新前缀刷新；无匹配时自动关闭
+                    Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(RefreshCompletion));
+                    return;
                 }
+                _completionWindow.CompletionList.RequestInsertion(e);
                 return;
             }
 
@@ -255,33 +235,54 @@ namespace client.Presentation.Controls
             ta.Caret.Offset = offset + nl.Length + indent.Length;
         }
 
-        private void ShowCompletion()
+        private (string prefix, int startOffset, List<CompletionItem> matches) ComputeCompletion()
         {
             var textArea = Editor.TextArea;
-            var caretOffset = textArea.Caret.Offset;
-            var line = textArea.Document.GetLineByOffset(caretOffset);
-            var lineText = textArea.Document.GetText(line.Offset, caretOffset - line.Offset);
+            int caret = textArea.Caret.Offset;
+            var line = textArea.Document.GetLineByOffset(caret);
+            string lineText = textArea.Document.GetText(line.Offset, caret - line.Offset);
 
             // 找到当前单词起始
             int wordStart = lineText.Length;
             while (wordStart > 0 && (char.IsLetterOrDigit(lineText[wordStart - 1]) || lineText[wordStart - 1] == '_' || lineText[wordStart - 1] == '#'))
                 wordStart--;
-            var prefix = lineText.Substring(wordStart);
-            if (prefix.Length == 0) return;
+            string prefix = lineText.Substring(wordStart);
+            var matches = prefix.Length == 0
+                ? new List<CompletionItem>()
+                : CppCompletionEngine.GetCompletions(textArea.Document.Text, prefix, 200);
+            return (prefix, line.Offset + wordStart, matches);
+        }
 
-            var matches = BasicKeywords
-                     .Where(c => c.Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                     .Take(200)
-                     .ToList();
+        private void RefreshCompletion()
+        {
+            if (_completionWindow == null) return;
+            var (prefix, _, matches) = ComputeCompletion();
+            if (matches.Count == 0)
+            {
+                _completionWindow.Close();
+                _completionWindow = null;
+                return;
+            }
+            _completionWindow.CompletionList.CompletionData.Clear();
+            foreach (var item in matches)
+                _completionWindow.CompletionList.CompletionData.Add(item);
+            _completionWindow.CompletionList.SelectItem(prefix);
+        }
+
+        private void ShowCompletion()
+        {
+            var (prefix, startOffset, matches) = ComputeCompletion();
             if (matches.Count == 0) return;
 
-            var window = new CompletionWindow(textArea)
+            var window = new CompletionWindow(Editor.TextArea)
             {
                 Width = 320,
                 Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30)),
                 Foreground = Brushes.White,
-                StartOffset = line.Offset + wordStart,   // ★ 关键
+                StartOffset = startOffset,
+                CloseWhenCaretAtBeginning = false,
             };
+            window.CompletionList.IsFiltering = false;   // 手动过滤：支持动态变量与空列表自动关闭
             window.CompletionList.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C));
             window.CompletionList.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30));
             window.CompletionList.Foreground = Brushes.White;
@@ -289,31 +290,10 @@ namespace client.Presentation.Controls
             foreach (var item in matches)
                 window.CompletionList.CompletionData.Add(item);
 
-            window.CompletionList.SelectItem(prefix);    // ★ 添加后再选中
-
+            window.CompletionList.SelectItem(prefix);
             window.Closed += (s, e) => { if (_completionWindow == window) _completionWindow = null; };
             _completionWindow = window;
             window.Show();
-        }
-    }
-
-    public class CompletionData : ICompletionData
-    {
-        public string Text { get; }
-        public object Content => Text;
-        public object Description { get; }
-        public double Priority => 0;
-        public System.Windows.Media.ImageSource? Image => null;
-
-        public CompletionData(string text, string description)
-        {
-            Text = text;
-            Description = description;
-        }
-
-        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
-        {
-            textArea.Document.Replace(completionSegment, Text);
         }
     }
 }

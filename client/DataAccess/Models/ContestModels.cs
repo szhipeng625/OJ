@@ -9,10 +9,10 @@ public record ContestDetail(int Id, string Name, string Description, string Star
 /// <summary>榜单单行</summary>
 public record BoardRow(int Rank, string Username, int Solved, long Penalty);
 
-/// <summary>榜单：正式榜 + 虚拟参赛榜</summary>
+/// <summary>榜单：正式榜 + 打星榜</summary>
 public record BoardData(List<BoardRow> Official, List<BoardRow> Virtual);
 
-/// <summary>合并榜单一行：虚拟参赛者 Rank=0（不显示名次），但行位置按成绩排列</summary>
+/// <summary>合并榜单一行：打星参赛者 Rank=0（不显示名次），但行位置按成绩排列</summary>
 public record BoardEntry(int Rank, string Username, int Solved, long Penalty, bool Virtual);
 
 /// <summary>比赛提交记录一行（列表摘要，不含代码/测试点；双击时按 Id 拉取详情）</summary>

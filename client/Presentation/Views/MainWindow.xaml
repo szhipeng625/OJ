@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:hc="https://handyorg.github.io/handycontrol"
         xmlns:controls="clr-namespace:client.Presentation.Controls"
-        Title="OJ 在线判题系统" Height="780" Width="1280"
+        Title="ACMDOG" Height="780" Width="1280"
+        Icon="pack://application:,,,/Assets/ACMOJ.png"
         WindowStartupLocation="CenterScreen"
         Background="#FFF7F8FA">
     <Grid>
@@ -15,15 +16,23 @@
         <!-- 顶部标题栏 -->
         <Border Grid.Row="0" Background="#2D7DF6" Padding="18,12">
             <DockPanel LastChildFill="False">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="&#xE0E6;" FontFamily="Segoe MDL2 Assets" Foreground="White"
-                               FontSize="20" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="OJ 在线判题系统" Foreground="White" FontSize="18" FontWeight="Bold"/>
-                </StackPanel>
-                <hc:Badge x:Name="NickBadge" HorizontalAlignment="Right" VerticalAlignment="Center"
+                <Button x:Name="LogoutBtn" Content="退出登录" DockPanel.Dock="Right" Width="84" Height="30"
+                        VerticalAlignment="Center" Margin="12,0,0,0" Visibility="Collapsed"
+                        Background="#FF33507A" Foreground="White" Click="OnLogout"/>
+                <hc:Badge x:Name="NickBadge" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
                           Background="#FF33507A" Text="未登录" Margin="0,0,10,0"/>
-                <hc:Badge x:Name="ConnBadge" HorizontalAlignment="Right" VerticalAlignment="Center"
+                <hc:Badge x:Name="ConnBadge" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
                           Background="#FF5A6172" Text="未连接"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="26" Height="26" CornerRadius="13" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <Border.Clip>
+                            <EllipseGeometry Center="13,13" RadiusX="13" RadiusY="13"/>
+                        </Border.Clip>
+                        <Image Source="pack://application:,,,/Assets/ACMOJ.png" Stretch="UniformToFill"
+                               Width="26" Height="26" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                    <TextBlock Text="ACMDOG" Foreground="White" FontSize="18" FontWeight="Bold"/>
+                </StackPanel>
             </DockPanel>
         </Border>
 
@@ -204,7 +213,7 @@
                                         Padding="10" Margin="0,10,0,0">
                                     <StackPanel>
                                         <CheckBox x:Name="RegisterVirtualBox" Margin="0,2"
-                                                  Content="虚拟参赛（比赛结束后补赛，不计正式排名）"/>
+                                                  Content="打星参加（不计正式排名）"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                             <Button x:Name="RegisterBtn" Content="报名"
                                                     Style="{StaticResource ButtonPrimary}"
@@ -325,7 +334,7 @@
                             <DockPanel>
                                 <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
                                     <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
-                                               Text="排行榜（带 * 为虚拟参赛者，不占正式名次，位置按成绩排列）"/>
+                                               Text="排行榜（带 * 为打星参赛者，不占正式名次，位置按成绩排列）"/>
                                     <Button Content="刷新" Width="70" Height="30" HorizontalAlignment="Right"
                                             Click="OnRefreshBoard"/>
                                 </Grid>

@@ -1,6 +1,6 @@
 # Verify lazy data generation: sync must NOT generate data; ensure_problem_data must.
 $ErrorActionPreference = "Stop"
-$dll = "D:/OJ/client/bin/Debug/net8.0-windows/ojcore.dll"
+$dll = "D:/OJ/client/bin/Debug/native/ojcore.dll"
 $base = "$env:TEMP\oj_lazy_test"
 $problemDir = "$base\problems"
 $dataDir = "$base\ojdata"
@@ -33,7 +33,7 @@ function Take($p) {
     return [System.Text.Encoding]::UTF8.GetString($b)
 }
 
-[OJ]::oj_init_middleware("http://47.253.41.10:8899", $problemDir, $dataDir) | Out-Null
+[OJ]::oj_init_middleware("https://47.253.41.10:8899", $problemDir, $dataDir) | Out-Null
 
 "=== 1. sync (should NOT generate data) ==="
 $sw = [System.Diagnostics.Stopwatch]::StartNew()

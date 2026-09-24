@@ -174,6 +174,30 @@ public sealed class ProblemService
             File.Copy(srcFile, dst, true);
         });
 
+    /// <summary>把指定组别下的一组测试数据导入为题目的样例（sample.in / sample.out）。</summary>
+    public Task<JobResult> ImportSampleFromDataAsync(int id, string group, string inFile, string outFile)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            string dir = _author.GenOutDir(id, group);
+            string srcIn = Path.Combine(dir, inFile);
+            if (!File.Exists(srcIn))
+                return new JobResult(false, "未找到输入文件：" + inFile);
+
+            string sampleIn = Path.Combine(_author.ProblemDir(id), "sample.in");
+            File.Copy(srcIn, sampleIn, true);
+
+            string srcOut = Path.Combine(dir, outFile);
+            if (File.Exists(srcOut))
+            {
+                string sampleOut = Path.Combine(_author.ProblemDir(id), "sample.out");
+                File.Copy(srcOut, sampleOut, true);
+            }
+
+            return new JobResult(true, File.Exists(srcOut)
+                ? $"导入成功：样例 {inFile} ⇄ {outFile}"
+                : $"导入成功：样例输入 {inFile}（未找到 .out）");
+        });
+
     /// <summary>完整性校验：题面检查 + 生成器检查，返回展示文本。</summary>
     public Task<string> ValidateAsync(int id)
         => _build.RunAsync(Gate(id), () =>
@@ -198,7 +222,7 @@ public sealed class ProblemService
                 sb.AppendLine("  描述：" + (desc ? "✓" : "✗ 缺失"));
                 sb.AppendLine("  标程 std.cpp：" + (hasStd ? "✓" : "✗ 缺失"));
                 sb.AppendLine("【生成器检查】");
-                sb.AppendLine($"  生成器：{genCount} 个，输入数据：{inCount} 组 .in");
+                sb.AppendLine($"  生成器：{genCount} 个；实际测试数据：{inCount} 组");
                 if (missingOut.Count > 0)
                     sb.AppendLine("  缺答案 .out：" + string.Join("、", missingOut.Take(8)));
                 bool ok = title && desc && hasStd

@@ -99,14 +99,16 @@ OJ_API int oj_init_mysql(const char* host, int port, const char* user,
                          const char* problem_dir, const char* data_dir);
 
 // 初始化中间层 HTTP 模式（middlewareUrl 非空时使用，替代直连 MySQL）。
-// url 形如 http://47.253.41.10:8899。返回 0 成功。
+// url 形如 https://47.253.41.10:8899（也支持 http）。返回 0 成功。
 OJ_API int oj_init_middleware(const char* url, const char* problem_dir, const char* data_dir);
 
 // 首次初始化建表（users/sessions/submissions）。返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_init_schema(void);
 
-// 注册。role: admin / author / user。返回 {"ok":true} 或 {"ok":false,"error":"..."}。
-OJ_API const char* oj_register(const char* username, const char* password, const char* role);
+// 注册（仅 user 角色，不开放 admin/author）。email/name/school 为用户资料（可空串）。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_register(const char* username, const char* password,
+                               const char* email, const char* name, const char* school);
 
 // 登录。成功返回 {"ok":true,"token":"...","userId":1,"role":"admin","username":"..."}
 OJ_API const char* oj_login(const char* username, const char* password);
@@ -142,6 +144,14 @@ OJ_API const char* oj_mysql_list_problems(void);
 // 不存在返回 {"ok":false,"error":"题目不存在"}
 OJ_API const char* oj_mysql_get_problem(int id);
 
+// 比赛列表（MySQL 云端）：[{"id":1,"name":"...","problemCount":3,"startTime":"...","endTime":"..."}, ...]
+OJ_API const char* oj_mysql_list_contests(void);
+
+// 单场比赛详情（MySQL 云端）：
+// {"ok":true,"id":1,"name":"...","description":"...","startTime":"...","endTime":"...","problems":[1,2,3]}
+// 不存在返回 {"ok":false,"error":"比赛不存在"}
+OJ_API const char* oj_mysql_get_contest(int cid);
+
 // ===== 生成器库（全局 generators 表：出题端增删改查 + 题↔生成器绑定） =====
 
 // 全部生成器：[{"id":1,"name":"juhua","description":"...","createdAt":"..."}, ...]
@@ -155,6 +165,9 @@ OJ_API const char* oj_mysql_create_generator(const char* name, const char* code,
 
 // 更新生成器代码/描述：{"ok":true} 或 {"ok":false,"error":"..."}
 OJ_API const char* oj_mysql_update_generator(int id, const char* code, const char* description);
+
+// 删除生成器（并解除与所有题目的绑定）：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_delete_generator(int id);
 
 // 某题已绑定的生成器：[{"id":1,"name":"juhua","genCount":10}, ...]
 OJ_API const char* oj_mysql_problem_generators(int problem_id);

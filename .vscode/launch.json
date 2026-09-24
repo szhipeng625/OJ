@@ -6,9 +6,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "构建客户端 (client)",
-      "program": "${workspaceFolder}/client/bin/Release/net8.0-windows/client.dll",
+      "program": "${workspaceFolder}/client/bin/Release/client.dll",
       "args": [],
-      "cwd": "${workspaceFolder}/client/bin/Release/net8.0-windows",
+      "cwd": "${workspaceFolder}/client/bin/Release",
       "console": "internalConsole",
       "stopAtEntry": false
     },
@@ -17,9 +17,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "构建服务端 (author)",
-      "program": "${workspaceFolder}/author/Author/bin/Release/net8.0-windows/Author.dll",
+      "program": "${workspaceFolder}/author/Author/bin/Release/Author.dll",
       "args": [],
-      "cwd": "${workspaceFolder}/author/Author/bin/Release/net8.0-windows",
+      "cwd": "${workspaceFolder}/author/Author/bin/Release",
       "console": "internalConsole",
       "stopAtEntry": false
     }
