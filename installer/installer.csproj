@@ -1,13 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <RootNamespace>OJInstaller</RootNamespace>
     <AssemblyName>OJInstaller</AssemblyName>
+    <StartupObject>OJInstaller.Program</StartupObject>
     <Version>1.0.0</Version>
+    <ApplicationIcon>..\assets\ACMOJ.ico</ApplicationIcon>
     <!-- 自包含单文件：目标机器无需安装 .NET 即可运行安装器 -->
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -21,6 +24,7 @@
 
   <ItemGroup>
     <AssemblyMetadata Include="InstallerBaseUrl" Value="$(InstallerBaseUrl)" />
+    <Resource Include="..\assets\ACMOJ.png" Link="Assets\ACMOJ.png" />
   </ItemGroup>
 
 </Project>

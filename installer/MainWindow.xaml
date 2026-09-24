@@ -1,0 +1,75 @@
+<Window x:Class="OJInstaller.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ACMOJ下载器" Height="660" Width="640"
+        Icon="pack://application:,,,/Assets/ACMOJ.png"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#FFF5F7FA">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 顶部标题 -->
+        <Border Grid.Row="0" Background="#2D7DF6" Padding="22,16">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="36" Height="36" CornerRadius="18" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <Border.Clip>
+                        <EllipseGeometry Center="18,18" RadiusX="18" RadiusY="18"/>
+                    </Border.Clip>
+                    <Image Source="pack://application:,,,/Assets/ACMOJ.png" Stretch="UniformToFill"
+                           Width="36" Height="36" RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Border>
+                <StackPanel>
+                    <TextBlock Text="ACMOJ下载器" Foreground="White" FontSize="20" FontWeight="Bold"/>
+                    <TextBlock Text="自动从服务器下载所需组件（含判题/出题核心 DLL）并完成安装"
+                               Foreground="#CCE0FF" FontSize="12" Margin="0,4,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 主体 -->
+        <StackPanel Grid.Row="1" Margin="24,18">
+            <TextBlock Text="选择要安装的组件" FontWeight="SemiBold" Margin="0,0,0,10"/>
+            <CheckBox x:Name="ClientBox" Content="客户端（ACMDOG 客户端）" IsChecked="True" Margin="0,0,0,6"/>
+            <CheckBox x:Name="ServerBox" Content="出题端（ACMDOG 服务端）" IsChecked="True"/>
+            <CheckBox x:Name="DesktopShortcutBox" Content="创建桌面快捷方式" IsChecked="True" Margin="0,8,0,0"/>
+
+            <TextBlock Text="安装目录" FontWeight="SemiBold" Margin="0,18,0,6"/>
+            <DockPanel>
+                <Button x:Name="BrowseBtn" Content="浏览..." DockPanel.Dock="Right" Width="70" Height="28"
+                        Margin="8,0,0,0" Click="OnBrowse"/>
+                <TextBox x:Name="DirBox" Height="28" VerticalContentAlignment="Center"/>
+            </DockPanel>
+
+            <TextBlock Text="下载地址（安装包所在服务器目录）" FontWeight="SemiBold" Margin="0,14,0,6"/>
+            <TextBox x:Name="UrlBox" Height="28" VerticalContentAlignment="Center"/>
+
+            <TextBlock x:Name="StatusText" Foreground="#2D7DF6" Margin="0,14,0,6" TextWrapping="Wrap"
+                       Text="准备就绪"/>
+            <ProgressBar x:Name="Progress" Height="10" Minimum="0" Maximum="100" Value="0"/>
+
+            <TextBox x:Name="LogBox" IsReadOnly="True" Background="#FFF8F9FA"
+                     VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"
+                     Margin="0,14,0,0" MinHeight="120" FontFamily="Consolas" FontSize="12"/>
+        </StackPanel>
+
+        <!-- 底部：联系作者 + 按钮 -->
+        <Border Grid.Row="2" Background="#FFF0F4FB" Padding="24,12">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="#666" FontSize="12"
+                           Text="联系作者：QQ 2014064199"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="CancelBtn" Content="退出" Width="90" Height="34" Margin="0,0,10,0"
+                            Click="OnCancel"/>
+                    <Button x:Name="InstallBtn" Content="开始安装" Width="130" Height="34"
+                            Background="#2D7DF6" Foreground="White" FontWeight="SemiBold"
+                            IsDefault="True" Click="OnInstall"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

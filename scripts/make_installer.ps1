@@ -49,38 +49,34 @@ if (-not $NoBuild) {
 if (-not (Test-Path $DistClient)) { throw "缺少客户端目录: $DistClient" }
 if (-not (Test-Path $DistAuthor)) { throw "缺少服务端目录: $DistAuthor" }
 
-# ---------- 2. 暂存（client/ + server/） ----------
-Write-Host '========== 暂存安装内容 ==========' -ForegroundColor Cyan
-$stage = Join-Path $env:TEMP 'oj_installer_stage'
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-$stageClient = Join-Path $stage 'client'
-$stageServer = Join-Path $stage 'server'
-New-Item -ItemType Directory -Force -Path $stageClient, $stageServer | Out-Null
-
-# 客户端：dist 下除 author 之外的全部内容
-Get-ChildItem $DistClient -Force | Where-Object { $_.Name -ne 'author' } | ForEach-Object {
-    Copy-Item $_.FullName -Destination $stageClient -Recurse -Force
-}
-# 服务端：dist\author 全部内容
-Get-ChildItem $DistAuthor -Force | ForEach-Object {
-    Copy-Item $_.FullName -Destination $stageServer -Recurse -Force
-}
-
-# 瘦身：去掉调试符号与运行日志
-Get-ChildItem $stage -Recurse -Include *.pdb, *.log | Remove-Item -Force -ErrorAction SilentlyContinue
-
-# ---------- 3. 压缩 ----------
-Write-Host '========== 压缩安装包 ==========' -ForegroundColor Cyan
-$zip = Join-Path $OutDir 'oj-package.zip'
-if (Test-Path $zip) { Remove-Item $zip -Force }
+# ---------- 2. 打包：oj-client.zip（仅客户端）+ oj-server.zip（出题端，含共享依赖） ----------
+Write-Host '========== 打包安装内容 ==========' -ForegroundColor Cyan
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-Remove-Item $stage -Recurse -Force
 
-# 生成 SHA256 校验文件（与 zip 一并上传）
-$hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -Path "$zip.sha256" -Value "$hash  oj-package.zip" -Encoding ascii
-Write-Host "安装包 -> $zip" -ForegroundColor Green
+function New-Package([string]$innerName, [string]$sourceDir, [string]$zipPath, [switch]$ExcludeAuthor) {
+    $stage = Join-Path $env:TEMP ("oj_pkg_" + $innerName)
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    $inner = Join-Path $stage $innerName
+    New-Item -ItemType Directory -Force -Path $inner | Out-Null
+    Get-ChildItem $sourceDir -Force | Where-Object { -not ($ExcludeAuthor -and $_.Name -eq 'author') } | ForEach-Object {
+        Copy-Item $_.FullName -Destination $inner -Recurse -Force
+    }
+    # 瘦身：去掉调试符号与运行日志
+    Get-ChildItem $stage -Recurse -Include *.pdb, *.log | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+    Remove-Item $stage -Recurse -Force
+
+    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -Path "$zipPath.sha256" -Value "$hash  $(Split-Path $zipPath -Leaf)" -Encoding ascii
+    Write-Host "  安装包 -> $zipPath" -ForegroundColor Green
+}
+
+# 客户端包：dist 下除 author 之外的全部内容（不含出题端 exe/dll 与死依赖）
+New-Package 'client' $DistClient (Join-Path $OutDir 'oj-client.zip') -ExcludeAuthor
+# 出题端包：dist\author 全部内容（自包含：含 ojcore/OpenSSL 等共享依赖）
+New-Package 'server' $DistAuthor (Join-Path $OutDir 'oj-server.zip')
 
 # ---------- 4. 发布安装器 ----------
 Write-Host '========== 发布安装器（自包含单文件） ==========' -ForegroundColor Cyan
@@ -108,5 +104,5 @@ if (Test-Path $wwwIndex) {
 
 Write-Host ''
 Write-Host '全部完成 [完成]' -ForegroundColor Green
-Write-Host "  1. 将 oj-package.zip（及 .sha256）上传到 BaseUrl 指向的目录；"
-Write-Host "  2. 把 OJ安装器.exe 发给用户即可一键安装/卸载。"
+Write-Host "  1. 将 oj-client.zip / oj-server.zip（及 .sha256）上传到 BaseUrl 指向的目录；"
+Write-Host "  2. 把 OJ安装器.exe 发给用户：/client 装客户端，/server 装出题端，默认两者都装。"
