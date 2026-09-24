@@ -49,21 +49,37 @@ if (-not $NoBuild) {
 if (-not (Test-Path $DistClient)) { throw "缺少客户端目录: $DistClient" }
 if (-not (Test-Path $DistAuthor)) { throw "缺少服务端目录: $DistAuthor" }
 
-# ---------- 2. 暂存（client/ + server/） ----------
-Write-Host '========== 暂存安装内容 ==========' -ForegroundColor Cyan
+# ---------- 2. 暂存（client/ + server/ + shared/，公共依赖只保留一份） ----------
+Write-Host '========== 暂存安装内容（去重） ==========' -ForegroundColor Cyan
 $stage = Join-Path $env:TEMP 'oj_installer_stage'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 $stageClient = Join-Path $stage 'client'
 $stageServer = Join-Path $stage 'server'
-New-Item -ItemType Directory -Force -Path $stageClient, $stageServer | Out-Null
+$stageSharedNative = Join-Path $stage 'shared\native'
+$stageSharedUi = Join-Path $stage 'shared\ui'
+New-Item -ItemType Directory -Force -Path $stageClient, $stageServer, $stageSharedNative, $stageSharedUi | Out-Null
 
-# 客户端：dist 下除 author 之外的全部内容
-Get-ChildItem $DistClient -Force | Where-Object { $_.Name -ne 'author' } | ForEach-Object {
+# 客户端独有文件：dist 根目录下除 author/、native/、ui/ 外的全部内容
+Get-ChildItem $DistClient -Force | Where-Object { $_.Name -notin @('author','native','ui') } | ForEach-Object {
     Copy-Item $_.FullName -Destination $stageClient -Recurse -Force
 }
-# 服务端：dist\author 全部内容
-Get-ChildItem $DistAuthor -Force | ForEach-Object {
+# 服务端独有文件：dist\author 根目录下除 native/、ui/ 外的全部内容
+Get-ChildItem $DistAuthor -Force | Where-Object { $_.Name -notin @('native','ui') } | ForEach-Object {
     Copy-Item $_.FullName -Destination $stageServer -Recurse -Force
+}
+
+# 公共依赖：native/（ojcore + OpenSSL + authorcore）与 ui/（HandyControl 等）各只保留一份
+$clientNative = Join-Path $DistClient 'native'
+if (Test-Path $clientNative) {
+    Get-ChildItem $clientNative -Force | Copy-Item -Destination $stageSharedNative -Recurse -Force
+}
+$authorcore = Join-Path $DistAuthor 'native\authorcore.dll'
+if (Test-Path $authorcore) {
+    Copy-Item $authorcore -Destination $stageSharedNative -Force
+}
+$clientUi = Join-Path $DistClient 'ui'
+if (Test-Path $clientUi) {
+    Get-ChildItem $clientUi -Force | Copy-Item -Destination $stageSharedUi -Recurse -Force
 }
 
 # 瘦身：去掉调试符号与运行日志

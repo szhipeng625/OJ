@@ -3,45 +3,164 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OJ 在线评测系统 - 安装</title>
+<title>ACMDOG · 在线判题系统</title>
 <style>
-  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f7fa; margin:0; padding:0; color:#333; }
-  .wrap { max-width:720px; margin:60px auto; background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,.08); padding:40px 48px; }
-  h1 { margin:0 0 8px; font-size:26px; color:#294172; }
-  .sub { color:#888; margin-bottom:28px; }
-  .card { border:1px solid #e3e8ef; border-radius:8px; padding:20px 24px; margin-bottom:16px; }
-  .card h2 { margin:0 0 10px; font-size:18px; color:#294172; }
-  .card p { margin:6px 0; line-height:1.6; }
-  a.btn { display:inline-block; background:#294172; color:#fff; text-decoration:none; padding:12px 22px; border-radius:6px; font-size:15px; }
-  a.btn:hover { background:#3C6EB4; }
-  a.btn-ghost { background:#fff; color:#294172; border:1px solid #294172; }
-  a.btn-ghost:hover { background:#eef2f8; }
-  code { background:#f0f2f5; padding:2px 6px; border-radius:4px; font-size:13px; }
-  .note { font-size:13px; color:#999; margin-top:24px; }
+  :root { --blue:#294172; --blue2:#3C6EB4; --accent:#5b8def; --bg:#f5f7fa; --line:#e3e8ef; --ink:#2b3242; --muted:#7a8494; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif; background: var(--bg); margin: 0; color: var(--ink); line-height: 1.7; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  .hero { background: linear-gradient(135deg, #16223a 0%, #28456f 45%, #3C6EB4 100%); background-size: 200% 200%; color: #fff; padding: 44px 24px 76px; text-align: center; position: relative; overflow: hidden; animation: heroShift 12s ease infinite; }
+  .hero::before { content:""; position:absolute; inset:0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,.08), transparent 40%), radial-gradient(circle at 80% 70%, rgba(255,255,255,.06), transparent 45%); }
+  .hero .logo { width: 80px; height: 80px; border-radius: 20px; background: #fff; padding: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); position: relative; animation: float 4s ease-in-out infinite; }
+  .hero h1 { margin: 16px 0 6px; font-size: 36px; letter-spacing: 3px; position: relative; font-weight: 700; color: #fff; }
+  .hero .tag { color: #cfe0f7; font-size: 15px; letter-spacing: 2px; position: relative; font-weight: 400; }
+  .hero .desc { max-width: 680px; margin: 14px auto 0; color: #e6eefb; font-size: 14.5px; position: relative; letter-spacing: .3px; }
+  .wrap { max-width: 1080px; margin: 28px auto 40px; padding: 0 24px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 28px 32px; margin-bottom: 20px; box-shadow: 0 6px 24px rgba(20,35,60,.07); }
+  .card h2 { margin: 0 0 6px; font-size: 20px; color: var(--blue); letter-spacing: .5px; font-weight: 600; }
+  .card .sub { margin: 0 0 22px; font-size: 13px; color: var(--muted); }
+  .card > p { font-size: 14.5px; }
+  .advantages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .adv { border: 1px solid var(--line); border-radius: 14px; padding: 22px 20px; background: linear-gradient(180deg, #fbfcff 0%, #f5f8fd 100%); position: relative; transition: transform .18s ease, box-shadow .18s ease; display: flex; flex-direction: column; }
+  .adv:hover { transform: translateY(-4px); box-shadow: 0 10px 28px rgba(44,78,130,.12); }
+  .adv .icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 23px; margin-bottom: 14px; color: #fff; }
+  .adv .icon.sec { background: linear-gradient(135deg, #2f9e75, #4ac292); }
+  .adv .icon.share { background: linear-gradient(135deg, #3C6EB4, #6b9be8); }
+  .adv .icon.conc { background: linear-gradient(135deg, #8b5cf6, #b388ff); }
+  .adv .icon.gen { background: linear-gradient(135deg, #f59e0b, #fbbf24); }
+  .adv h3 { margin: 0 0 6px; font-size: 16.5px; color: var(--blue); font-weight: 600; letter-spacing: .3px; }
+  .adv p { margin: 0 0 8px; font-size: 13px; color: #5b6572; }
+  .adv ul { margin: 0; padding-left: 17px; font-size: 12.5px; color: #5b6572; line-height: 1.65; }
+  .adv ul li { margin: 5px 0; }
+  .audience { display: flex; flex-wrap: wrap; gap: 10px; }
+  .audience .chip { background: #eef2f8; border: 1px solid #d7dfeb; color: var(--blue); border-radius: 20px; padding: 7px 18px; font-size: 14px; font-weight: 500; transition: background .15s ease, border-color .15s ease; }
+  .audience .chip:hover { background: #e2eaf6; border-color: #c0cfe2; }
+  a.btn { display: inline-block; background: var(--blue); color: #fff; text-decoration: none; padding: 12px 26px; border-radius: 9px; font-size: 14.5px; margin: 4px 10px 4px 0; font-weight: 500; letter-spacing: .3px; transition: background .15s ease, transform .15s ease; }
+  a.btn:hover { background: var(--blue2); transform: translateY(-1px); }
+  a.btn-ghost { background: #fff; color: var(--blue); border: 1px solid var(--blue); }
+  a.btn-ghost:hover { background: #eef2f8; }
+  code { background: #eef1f6; padding: 2px 7px; border-radius: 5px; font-size: 13px; color: #294172; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  .steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  .steps li { position: relative; padding: 10px 0 10px 42px; font-size: 14.5px; }
+  .steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 9px; width: 28px; height: 28px; border-radius: 50%; background: var(--blue); color: #fff; text-align: center; line-height: 28px; font-size: 14px; font-weight: 600; }
+  .footer { text-align: center; color: var(--muted); font-size: 13.5px; padding: 8px 0 48px; letter-spacing: .3px; }
+
+  @keyframes heroShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+  .card { animation: fadeUp .6s ease both; }
+  .card:nth-child(2) { animation-delay: .1s; }
+  .card:nth-child(3) { animation-delay: .2s; }
+  .card:nth-child(4) { animation-delay: .3s; }
+  .card:nth-child(5) { animation-delay: .4s; }
+  .card:nth-child(6) { animation-delay: .5s; }
+
+  .adv .icon { transition: transform .25s ease; }
+  .adv:hover .icon { transform: scale(1.15) rotate(-6deg); }
+
+  a.btn { transition: background .15s ease, transform .15s ease, box-shadow .2s ease; }
+  a.btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(44,78,130,.28); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero, .hero .logo, .card { animation: none; }
+  }
+
+  @media (max-width: 760px) { .advantages { grid-template-columns: 1fr; } .hero h1 { font-size: 28px; } }
+  @media (max-width: 1080px) and (min-width: 761px) { .advantages { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
+  <div class="hero">
+    <img class="logo" src="logo.png" alt="ACMDOG logo">
+    <h1>ACMDOG</h1>
+    <div class="tag">在线判题系统 · Online Judge</div>
+    <p class="desc">专业级 C++ 在线判题平台，服务算法竞赛与程序设计训练全场景。</p>
+  </div>
+
   <div class="wrap">
-    <h1>OJ 在线评测系统</h1>
-    <div class="sub">客户端 + 服务端 一键安装</div>
+    <div class="card">
+      <h2>简介</h2>
+      <p style="margin-bottom:0;"><b>ACMDOG</b> 是一套专业级在线判题（Online Judge）平台，覆盖「命题 · 发布 · 判题 · 竞赛」全流程，以高性能 <b>C++</b> 判题引擎为核心，当前支持 <b>C++</b> 语言评测，选手端与出题端协同、云端多端实时同步、开箱即用。</p>
+    </div>
+
+    <div class="card">
+      <h2>题库特色</h2>
+      <div class="audience">
+        <span class="chip">ACM / ICPC 竞赛算法</span>
+        <span class="chip">CPU 底层算法</span>
+        <span class="chip">数据结构与算法</span>
+        <span class="chip">体系结构与内核算法</span>
+        <span class="chip">经典算法专题</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>核心优势</h2>
+      <p class="sub">四大能力，构筑安全、可靠、高效的竞赛与训练体验。</p>
+      <div class="advantages">
+        <div class="adv">
+          <div class="icon sec">🛡️</div>
+          <h3>安全性</h3>
+          <p>端到端安全，全链路护航。</p>
+          <ul>
+            <li>HTTPS 加密传输，数据全程防窃取、防篡改</li>
+            <li>中间件统一权限验证，拦截越权与恶意提交</li>
+            <li>判题进程沙箱隔离，编译运行受时间与资源双重约束</li>
+          </ul>
+        </div>
+        <div class="adv">
+          <div class="icon share">🤝</div>
+          <h3>共享性</h3>
+          <p>云端一体，多端协同、即开即用。</p>
+          <ul>
+            <li>MySQL + 远端 LSM 双存储，题库与提交数据云端统一托管</li>
+            <li>选手端与出题端共享判题核心与云端接口</li>
+            <li>题目一键发布，全员即时共享最新题库</li>
+          </ul>
+        </div>
+        <div class="adv">
+          <div class="icon conc">⚡</div>
+          <h3>并发性</h3>
+          <p>高性能引擎，从容应对高并发。</p>
+          <ul>
+            <li>C++ 判题引擎，毫秒级响应、逐测试点精准判定</li>
+            <li>中间件网关缓冲转发，支撑大量用户同时提交</li>
+            <li>榜单实时更新、多端同步，比赛并发不卡顿</li>
+          </ul>
+        </div>
+        <div class="adv">
+          <div class="icon gen">🧬</div>
+          <h3>数据生成器</h3>
+          <p>丰富生成器库，一键产测大数据。</p>
+          <ul>
+            <li>内含丰富大量的数据生成器模板，快速构造各类测试数据</li>
+            <li>全局生成器库统一管理，一处配置多处复用</li>
+            <li>可视化生成高强度测试数据，轻松构造特殊样例</li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
     <div class="card">
       <h2>下载</h2>
-      <p><a class="btn" href="oj.exe">快捷安装（点击这里）</a></p>
-      <p>下载 <code>oj.exe</code> 后双击运行，自动从服务器下载并安装客户端与服务端。</p>
-      <p style="margin-top:16px;"><a class="btn btn-ghost" href="oj-package.zip">压缩包版本（下载这里）</a></p>
-      <p>手动下载完整安装包 <code>oj-package.zip</code>。</p>
+      <p>
+        <a class="btn" href="oj.exe">下载安装器（点击这里）</a>
+      </p>
+      <p>下载 <code>oj.exe</code> 后双击运行即可完成安装（客户端 + 出题端）。</p>
     </div>
 
     <div class="card">
-      <h2>使用说明</h2>
-      <p>1. 运行 <code>oj.exe</code>，一键安装客户端与服务端。</p>
-      <p>2. 桌面 / 开始菜单会生成「OJ客户端」「OJ服务端」「卸载 OJ」快捷方式。</p>
-      <p>3. 卸载时点击「卸载 OJ」即可一键清理。</p>
-      <p>4. 运行前需安装 <a href="https://dotnet.microsoft.com/download/dotnet/8.0">.NET 8 桌面运行时</a>。</p>
+      <h2>安装说明</h2>
+      <ol class="steps">
+        <li>运行 <code>oj.exe</code>，一键安装客户端与服务端。</li>
+        <li>桌面 / 开始菜单会生成「ACMDOG客户端」「ACMDOG服务端」「卸载 ACMDOG」快捷方式。</li>
+        <li>卸载时点击「卸载 ACMDOG」即可一键清理。</li>
+        <li>运行前需安装 <a href="https://dotnet.microsoft.com/download/dotnet/8.0">.NET 8 桌面运行时</a>。</li>
+      </ol>
     </div>
 
-    <div class="note">安装包下载地址：<code>http://47.253.41.10/oj/oj-package.zip</code></div>
+    <div class="footer">
+      联系作者：QQ 2014064199
+    </div>
   </div>
 </body>
 </html>

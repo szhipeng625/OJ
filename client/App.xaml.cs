@@ -21,14 +21,20 @@ public partial class App : Application
     static App()
     {
         string baseDir = AppContext.BaseDirectory;
+        // 原生 DLL（ojcore/OpenSSL）统一从 native/ 加载，含其传递依赖；
+        // 安装版公共依赖放 ..\shared\native（客户端/服务端共用，避免重复），开发版仍在 exe 同目录 native/
         string nativeDir = Path.Combine(baseDir, "native");
-        string uiDir = Path.Combine(baseDir, "ui");
+        if (!Directory.Exists(nativeDir))
+            nativeDir = Path.GetFullPath(Path.Combine(baseDir, "..", "shared", "native"));
 
-        // 原生 DLL（ojcore/OpenSSL）统一从 native/ 加载，含其传递依赖
+        // 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 ui/ 加载，同样回退到 ..\shared\ui
+        string uiDir = Path.Combine(baseDir, "ui");
+        if (!Directory.Exists(uiDir))
+            uiDir = Path.GetFullPath(Path.Combine(baseDir, "..", "shared", "ui"));
+
         if (Directory.Exists(nativeDir))
             SetDllDirectory(nativeDir);
 
-        // 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 ui/ 加载
         AssemblyLoadContext.Default.Resolving += (ctx, name) =>
         {
             if (name.Name is null) return null;
