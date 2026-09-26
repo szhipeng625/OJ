@@ -1,4 +1,6 @@
-﻿# OJ 在线判题系统
+ # ACMDOG项目交流QQ群: 1109340418
+ # ACMDOG首页：http://www.acmdog.cn
+ # OJ 在线判题系统
 
 WPF 客户端 + C++ 判题核心 + **tiny-lsm 分布式 LSM 存储**，全 C/S 一体化产品，全部用 Visual Studio 构建。
 
