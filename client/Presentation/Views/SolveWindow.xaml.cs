@@ -78,8 +78,10 @@ public partial class SolveWindow : Window
 
     private async Task LoadSavedCodeAsync()
     {
-        const string DefaultCode =
-            "#include <iostream>\nusing namespace std;\nint main(){\n    return 0;\n}";
+        // 函数式判题题目用接口模板作为起始代码，否则用整程序 main() 模板
+        string defaultCode = _problem.JudgeMode == 1 && !string.IsNullOrWhiteSpace(_problem.ItfTemplate)
+            ? _problem.ItfTemplate
+            : "#include <iostream>\nusing namespace std;\nint main(){\n    return 0;\n}";
         try
         {
             int contestId = _contest?.Id ?? 0;
@@ -92,13 +94,13 @@ public partial class SolveWindow : Window
             }
             else
             {
-                CodeBox.Text = DefaultCode;
+                CodeBox.Text = defaultCode;
                 StatusText.Text = "暂无历史代码";
             }
         }
         catch
         {
-            CodeBox.Text = DefaultCode;
+            CodeBox.Text = defaultCode;
             StatusText.Text = "载入历史代码失败";
         }
 

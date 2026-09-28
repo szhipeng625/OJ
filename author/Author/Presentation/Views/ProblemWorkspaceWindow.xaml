@@ -78,7 +78,8 @@
                             <TextBlock Text="标准程序 std.cpp" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             <Button DockPanel.Dock="Right" Content="保存并编译标程" Width="130" Click="OnCompileStd"/>
                         </DockPanel>
-                        <TextBlock x:Name="StdMsg" DockPanel.Dock="Bottom" Foreground="#888" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <TextBox x:Name="StdMsg" DockPanel.Dock="Bottom" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                 Foreground="#888" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="60" Margin="0,8,0,0"/>
                         <controls:CodeEditor x:Name="StdBox"/>
                     </DockPanel>
 
@@ -93,7 +94,8 @@
                                     ToolTip="将下方列表中选中一行的输入/输出导入为题目的样例（sample.in / sample.out）"/>
                             <TextBlock Text="勾选需要作为题目样例的输入/输出，自动上传到数据库" Foreground="#888" VerticalAlignment="Center"/>
                         </WrapPanel>
-                        <TextBlock x:Name="DataMsg" DockPanel.Dock="Bottom" Foreground="#2d8cf0" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <TextBox x:Name="DataMsg" DockPanel.Dock="Bottom" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                 Foreground="#2d8cf0" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="56" Margin="0,8,0,0"/>
                         <ListView x:Name="DataGroupView" BorderThickness="1" BorderBrush="#FFE3E6EB"
                                   MouseDoubleClick="OnDataRowDoubleClick">
                             <ListView.View>
@@ -119,6 +121,61 @@
                                 </GroupStyle>
                             </ListView.GroupStyle>
                         </ListView>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- 特殊判题（SPJ） -->
+            <TabItem Header="特殊判题 (SPJ)">
+                <DockPanel Margin="8">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                        <TextBlock Text="特殊判题器 spj.cpp" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="保存 SPJ" Width="96" Click="OnSaveSpj"/>
+                            <Button Content="保存并编译" Width="110" Margin="6,0,0,0" Click="OnCompileSpj"/>
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6" Foreground="#888" TextWrapping="Wrap"
+                               Text="调用约定：spj.exe &lt;用户输出&gt; &lt;标准输出&gt; &lt;输入&gt;；退出码 0 = 通过，非 0 = WA（special judge 未通过）。留空则不启用 SPJ，按文本比对。"/>
+                    <TextBox x:Name="SpjMsg" DockPanel.Dock="Bottom" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                             Foreground="#888" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="60" Margin="0,8,0,0"/>
+                    <controls:CodeEditor x:Name="SpjBox"/>
+                </DockPanel>
+            </TabItem>
+
+            <!-- 接口判题（函数式） -->
+            <TabItem Header="接口判题">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Margin="0,0,0,6" Foreground="#888" TextWrapping="Wrap"
+                               Text="函数式判题：用户只实现接口函数（编译为 DLL），题目入口 entry.exe 负责加载 DLL、解析输入、计时调用接口、写回输出。调用约定：entry.exe &lt;user.dll&gt; &lt;输入&gt; &lt;输出&gt; &lt;时间&gt;；接口函数固定名 solve，须 extern &quot;C&quot; __declspec(dllexport)。入口留空则退回整程序判题。"/>
+
+                    <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <TextBlock Text="题目入口 entry.cpp" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="保存入口" Width="96" Click="OnSaveEntry"/>
+                                <Button Content="保存并编译" Width="110" Margin="6,0,0,0" Click="OnCompileEntry"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <TextBox x:Name="EntryMsg" DockPanel.Dock="Bottom" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                 Foreground="#888" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="40" Margin="0,4,0,0"/>
+                        <controls:CodeEditor x:Name="EntryBox"/>
+                    </DockPanel>
+
+                    <DockPanel Grid.Row="2">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <TextBlock Text="接口模板 itf.template.cpp（用户实现的函数骨架，.cpp 文件）" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="保存模板" Width="96" Click="OnSaveItf"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <controls:CodeEditor x:Name="ItfBox"/>
                     </DockPanel>
                 </Grid>
             </TabItem>

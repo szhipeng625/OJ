@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include <cstdio>
+#include <cstdlib>
 #pragma comment(lib, "shlwapi.lib")
 
 namespace oj {
@@ -165,6 +167,154 @@ static RunOutcome run_one(const std::string& exe, const std::string& inFile,
     return r;
 }
 
+// 运行特殊判题器：spj.exe <用户输出> <标准输出> <输入>。
+// status: 0=正常（exitCode 存 spj 退出码，0 通过/非 0 不通过）1=TLE 3=启动失败。
+static RunOutcome run_spj(const std::string& spjExe, const std::string& userOut,
+                          const std::string& ansOut, const std::string& inFile,
+                          DWORD timeoutMs, const std::string& spjLog) {
+    RunOutcome r = {0, 0, 0};
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+
+    HANDLE hOut = CreateFileA(spjLog.c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hOut == INVALID_HANDLE_VALUE) { r.status = 3; return r; }
+
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput  = NULL;
+    si.hStdOutput = hOut;
+    si.hStdError  = hOut;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = "\"" + spjExe + "\" \"" + userOut + "\" \"" + ansOut + "\" \"" + inFile + "\"";
+    std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
+
+    BOOL ok = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    if (!ok) {
+        CloseHandle(hOut);
+        r.status = 3; return r;
+    }
+    CloseHandle(hOut);
+
+    LARGE_INTEGER t0, t1, freq;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
+    QueryPerformanceCounter(&t1);
+    r.ms = (long long)((t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart);
+
+    if (wr == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+        r.status = 1;
+    } else {
+        GetExitCodeProcess(pi.hProcess, &r.exitCode);
+    }
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    return r;
+}
+
+// 运行函数式判题入口：entry.exe <user.dll> <输入文件> <输出文件> <时间文件>。
+// 入口负责 LoadLibrary 加载 DLL、解析输入、计时调用 solve、写回输出与耗时；judge 仅限时/限内存。
+// status: 0=正常 1=TLE 2=崩溃/非零退出 3=启动失败
+static RunOutcome run_entry(const std::string& entryExe, const std::string& dll,
+                            const std::string& inFile, const std::string& outFile,
+                            const std::string& timeFile, DWORD timeoutMs, SIZE_T memBytes) {
+    RunOutcome r = {0, 0, 0};
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = "\"" + entryExe + "\" \"" + dll + "\" \"" + inFile + "\" \""
+        + outFile + "\" \"" + timeFile + "\"";
+    std::vector<char> cmdBuf(cmd.begin(), cmd.end()); cmdBuf.push_back('\0');
+
+    LARGE_INTEGER t0, t1, freq;
+    QueryPerformanceFrequency(&freq);
+
+    BOOL ok = CreateProcessA(NULL, cmdBuf.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    if (!ok) { r.status = 3; return r; }
+
+    HANDLE hJob = NULL;
+    if (memBytes > 0) {
+        hJob = CreateJobObjectA(NULL, NULL);
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
+        jeli.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        jeli.ProcessMemoryLimit = memBytes;
+        SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        AssignProcessToJobObject(hJob, pi.hProcess);
+    }
+
+    QueryPerformanceCounter(&t0);
+    DWORD wr = WaitForSingleObject(pi.hProcess, timeoutMs);
+    QueryPerformanceCounter(&t1);
+    r.ms = (long long)((t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart);
+
+    if (wr == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+        r.status = 1;
+    } else {
+        GetExitCodeProcess(pi.hProcess, &r.exitCode);
+        if (r.exitCode != 0) r.status = 2;
+    }
+
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    if (hJob) CloseHandle(hJob);
+    return r;
+}
+
+// ojcore.dll 所在目录（随包 MinGW 探测）
+static std::string module_dir() {
+    HMODULE hm = NULL;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       (LPCSTR)&module_dir, &hm);
+    char path[MAX_PATH] = {0};
+    GetModuleFileNameA(hm, path, MAX_PATH);
+    std::string p = path;
+    size_t pos = p.find_last_of("\\/");
+    return pos == std::string::npos ? "." : p.substr(0, pos);
+}
+
+// 解析 g++：PATH 优先，其次随包 mingw64 与常见安装位置；找不到回退裸名 g++。
+static std::string resolve_gpp() {
+    char* pe = NULL; size_t n = 0;
+    if (_dupenv_s(&pe, &n, "PATH") == 0 && pe) {
+        std::string path = pe;
+        free(pe);
+        size_t start = 0;
+        while (start <= path.size()) {
+            size_t seg = path.find(';', start);
+            std::string d = path.substr(start, seg == std::string::npos ? std::string::npos : seg - start);
+            if (!d.empty()) {
+                std::string cand = d + "\\g++.exe";
+                DWORD a = GetFileAttributesA(cand.c_str());
+                if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) return cand;
+            }
+            if (seg == std::string::npos) break;
+            start = seg + 1;
+        }
+    }
+    std::string md = module_dir();
+    char exe[MAX_PATH] = {0};
+    GetModuleFileNameA(NULL, exe, MAX_PATH);
+    std::string ex = exe;
+    size_t pos = ex.find_last_of("\\/");
+    std::string ed = pos == std::string::npos ? "." : ex.substr(0, pos);
+    std::vector<std::string> cands;
+    cands.push_back(md + "\\..\\mingw64\\bin\\g++.exe");
+    cands.push_back(md + "\\mingw64\\bin\\g++.exe");
+    cands.push_back(ed + "\\mingw64\\bin\\g++.exe");
+    cands.push_back("D:\\mingw64\\bin\\g++.exe");
+    for (size_t i = 0; i < cands.size(); ++i) {
+        DWORD a = GetFileAttributesA(cands[i].c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) return cands[i];
+    }
+    return "g++";
+}
 bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::string& errMsg) {
     SECURITY_ATTRIBUTES sa; sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
     std::string errFile = exeFile + ".err";
@@ -172,8 +322,9 @@ bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::st
                               &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "g++ -O2 -o \"%s\" \"%s\"",
-             exeFile.c_str(), srcFile.c_str());
+    std::string gpp = resolve_gpp();
+    snprintf(cmd, sizeof(cmd), "\"%s\" -O2 -o \"%s\" \"%s\"",
+             gpp.c_str(), exeFile.c_str(), srcFile.c_str());
 
     STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si); si.dwFlags = STARTF_USESTDHANDLES; si.hStdError = hErr; si.hStdOutput = hErr;
@@ -190,6 +341,35 @@ bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::st
     DeleteFileA(errFile.c_str());
     if (exitCode != 0) return false;
     return GetFileAttributesA(exeFile.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// 把用户源码编译为共享库 DLL（函数式判题）。用户需实现 extern "C" __declspec(dllexport) 的 solve。
+bool compile_shared(const std::string& srcFile, const std::string& dllFile, std::string& errMsg) {
+    SECURITY_ATTRIBUTES sa; sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+    std::string errFile = dllFile + ".err";
+    HANDLE hErr = CreateFileA(errFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    char cmd[1024];
+    std::string gpp = resolve_gpp();
+    snprintf(cmd, sizeof(cmd), "\"%s\" -O2 -shared -o \"%s\" \"%s\"",
+             gpp.c_str(), dllFile.c_str(), srcFile.c_str());
+
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si); si.dwFlags = STARTF_USESTDHANDLES; si.hStdError = hErr; si.hStdOutput = hErr;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    if (!ok) { if (hErr) CloseHandle(hErr); errMsg = "无法启动 g++"; return false; }
+    WaitForSingleObject(pi.hProcess, 60000);
+    DWORD exitCode = 1; GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    if (hErr) CloseHandle(hErr);
+
+    errMsg = readAll(errFile);
+    DeleteFileA(errFile.c_str());
+    if (exitCode != 0) return false;
+    return GetFileAttributesA(dllFile.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 // 去掉字符串首尾空白（空格 / 制表 / 回车换行）
@@ -224,7 +404,8 @@ static std::vector<std::pair<std::string, std::string>> collectAllIn(const std::
     return res;
 }
 std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string& testDir,
-                                  const std::string& tempOut, const JudgeOptions& opt) {
+                                  const std::string& tempOut, const JudgeOptions& opt,
+                                  const std::string& spjExe) {
     std::vector<CaseResult> out;
     auto ins = collectAllIn(testDir);
     int idx = 0;
@@ -252,6 +433,19 @@ std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string&
             const char* cd = crashDesc(r.exitCode);
             c.info = cd ? cd : (genDesc.empty() ? "运行时错误（非零退出）" : genDesc);
         }
+        else if (!spjExe.empty()) {
+            // 特殊判题：spj.exe <用户输出> <标准输出> <输入>，退出码 0=通过。
+            std::string spjLog = tempOut + ".spj";
+            RunOutcome sp = run_spj(spjExe, tempOut, ansFile, inFile, 5000, spjLog);
+            if (sp.status == 3)      { c.verdict = "SE";  c.passed = false;
+                                       c.info = genDesc.empty() ? "SPJ 启动失败" : genDesc; }
+            else if (sp.status == 1) { c.verdict = "TLE"; c.passed = false;
+                                       c.info = genDesc.empty() ? "SPJ 超时" : genDesc; }
+            else if (sp.exitCode != 0) { c.verdict = "WA"; c.passed = false;
+                                       c.info = genDesc.empty() ? "special judge 未通过" : genDesc; }
+            else                     { c.verdict = "AC";  c.passed = true; }
+            DeleteFileA(spjLog.c_str());
+        }
         else {
             std::string u = normalize(readAll(tempOut));
             std::string a = normalize(readAll(ansFile));
@@ -259,6 +453,67 @@ std::vector<CaseResult> run_tests(const std::string& exeFile, const std::string&
             else        { c.verdict = "WA"; c.passed = false;
                           c.info = genDesc.empty() ? "输出与标准答案不一致" : genDesc; }
         }
+        out.push_back(c);
+    }
+    DeleteFileA(tempOut.c_str());
+    return out;
+}
+
+// 函数式判题：入口 exe 加载用户 DLL 并调用 solve。仅计时 solve 调用本身（耗时由入口写入 timeFile）。
+std::vector<CaseResult> run_tests_entry(const std::string& entryExe, const std::string& dll,
+                                        const std::string& testDir, const std::string& tempOut,
+                                        const JudgeOptions& opt, const std::string& spjExe) {
+    std::vector<CaseResult> out;
+    auto ins = collectAllIn(testDir);
+    int idx = 0;
+    for (auto& item : ins) {
+        idx++;
+        const std::string& inp = item.first;
+        const std::string& genName = item.second;
+        std::string genDesc = trim(readAll(testDir + "\\" + genName + "\\desc.txt"));
+
+        std::string slash = inp;
+        for (auto& ch : slash) if (ch == '/') ch = '\\';
+        std::string base = slash.substr(0, slash.size() - 3);
+        std::string inFile  = testDir + "\\" + slash;
+        std::string ansFile = testDir + "\\" + base + ".out";
+        std::string timeFile = tempOut + ".time";
+        DeleteFileA(timeFile.c_str());
+
+        RunOutcome r = run_entry(entryExe, dll, inFile, tempOut, timeFile, opt.timeoutMs, opt.memBytes);
+
+        CaseResult c;
+        c.name = inp.substr(0, inp.size() - 3);
+        // 接口耗时由入口写入 timeFile（只计时 solve 调用，不含输入输出）；缺失时回退进程墙钟时间。
+        std::string tstr = trim(readAll(timeFile));
+        c.timeMs = tstr.empty() ? r.ms : atoll(tstr.c_str());
+        if (r.status == 3)      { c.verdict = "SE";  c.passed = false; c.info = genDesc.empty() ? "入口启动失败" : genDesc; }
+        else if (r.status == 1) { c.verdict = "TLE"; c.passed = false; c.info = genDesc; }
+        else if (r.status == 2) {
+            c.verdict = "RE"; c.passed = false;
+            const char* cd = crashDesc(r.exitCode);
+            c.info = cd ? cd : (genDesc.empty() ? "运行时错误（非零退出）" : genDesc);
+        }
+        else if (!spjExe.empty()) {
+            std::string spjLog = tempOut + ".spj";
+            RunOutcome sp = run_spj(spjExe, tempOut, ansFile, inFile, 5000, spjLog);
+            if (sp.status == 3)      { c.verdict = "SE";  c.passed = false;
+                                       c.info = genDesc.empty() ? "SPJ 启动失败" : genDesc; }
+            else if (sp.status == 1) { c.verdict = "TLE"; c.passed = false;
+                                       c.info = genDesc.empty() ? "SPJ 超时" : genDesc; }
+            else if (sp.exitCode != 0) { c.verdict = "WA"; c.passed = false;
+                                       c.info = genDesc.empty() ? "special judge 未通过" : genDesc; }
+            else                     { c.verdict = "AC";  c.passed = true; }
+            DeleteFileA(spjLog.c_str());
+        }
+        else {
+            std::string u = normalize(readAll(tempOut));
+            std::string a = normalize(readAll(ansFile));
+            if (u == a) { c.verdict = "AC"; c.passed = true; }
+            else        { c.verdict = "WA"; c.passed = false;
+                          c.info = genDesc.empty() ? "输出与标准答案不一致" : genDesc; }
+        }
+        DeleteFileA(timeFile.c_str());
         out.push_back(c);
     }
     DeleteFileA(tempOut.c_str());

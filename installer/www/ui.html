@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACMDOG · 软件界面预览</title>
+<style>
+  :root { --blue:#294172; --blue2:#3C6EB4; --bg:#f5f7fa; --line:#e3e8ef; --ink:#2b3242; --muted:#7a8494; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif; background: var(--bg); margin: 0; color: var(--ink); line-height: 1.7; -webkit-font-smoothing: antialiased; }
+  .hero { background: linear-gradient(135deg, #16223a 0%, #28456f 45%, #3C6EB4 100%); color: #fff; padding: 40px 24px 64px; text-align: center; }
+  .hero h1 { margin: 0; font-size: 32px; letter-spacing: 3px; font-weight: 700; }
+  .hero p { margin: 10px auto 0; color: #cfe0f7; font-size: 14.5px; letter-spacing: .5px; }
+  .wrap { max-width: 1160px; margin: -30px auto 40px; padding: 0 24px; }
+  .group-title { display: flex; align-items: center; gap: 10px; margin: 30px 0 14px; }
+  .group-title .badge { width: 34px; height: 34px; border-radius: 9px; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 17px; flex: none; }
+  .group-title h2 { margin: 0; font-size: 21px; color: var(--blue); font-weight: 600; letter-spacing: .5px; }
+  .group-title .sub { font-size: 13px; color: var(--muted); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 20px; box-shadow: 0 6px 22px rgba(20,35,60,.07); }
+  .card img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; }
+  .card .cap { margin: 12px 2px 2px; font-size: 14px; color: var(--ink); font-weight: 600; }
+  .card .desc { margin: 2px 2px 0; font-size: 12.5px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .footer { text-align: center; color: var(--muted); font-size: 13.5px; padding: 4px 0 44px; letter-spacing: .3px; }
+  a.back { display: inline-block; margin-bottom: 18px; color: var(--blue); text-decoration: none; font-size: 14px; }
+  a.back:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <h1>ACMDOG 软件界面预览</h1>
+    <p>在线判题平台 · 客户端（做题）与出题端（命题）真实使用界面一览</p>
+  </div>
+
+  <div class="wrap">
+    <a class="back" href="index.html">← 返回下载页</a>
+
+    <div class="group-title">
+      <div class="badge">💻</div>
+      <div>
+        <h2>客户端 · ACMDOG</h2>
+        <div class="sub">登录、刷题、本地调试、比赛</div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <img src="img/client-login.png" alt="客户端登录界面">
+        <div class="cap">登录界面</div>
+        <div class="desc">输入用户名与密码登录，登录后自动恢复上次会话。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-profile.png" alt="客户端题库主页与个人信息">
+        <div class="cap">题库主页 · 个人信息</div>
+        <div class="desc">左侧题目列表（可搜索、显示通过状态），右侧个人资料与通过进度统计。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-problem.png" alt="题目详情">
+        <div class="cap">题目详情</div>
+        <div class="desc">单击题目即可查看完整题面：描述、输入输出格式、样例与标签。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-solve.png" alt="做题窗口">
+        <div class="cap">做题窗口</div>
+        <div class="desc">左侧题面、右侧代码编辑器（含补全提示），支持本地调试与提交判题。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-contests.png" alt="比赛列表">
+        <div class="cap">比赛列表</div>
+        <div class="desc">查看已发布比赛、报名状态与比赛时间，可报名正式或打星参赛。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-contest-problem.png" alt="比赛题目">
+        <div class="cap">比赛题目</div>
+        <div class="desc">进入比赛后按题号查看本场题目，顶部可切换比赛首页 / 排行榜 / 提交记录。</div>
+      </div>
+      <div class="card">
+        <img src="img/client-contest-submissions.png" alt="比赛提交记录">
+        <div class="cap">比赛提交记录</div>
+        <div class="desc">本场全部提交按时间倒序展示，双击可查看提交代码。</div>
+      </div>
+    </div>
+
+    <div class="group-title">
+      <div class="badge">🛠️</div>
+      <div>
+        <h2>出题端 · ACMDOG 出题工作台</h2>
+        <div class="sub">命题、数据生成、标程、发布、比赛管理</div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <img src="img/author-login.png" alt="出题端登录界面">
+        <div class="cap">登录界面</div>
+        <div class="desc">仅 admin / author 角色可登录出题端。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-main.png" alt="出题端工作台">
+        <div class="cap">工作台</div>
+        <div class="desc">题库列表（双击打开题目编辑窗口，可多窗口并行编译/评测），支持新建题目与比赛管理。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-problem.png" alt="题目编辑">
+        <div class="cap">题目编辑</div>
+        <div class="desc">编辑标题、时限、内存、标签，题面支持 Markdown 富文本。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-generator.png" alt="数据生成器">
+        <div class="cap">数据生成器</div>
+        <div class="desc">勾选绑定生成器并一键生成测试数据，可逐组预览 .in 输入。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-std.png" alt="生成标准答案">
+        <div class="cap">生成标准答案</div>
+        <div class="desc">编译标程并批量跑出 .out 答案，支持输入/输出逐组对比。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-publish.png" alt="发布题目">
+        <div class="cap">发布题目</div>
+        <div class="desc">一键校验题目完整性（题面/标程/生成器）并发布，客户端可见。</div>
+      </div>
+      <div class="card">
+        <img src="img/author-contests.png" alt="比赛管理">
+        <div class="cap">比赛管理</div>
+        <div class="desc">新建 / 编辑比赛，设置起止时间并勾选本场题目，保存即发布。</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      联系作者：QQ 2014064199
+    </div>
+  </div>
+</body>
+</html>

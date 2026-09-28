@@ -7,6 +7,10 @@ namespace oj {
 // 中间层已配置即视为可用
 bool mysql_available();
 
+// base64 编解码（二进制可执行文件经 JSON 字段以 base64 传输）
+std::string base64_encode(const std::string& in);
+std::string base64_decode(const std::string& in);
+
 // 中间层 HTTP 模式状态
 void middleware_set_url(const std::string& url);
 const std::string& middleware_url();
@@ -60,17 +64,26 @@ bool mysql_board(int cid, const std::string& start_str,
 bool mysql_list_users(std::string& out_json, std::string& err);
 
 // 题目 / 比赛
+// std_exe 为标程编译产物（base64），可空；非空时客户端直接拉取运行，不再本地编译。
+// spj_code / spj_exe 为特殊判题器源码与编译产物（base64），可空；非空时客户端启用 SPJ 比对。
 bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
                           const std::string& sample_in, const std::string& sample_out,
                           int time_ms, int mem_mb, const std::string& tags_json,
-                          const std::string& std_code, bool is_public, std::string& err);
+                          const std::string& std_code, const std::string& std_exe,
+                          const std::string& spj_code, const std::string& spj_exe,
+                          const std::string& entry_code, const std::string& entry_exe,
+                          const std::string& itf_template, int judge_mode,
+                          bool is_public, std::string& err);
 bool mysql_problem_visibility(std::string& out_json);
 bool mysql_list_problems(std::string& out_json);
 bool mysql_get_problem(int id, std::string& out_json);
 bool mysql_upsert_contest(int cid, const std::string& contest_json, std::string& err);
 bool mysql_list_contests(std::string& out_json);
 bool mysql_get_contest(int cid, std::string& out_json);
-bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err);
+// 登录后仅同步「题目列表索引 + 比赛配置」到本地（加密缓存），不下载题面/标程/生成器。
+bool mysql_sync_problem_list(const std::string& problem_dir, const std::string& server_root, std::string& err);
+// 用户点开某题详情时，按需下载该题完整数据（题面/样例/标程/生成器/测试样例），加密落盘。
+bool mysql_fetch_problem(int id, const std::string& problem_dir, std::string& err);
 // 判题前按需生成数据（初始化不再预生成）；生成耗时不计入判题计时。
 bool ensure_problem_data(int problem_id, const std::string& problem_dir, std::string& err);
 
@@ -80,6 +93,8 @@ bool mysql_get_generator(int id, std::string& out_name, std::string& out_code, s
 bool mysql_create_generator(const std::string& name, const std::string& code, const std::string& desc,
                             long long& out_id, std::string& err);
 bool mysql_update_generator(int id, const std::string& code, const std::string& desc, std::string& err);
+// 上传生成器编译产物（base64）到数据库，客户端拉取后直接运行生成数据。
+bool mysql_update_generator_exe(int id, const std::string& exe_base64, std::string& err);
 bool mysql_delete_generator(int id);
 bool mysql_problem_generators(int problem_id, std::string& out_json);
 bool mysql_bind_generator(int problem_id, int generator_id, int gen_count, std::string& err);

@@ -65,6 +65,10 @@ public static class OjCoreInterop
         [MarshalAs(UnmanagedType.LPUTF8Str)] string code, [MarshalAs(UnmanagedType.LPUTF8Str)] string description);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_update_generator_exe(int id,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string exe_base64);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_delete_generator(int id);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -167,6 +171,12 @@ public static class OjCoreInterop
     public static string UpdateGeneratorJson(int id, string code, string desc)
     {
         lock (Lock) return Take(oj_mysql_update_generator(id, code, desc));
+    }
+
+    /// <summary>上传生成器编译产物（base64）到数据库。</summary>
+    public static string UpdateGeneratorExeJson(int id, string exeBase64)
+    {
+        lock (Lock) return Take(oj_mysql_update_generator_exe(id, exeBase64));
     }
 
     /// <summary>删除生成器（并解除与所有题目的绑定）。</summary>

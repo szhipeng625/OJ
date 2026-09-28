@@ -17,6 +17,20 @@ public sealed class AuthorClient
     private const string StdTemplate =
         "// 标准程序（用于生成答案 / 本地验证）\n#include <iostream>\nusing namespace std;\nint main() {\n    return 0;\n}\n";
 
+    /// <summary>
+    /// 函数式（接口判题）题目的默认 C++ 接口模板：用户只实现 solve，不写 main；
+    /// 客户端提交后后台自动把该 .cpp 编译为 DLL，由题目入口加载调用。
+    /// </summary>
+    public const string ItfTemplateDefault =
+        "// 接口编程题：只需实现 solve 函数，不要写 main 函数和输入输出语句。\n"
+        + "// 提交后你的代码会自动编译为 DLL，由题目入口加载、解析输入并调用 solve，返回值即输出。\n"
+        + "// 函数签名以题面为准（示例为两个整数求和）。\n"
+        + "extern \"C\" __declspec(dllexport)\n"
+        + "int solve(int a, int b) {\n"
+        + "    // TODO: 在此实现你的算法\n"
+        + "    return a + b;\n"
+        + "}\n";
+
     /// <summary>服务端题库根目录（author/problems）。</summary>
     public string Root { get; private set; } = "";
     /// <summary>编译产物临时目录（author/temp）。</summary>
@@ -37,6 +51,16 @@ public sealed class AuthorClient
     public string GenOutDir(int id, string name) => Path.GetFullPath(Path.Combine(ProblemDir(id), name));
     public string GenExePath(int id, string name) => Path.Combine(TempRoot, id.ToString(), name + ".exe");
     public string StdExePath(int id) => Path.Combine(TempRoot, id.ToString(), "std.exe");
+    public string SpjPath(int id) => Path.Combine(ProblemDir(id), "spj.cpp");
+    public string SpjExePath(int id) => Path.Combine(TempRoot, id.ToString(), "spj.exe");
+    public string EntryPath(int id) => Path.Combine(ProblemDir(id), "entry.cpp");
+    public string EntryExePath(int id) => Path.Combine(TempRoot, id.ToString(), "entry.exe");
+    public string ItfPath(int id) => Path.Combine(ProblemDir(id), "itf.template.cpp");
+
+    /// <summary>
+    /// 与 authorcore 的 safeName 对齐后的生成器 exe 路径（非 ASCII 名字会哈希成 g_xxx）。
+    /// </summary>
+    public string GenExePathSafe(int id, string name) => Path.Combine(TempRoot, id.ToString(), SafeGenName(name) + ".exe");
 
     /// <summary>
     /// 与 authorcore/gen.cpp 的 safeName 一致：非 ASCII 生成器名映射为 "g_" + FNV-1a64(名字 UTF-8 字节)，
@@ -140,11 +164,17 @@ public sealed class AuthorClient
         string desc = nl < 0 ? "" : st[(nl + 1)..];
 
         string stdPath = Path.Combine(dir, "std.cpp");
+        string spjPath = Path.Combine(dir, "spj.cpp");
+        string entryPath = Path.Combine(dir, "entry.cpp");
+        string itfPath = Path.Combine(dir, "itf.template.cpp");
         return new ProblemContent(
             title, desc,
             ReadFile("sample.in"), ReadFile("sample.out"),
             GetMeta(id),
-            File.Exists(stdPath) ? File.ReadAllText(stdPath) : StdTemplate);
+            File.Exists(stdPath) ? File.ReadAllText(stdPath) : StdTemplate,
+            File.Exists(spjPath) ? File.ReadAllText(spjPath) : "",
+            File.Exists(entryPath) ? File.ReadAllText(entryPath) : "",
+            File.Exists(itfPath) ? File.ReadAllText(itfPath) : ItfTemplateDefault);
     }
 
     /// <summary>
@@ -169,6 +199,12 @@ public sealed class AuthorClient
             int timeMs = r.TryGetProperty("timeMs", out var tm) ? tm.GetInt32() : 1000;
             int memMb = r.TryGetProperty("memMb", out var mm) ? mm.GetInt32() : 256;
             string stdCode = r.TryGetProperty("stdCode", out var sc) ? sc.GetString() ?? "" : "";
+            bool spjPresent = r.TryGetProperty("spjCode", out var sj);
+            string spjCode = spjPresent && sj.ValueKind == JsonValueKind.String ? sj.GetString() ?? "" : "";
+            bool entryPresent = r.TryGetProperty("entryCode", out var en);
+            string entryCode = entryPresent && en.ValueKind == JsonValueKind.String ? en.GetString() ?? "" : "";
+            bool itfPresent = r.TryGetProperty("itfTemplate", out var it);
+            string itfTemplate = itfPresent && it.ValueKind == JsonValueKind.String ? it.GetString() ?? "" : "";
             string updatedAt = r.TryGetProperty("updatedAt", out var ua) ? ua.GetString() ?? "" : "";
             string tagsJson = r.TryGetProperty("tags", out var tg) ? tg.GetRawText() : "[]";
             var tags = new List<string>();
@@ -183,6 +219,38 @@ public sealed class AuthorClient
             File.WriteAllText(Path.Combine(dir, "sample.in"), sampleIn);
             File.WriteAllText(Path.Combine(dir, "sample.out"), sampleOut);
             File.WriteAllText(Path.Combine(dir, "std.cpp"), stdCode);
+            // 只有服务端明确返回了 spjCode 字段才同步本地 spj.cpp（老中间层无该字段时保留本地文件）。
+            if (spjPresent)
+            {
+                if (!string.IsNullOrEmpty(spjCode))
+                    File.WriteAllText(Path.Combine(dir, "spj.cpp"), spjCode);
+                else
+                {
+                    string spjF = Path.Combine(dir, "spj.cpp");
+                    if (File.Exists(spjF)) File.Delete(spjF);
+                }
+            }
+            // 函数式判题：同步题目入口 entry.cpp 与接口模板 itf.template.cpp（老中间层无字段时保留本地文件）。
+            if (entryPresent)
+            {
+                if (!string.IsNullOrEmpty(entryCode))
+                    File.WriteAllText(Path.Combine(dir, "entry.cpp"), entryCode);
+                else
+                {
+                    string ef = Path.Combine(dir, "entry.cpp");
+                    if (File.Exists(ef)) File.Delete(ef);
+                }
+            }
+            if (itfPresent)
+            {
+                if (!string.IsNullOrEmpty(itfTemplate))
+                    File.WriteAllText(Path.Combine(dir, "itf.template.cpp"), itfTemplate);
+                else
+                {
+                    string tf = Path.Combine(dir, "itf.template.cpp");
+                    if (File.Exists(tf)) File.Delete(tf);
+                }
+            }
             string updated = updatedAt.Replace("\"", "").Replace("\\", "");
             File.WriteAllText(Path.Combine(dir, "meta.json"),
                 "{\"timeLimitMs\":" + timeMs + ",\"memLimitMB\":" + memMb
@@ -217,13 +285,56 @@ public sealed class AuthorClient
             }
 
             return new ProblemContent(title, desc, sampleIn, sampleOut,
-                new ProblemMeta(true, timeMs, memMb, tags.ToArray(), updatedAt), stdCode);
+                new ProblemMeta(true, timeMs, memMb, tags.ToArray(), updatedAt), stdCode, spjCode, entryCode, itfTemplate);
         }
         catch { return null; }
     }
 
     public void WriteProblemFile(int id, string name, string content)
         => File.WriteAllText(Path.Combine(ProblemDir(id), name), content);
+
+    // ===== 特殊判题器（SPJ） =====
+    public string SpjLoad(int id)
+    {
+        string p = SpjPath(id);
+        return File.Exists(p) ? File.ReadAllText(p) : "";
+    }
+
+    public void SpjSave(int id, string code)
+        => File.WriteAllText(SpjPath(id), code ?? "");
+
+    /// <summary>编译 spj.cpp → spj.exe（经 authorcore g++）。</summary>
+    public string SpjCompile(int id)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SpjExePath(id))!);
+        return Compile(SpjPath(id), SpjExePath(id));
+    }
+
+    // ===== 函数式判题：题目入口（entry.cpp）与接口模板（itf.template.cpp） =====
+    public string EntryLoad(int id)
+    {
+        string p = EntryPath(id);
+        return File.Exists(p) ? File.ReadAllText(p) : "";
+    }
+
+    public void EntrySave(int id, string code)
+        => File.WriteAllText(EntryPath(id), code ?? "");
+
+    /// <summary>编译 entry.cpp → entry.exe（经 authorcore g++）。</summary>
+    public string EntryCompile(int id)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(EntryExePath(id))!);
+        return Compile(EntryPath(id), EntryExePath(id));
+    }
+
+    public string ItfLoad(int id)
+    {
+        string p = ItfPath(id);
+        return File.Exists(p) ? File.ReadAllText(p) : "";
+    }
+
+    public void ItfSave(int id, string code)
+        => File.WriteAllText(ItfPath(id), code ?? "");
 
     // ===== 编译 / 生成答案 / 校验 / 发布（返回原生 JSON，由 BLL 解析） =====
     public string Compile(string src, string exe) => AuthorCoreInterop.Compile(src, exe);

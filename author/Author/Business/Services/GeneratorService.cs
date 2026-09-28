@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.IO;
+using System.Text.Json;
 using author.DataAccess;
 using author.DataAccess.Models;
 
@@ -104,6 +105,20 @@ public sealed class GeneratorService
     // ===== 本地测试（编译 / 运行 / 文件预览） =====
     // 生成数据落到固定相对路径 problems/{题号}/{生成器名}/（与客户端判题读取目录一致）。
 
+    /// <summary>把生成器编译产物（exe）上传到数据库；失败返回错误信息，成功返回 null。</summary>
+    private string? UploadExe(int problemId, int generatorId, string name)
+    {
+        try
+        {
+            string exePath = _author.GenExePathSafe(problemId, name);
+            if (!File.Exists(exePath)) return "未找到编译产物";
+            string b64 = Convert.ToBase64String(File.ReadAllBytes(exePath));
+            var (ok, msg) = _db.UpdateExe(generatorId, b64);
+            return ok ? null : msg;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     public Task<JobResult> CompileAsync(int problemId, int id, string name, string code)
         => _build.RunAsync(PGate(problemId), () =>
         {
@@ -113,9 +128,14 @@ public sealed class GeneratorService
             if (!r.Contains("\"ok\":true"))
                 return new JobResult(false, "保存失败：" + AuthorClient.ParseError(r));
             string rc = _author.GenCompile(problemId, name);
-            return rc.Contains("\"ok\":true")
-                ? new JobResult(true, "编译成功 ✓")
-                : new JobResult(false, "编译失败：" + AuthorClient.ParseError(rc));
+            if (!rc.Contains("\"ok\":true"))
+                return new JobResult(false, "编译失败：" + AuthorClient.ParseError(rc));
+
+            // 上传编译产物（二进制）到数据库，客户端拉取后直接运行生成数据，无需本地 g++。
+            string? upErr = UploadExe(problemId, id, name);
+            return new JobResult(true, upErr == null
+                ? "编译成功 ✓；二进制已上传"
+                : "编译成功 ✓；二进制上传失败：" + upErr);
         });
 
     public Task<JobResult> RunAsync(int problemId, int id, string name, int n)
@@ -129,6 +149,7 @@ public sealed class GeneratorService
             string rc = _author.GenCompile(problemId, name);
             if (!rc.Contains("\"ok\":true"))
                 return new JobResult(false, "编译失败：" + AuthorClient.ParseError(rc));
+            UploadExe(problemId, id, name);   // 同步上传二进制（失败不阻断本地生成数据）
             string rr = _author.GenRun(problemId, name, n);
             try
             {

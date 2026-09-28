@@ -15,6 +15,12 @@ public class JudgeService
 
     public Task<List<Problem>?> GetProblemsAsync() => _api.GetProblemsAsync();
 
+    /// <summary>按需拉取某题完整详情到本地（登录后列表只同步索引，点开题目时再下载）。</summary>
+    public Task<bool> FetchProblemAsync(int problemId) => _api.FetchProblemAsync(problemId);
+
+    /// <summary>读取某题完整详情（本地缓存）。</summary>
+    public Task<Problem?> GetProblemAsync(int problemId) => _api.GetProblemAsync(problemId);
+
     /// <summary>获取某用户在某题（某比赛，contestId=0 为练习）下的最近一次提交（含代码）。</summary>
     public Task<UserSolution?> GetUserSolutionAsync(int problemId, string username, int contestId)
         => _api.GetUserSolutionAsync(problemId, username, contestId);

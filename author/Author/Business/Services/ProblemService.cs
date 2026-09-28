@@ -74,10 +74,35 @@ public sealed class ProblemService
             if (!r.Contains("\"ok\":true"))
                 return new JobResult(false, AuthorClient.ParseError(r));
             string rm = _author.SaveMeta(id, timeMs, memMb, tags);
-            return rm.Contains("\"ok\":true")
-                ? new JobResult(true, $"已保存（{timeMs}ms / {memMb}MB / {string.Join(",", tags)}）")
-                : new JobResult(false, AuthorClient.ParseError(rm));
+            if (!rm.Contains("\"ok\":true"))
+                return new JobResult(false, AuthorClient.ParseError(rm));
+
+            // 保存题面后同步到数据库（客户端从数据库拉取题目信息，保存即生效）。
+            string dbMsg = SyncToMySql(id);
+
+            return new JobResult(true,
+                $"已保存（{timeMs}ms / {memMb}MB / {string.Join(",", tags)}）" + dbMsg);
         });
+
+    /// <summary>把题目信息同步到数据库（保留当前公开状态）。返回附加提示文本。</summary>
+    private string SyncToMySql(int id)
+    {
+        try
+        {
+            bool isPublic = true;
+            var vis = _author.GetProblemVisibility();
+            if (vis.TryGetValue(id, out var v)) isPublic = v;
+
+            string m = _author.PublishToMySql(id, isPublic);
+            return m.Contains("\"ok\":true")
+                ? "；已同步到数据库"
+                : "；数据库同步失败：" + AuthorClient.ParseError(m);
+        }
+        catch (Exception ex)
+        {
+            return "；数据库同步失败：" + ex.Message;
+        }
+    }
 
     public Task<List<DataPair>> ListDataAsync(int id)
         => _build.RunAsync(Gate(id), () => _author.ListDataPairs(id));
@@ -110,6 +135,52 @@ public sealed class ProblemService
             return r.Contains("\"ok\":true")
                 ? new JobResult(true, okMessage)
                 : new JobResult(false, "编译失败：" + AuthorClient.ParseError(r));
+        });
+
+    /// <summary>保存 SPJ 特殊判题器源码（不编译）。</summary>
+    public Task<JobResult> SaveSpjAsync(int id, string code)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            _author.SpjSave(id, code);
+            return new JobResult(true, "已保存 SPJ");
+        });
+
+    /// <summary>保存并编译 SPJ 特殊判题器。</summary>
+    public Task<JobResult> CompileSpjAsync(int id, string code)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            _author.SpjSave(id, code);
+            string r = _author.SpjCompile(id);
+            return r.Contains("\"ok\":true")
+                ? new JobResult(true, "SPJ 编译成功 ✓")
+                : new JobResult(false, "SPJ 编译失败：" + AuthorClient.ParseError(r));
+        });
+
+    /// <summary>保存题目入口源码（entry.cpp，不编译）。</summary>
+    public Task<JobResult> SaveEntryAsync(int id, string code)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            _author.EntrySave(id, code);
+            return new JobResult(true, "已保存题目入口");
+        });
+
+    /// <summary>保存并编译题目入口 entry.cpp → entry.exe。</summary>
+    public Task<JobResult> CompileEntryAsync(int id, string code)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            _author.EntrySave(id, code);
+            string r = _author.EntryCompile(id);
+            return r.Contains("\"ok\":true")
+                ? new JobResult(true, "题目入口编译成功 ✓")
+                : new JobResult(false, "题目入口编译失败：" + AuthorClient.ParseError(r));
+        });
+
+    /// 保存接口模板（itf.template.cpp，用户实现的函数骨架，.cpp 文件）。
+    public Task<JobResult> SaveItfAsync(int id, string code)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            _author.ItfSave(id, code);
+            return new JobResult(true, "已保存接口模板");
         });
 
     /// <summary>运行标程对所有 *.in 生成 *.out（stdout 重定向到对应 .out 文件）。</summary>

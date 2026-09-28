@@ -47,6 +47,9 @@ public partial class MainWindow : Window
     // 提交记录缓存（双击查看代码用）
     private List<ContestSubmission> _contestSubs = new();
 
+    // 题目详情缓存（点开时按需拉取，避免重复下载）
+    private readonly Dictionary<int, Problem> _detailCache = new();
+
     public MainWindow(JudgeService judge, AuthService auth, LocalIdentityService identity)
     {
         InitializeComponent();
@@ -380,16 +383,39 @@ public partial class MainWindow : Window
         SolveProgress.Value = solved;
     }
 
-    private void ProblemList_OnSelected(object sender, SelectionChangedEventArgs e)
+    private async void ProblemList_OnSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (ProblemList.SelectedItem is ProblemRow row)
-            ShowProblemDescription(row.Problem);
+        if (ProblemList.SelectedItem is not ProblemRow row) return;
+        var full = await EnsureProblemDetailAsync(row.Problem);
+        ShowProblemDescription(full);
     }
 
-    private void ProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
+    private async void ProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ProblemList.SelectedItem is ProblemRow row)
-            OpenSolveWindow(row.Problem, null, false);
+        if (ProblemList.SelectedItem is not ProblemRow row) return;
+        var full = await EnsureProblemDetailAsync(row.Problem);
+        OpenSolveWindow(full, null, false);
+    }
+
+    /// <summary>列表项只含 id/title/tags，点开时按需下载完整题面并缓存。</summary>
+    private async Task<Problem> EnsureProblemDetailAsync(Problem p)
+    {
+        if (!string.IsNullOrEmpty(p.Description)) return p;
+        if (_detailCache.TryGetValue(p.Id, out var cached)) return cached;
+        try
+        {
+            if (await _judge.FetchProblemAsync(p.Id))
+            {
+                var full = await _judge.GetProblemAsync(p.Id);
+                if (full is not null && !string.IsNullOrEmpty(full.Description))
+                {
+                    _detailCache[p.Id] = full;
+                    return full;
+                }
+            }
+        }
+        catch { /* 拉取失败则退回仅有标题的列表项 */ }
+        return p;
     }
 
     private void ShowProblemDescription(Problem p)
@@ -695,16 +721,15 @@ public partial class MainWindow : Window
         RoomSolvePanel.Visibility = Visibility.Visible;
     }
 
-    private void OnSelectContestProblem(object sender, SelectionChangedEventArgs e)
+    private async void OnSelectContestProblem(object sender, SelectionChangedEventArgs e)
     {
-        if (ContestProblemList.SelectedItem is ProblemRow row)
-        {
-            _currentContestProblem = row.Problem;
-            ShowContestProblemDescription(row.Problem);
-        }
+        if (ContestProblemList.SelectedItem is not ProblemRow row) return;
+        _currentContestProblem = row.Problem;
+        var full = await EnsureProblemDetailAsync(row.Problem);
+        ShowContestProblemDescription(full);
     }
 
-    private void ContestProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
+    private async void ContestProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (_roomContest is null) return;
         if (_roomViewOnly)
@@ -712,8 +737,9 @@ public partial class MainWindow : Window
             MessageBox.Show("未报名，仅可查看题面，无法提交");
             return;
         }
-        if (ContestProblemList.SelectedItem is ProblemRow row)
-            OpenSolveWindow(row.Problem, _roomContest, _roomVirtual);
+        if (ContestProblemList.SelectedItem is not ProblemRow row) return;
+        var full = await EnsureProblemDetailAsync(row.Problem);
+        OpenSolveWindow(full, _roomContest, _roomVirtual);
     }
 
     private void ShowContestProblemDescription(Problem p)

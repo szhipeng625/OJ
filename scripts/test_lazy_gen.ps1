@@ -16,7 +16,9 @@ public static class OJ {
         [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
     [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr oj_mysql_sync_problems();
+    public static extern IntPtr oj_mysql_sync_problem_list();
+    [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr oj_mysql_fetch_problem(int problem_id);
     [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr oj_ensure_problem_data(int problem_id);
     [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
@@ -37,14 +39,19 @@ function Take($p) {
 
 "=== 1. sync (should NOT generate data) ==="
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$syncRes = Take([OJ]::oj_mysql_sync_problems())
+$syncRes = Take([OJ]::oj_mysql_sync_problem_list())
 $sw.Stop()
 "sync took $($sw.ElapsedMilliseconds) ms -> $syncRes"
 ""
-"=== files after sync (expect NO .in/.out, only gen.cpp/genmeta.txt) ==="
+"=== files after sync (expect only encrypted _index.json) ==="
 Get-ChildItem $problemDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Replace($problemDir,'') }
 ""
-"=== 2. ensure_problem_data(111) (should generate data) ==="
+"=== 2. fetch_problem(111) (should materialize encrypted sources, NO .in/.out) ==="
+$fetchRes = Take([OJ]::oj_mysql_fetch_problem(111))
+"fetch -> $fetchRes"
+Get-ChildItem $problemDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Replace($problemDir,'') }
+""
+"=== 3. ensure_problem_data(111) (should generate data) ==="
 $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
 $ens = Take([OJ]::oj_ensure_problem_data(111))
 $sw2.Stop()
@@ -53,7 +60,7 @@ $sw2.Stop()
 "=== files after ensure (expect .in/.out + .genhash) ==="
 Get-ChildItem $problemDir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Replace($problemDir,'') }
 ""
-"=== 3. ensure again (should be cached/fast) ==="
+"=== 4. ensure again (should be cached/fast) ==="
 $sw3 = [System.Diagnostics.Stopwatch]::StartNew()
 $ens2 = Take([OJ]::oj_ensure_problem_data(111))
 $sw3.Stop()

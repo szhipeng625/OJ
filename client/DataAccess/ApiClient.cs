@@ -53,12 +53,25 @@ public class ApiClient
         catch { MySqlEnabled = false; }
     }
 
-    /// <summary>从中间层拉取题目/比赛到本地目录（本地文件作为缓存，判题仍走文件）。</summary>
+    /// <summary>登录后仅同步轻量题目列表索引 + 比赛配置到本地（不下载题面/标程/生成器）。</summary>
     public void SyncProblems()
     {
         if (!MySqlEnabled) return;
-        try { OJInterop.SyncProblemsJson(); } catch { /* 同步失败回退本地题目 */ }
+        try { OJInterop.SyncProblemListJson(); } catch { /* 同步失败回退本地题目 */ }
     }
+
+    /// <summary>按需拉取某题完整详情到本地（题面/样例/标程/生成器），加密缓存。</summary>
+    public Task<bool> FetchProblemAsync(int problemId)
+        => Task.Run(() =>
+        {
+            if (!MySqlEnabled) return false;
+            var j = JsonDocument.Parse(OJInterop.FetchProblemJson(problemId)).RootElement;
+            return j.TryGetProperty("ok", out var ok) && ok.GetBoolean();
+        });
+
+    /// <summary>读取某题完整详情（本地缓存，解密）。未拉取过返回 null。</summary>
+    public Task<Problem?> GetProblemAsync(int problemId)
+        => Task.Run(() => JsonSerializer.Deserialize<Problem>(OJInterop.GetProblemJson(problemId), Opt));
 
     // ---------- 题库 / 判题 ----------
 

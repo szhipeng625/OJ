@@ -20,6 +20,9 @@ struct CaseResult {
 // 把用户源码编译为 exe。返回 true 成功，false 失败（errMsg 填编译器 stderr）。
 bool compile_cpp(const std::string& srcFile, const std::string& exeFile, std::string& errMsg);
 
+// 把用户源码编译为共享库 DLL（函数式判题用）。返回 true 成功，false 失败（errMsg 填编译器 stderr）。
+bool compile_shared(const std::string& srcFile, const std::string& dllFile, std::string& errMsg);
+
 // 判题选项
 struct JudgeOptions {
     DWORD timeoutMs = 1000;                              // 单测时间限制
@@ -29,10 +32,22 @@ struct JudgeOptions {
 // 对 testDir 下各数据生成器子目录（含 gen.cpp 的二级目录）的 *.in 运行 exe，
 // 返回逐测试点结果。生成器子目录名体现在用例名（如 "juhua/1"），未通过的用例
 // info 为该生成器 desc.txt 的描述文本。按文本比对（normalize 后逐行）。
+// spjExe 非空时启用特殊判题：运行 spj.exe <用户输出> <标准输出> <输入>，退出码 0=通过。
 std::vector<CaseResult> run_tests(const std::string& exeFile,
                                   const std::string& testDir,
                                   const std::string& tempOut,
-                                  const JudgeOptions& opt);
+                                  const JudgeOptions& opt,
+                                  const std::string& spjExe = "");
+
+// 函数式判题：入口 exe 加载用户 DLL 并调用接口函数 solve，仅计时接口调用本身。
+// 入口调用约定：entry.exe <user.dll> <输入文件> <输出文件> <时间文件>；
+// 入口把 solve 耗时（毫秒）写入时间文件，judge 读取后作为 case.timeMs，再比对输出。
+std::vector<CaseResult> run_tests_entry(const std::string& entryExe,
+                                        const std::string& dll,
+                                        const std::string& testDir,
+                                        const std::string& tempOut,
+                                        const JudgeOptions& opt,
+                                        const std::string& spjExe = "");
 
 // 汇总整体判定：CE > TLE > RE/SE > WA > AC
 std::string summarize(const std::vector<CaseResult>& cases);

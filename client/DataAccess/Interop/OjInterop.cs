@@ -96,7 +96,13 @@ public static class OJInterop
     private static extern IntPtr oj_mysql_init_schema();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr oj_mysql_sync_problems();
+    private static extern IntPtr oj_mysql_sync_problem_list();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_mysql_fetch_problem(int problem_id);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_get_problem(int id);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_register([MarshalAs(UnmanagedType.LPUTF8Str)] string u,
@@ -142,6 +148,8 @@ public static class OJInterop
         => oj_init_redis(host, port);
 
     public static string GetProblemsJson() => PtrToString(oj_get_problems());
+
+    public static string GetProblemJson(int id) => PtrToString(oj_get_problem(id));
 
     public static string GetUserSolutionJson(int problemId, string username, int contestId)
         => PtrToString(oj_get_user_solution(problemId, username, contestId));
@@ -191,7 +199,8 @@ public static class OJInterop
         => oj_init_middleware(url, problemDir, dataDir);
 
     public static string InitMysqlSchemaJson() => PtrToString(oj_mysql_init_schema());
-    public static string SyncProblemsJson() => PtrToString(oj_mysql_sync_problems());
+    public static string SyncProblemListJson() => PtrToString(oj_mysql_sync_problem_list());
+    public static string FetchProblemJson(int problemId) => PtrToString(oj_mysql_fetch_problem(problemId));
     public static string RegisterJson(string u, string p, string email, string name, string school)
         => PtrToString(oj_register(u, p, email, name, school));
     public static string LoginJson(string u, string p) => PtrToString(oj_login(u, p));

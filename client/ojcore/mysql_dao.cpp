@@ -3,6 +3,7 @@
 #include "http_client.h"
 #include "judge.h"
 #include "json.hpp"
+#include "crypt.h"
 
 #include <algorithm>
 #include <fstream>
@@ -144,24 +145,40 @@ ProcResult RunRedirect(const std::string& exe, const std::string& args,
 // dirName: 磁盘目录名（ASCII 安全，避免中文名经 ANSI API 出现编码问题）
 struct GenInfo { std::string name; std::string dirName; int count; int seedBase; std::string marker; std::string hash; };
 
-// 重新生成某题的判题数据：编译标程 + 编译运行各生成器（确定性种子）→ .in，再跑标程 → .out。
+// 重新生成某题的判题数据：优先使用数据库下发的二进制（std.exe / gen.exe）直接运行，
+// 缺失时才回退到本地 g++ 编译源码。运行生成器（确定性种子）→ .in，再跑标程 → .out。
+// std.exe / gen.exe 生成后保留在磁盘上，供后续判题直接复用（避免重复编译）。
 bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& gens,
                            std::string& errOut) {
     if (gens.empty()) return true;
 
-    std::string stdSrc = dir + "\\std.cpp";
+    // 标程二进制：数据库下发的 std.exe 优先，否则本地编译 std.cpp。
     std::string stdExe = dir + "\\std.exe";
     std::string cerr;
-    if (!oj::compile_cpp(stdSrc, stdExe, cerr)) { errOut = "标程编译失败：" + cerr; return false; }
+    if (!ExistsFile(stdExe)) {
+        std::string stdSrc = dir + "\\std.tmp.cpp";
+        WriteFileBin(stdSrc, oj::read_enc_file(dir + "\\std.cpp"));
+        if (!oj::compile_cpp(stdSrc, stdExe, cerr)) {
+            DeleteFileA(stdSrc.c_str());
+            errOut = "标程编译失败：" + cerr;
+            return false;
+        }
+        DeleteFileA(stdSrc.c_str());
+    }
 
     for (auto& g : gens) {
         std::string gdir = dir + "\\" + g.dirName;
         Mkdirs(gdir);
         std::string gexe = gdir + "\\gen.exe";
-        if (!oj::compile_cpp(gdir + "\\gen.cpp", gexe, cerr)) {
-            DeleteFileA(stdExe.c_str());
-            errOut = "生成器 " + g.name + " 编译失败：" + cerr;
-            return false;
+        if (!ExistsFile(gexe)) {
+            std::string genSrc = gdir + "\\gen.tmp.cpp";
+            WriteFileBin(genSrc, oj::read_enc_file(gdir + "\\gen.cpp"));
+            if (!oj::compile_cpp(genSrc, gexe, cerr)) {
+                DeleteFileA(genSrc.c_str());
+                errOut = "生成器 " + g.name + " 编译失败：" + cerr;
+                return false;
+            }
+            DeleteFileA(genSrc.c_str());
         }
         // 清空旧 .in/.out
         for (const char* ext : { ".in", ".out" }) {
@@ -183,14 +200,12 @@ bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& g
             std::string outFile = gdir + "\\" + std::to_string(i) + ".in";
             ProcResult rr = RunRedirect(gexe, args, "", outFile, gdir, 60000);
             if (!rr.ok) {
-                DeleteFileA(gexe.c_str()); DeleteFileA(stdExe.c_str());
                 errOut = "生成器 " + g.name + " 第 " + std::to_string(i) + " 组失败："
                     + (rr.timeout ? "超时" : "退出码 " + std::to_string(rr.exitCode))
                     + (rr.errText.empty() ? "" : "：" + rr.errText.substr(0, 120));
                 return false;
             }
         }
-        DeleteFileA(gexe.c_str());
 
         // 跑标程生成 .out（生成阶段给足 60s，避免大数据点被过短超时误杀）
         for (int i = 1; i <= g.count; ++i) {
@@ -198,14 +213,12 @@ bool RegenerateProblemData(const std::string& dir, const std::vector<GenInfo>& g
             std::string outFile = gdir + "\\" + std::to_string(i) + ".out";
             ProcResult rr = RunRedirect(stdExe, "", inFile, outFile, "", 60000);
             if (!rr.ok) {
-                DeleteFileA(stdExe.c_str());
                 errOut = "标程运行 " + g.name + "/" + std::to_string(i) + " 失败："
                     + (rr.timeout ? "超时" : "退出码 " + std::to_string(rr.exitCode));
                 return false;
             }
         }
     }
-    DeleteFileA(stdExe.c_str());
     return true;
 }
 
@@ -225,6 +238,67 @@ void middleware_set_url(const std::string& url) {
 const std::string& middleware_url() { return g_middleware_url; }
 void middleware_set_token(const std::string& token) { g_middleware_token = token; }
 const std::string& middleware_token() { return g_middleware_token; }
+
+// ---------- base64（二进制可执行文件经 JSON 字段传输） ----------
+static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string base64_encode(const std::string& in) {
+    std::string out;
+    out.reserve(((in.size() + 2) / 3) * 4);
+    unsigned char a3[3], a4[4];
+    size_t i = 0;
+    for (; i + 2 < in.size(); i += 3) {
+        a3[0] = (unsigned char)in[i];
+        a3[1] = (unsigned char)in[i + 1];
+        a3[2] = (unsigned char)in[i + 2];
+        a4[0] = (a3[0] >> 2) & 0x3f;
+        a4[1] = ((a3[0] & 0x03) << 4) | ((a3[1] >> 4) & 0x0f);
+        a4[2] = ((a3[1] & 0x0f) << 2) | ((a3[2] >> 6) & 0x03);
+        a4[3] = a3[2] & 0x3f;
+        for (int k = 0; k < 4; ++k) out += kB64[a4[k]];
+    }
+    if (i < in.size()) {
+        size_t left = in.size() - i;
+        a3[0] = (unsigned char)in[i];
+        a3[1] = left > 1 ? (unsigned char)in[i + 1] : 0;
+        a3[2] = 0;
+        a4[0] = (a3[0] >> 2) & 0x3f;
+        a4[1] = ((a3[0] & 0x03) << 4) | ((a3[1] >> 4) & 0x0f);
+        a4[2] = left > 1 ? ((a3[1] & 0x0f) << 2) : 64;
+        a4[3] = 64;
+        for (int k = 0; k < 4; ++k) {
+            out += (a4[k] == 64) ? '=' : kB64[a4[k]];
+        }
+    }
+    return out;
+}
+
+static int b64val(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+std::string base64_decode(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() * 3 / 4 + 4);
+    int val = 0, bits = -8;
+    for (unsigned char c : in) {
+        if (c == '=' || c == '\r' || c == '\n') break;
+        int v = b64val(c);
+        if (v < 0) continue;
+        val = (val << 6) + v;
+        bits += 6;
+        if (bits >= 0) {
+            out += (char)((val >> bits) & 0xff);
+            bits -= 8;
+        }
+    }
+    return out;
+}
 
 static std::string UrlEncode(const std::string& s) {
     std::string out;
@@ -271,9 +345,9 @@ static bool mw_ok(const std::string& resp, const std::string& fallback, std::str
     return false;
 }
 
-// ---------- 中间层模式下把题目/比赛物化到本地 ----------
-static bool middleware_sync_problems(const std::string& problem_dir, const std::string& server_root,
-                                     std::string& err) {
+// ---------- 中间层模式下物化数据到本地（题目列表索引 + 比赛配置，轻量；题目详情按需拉取） ----------
+static bool middleware_sync_problem_list(const std::string& problem_dir, const std::string& server_root,
+                                         std::string& err) {
     if (problem_dir.empty()) { err = "题目目录为空"; return false; }
     CreateDirectoryA(problem_dir.c_str(), nullptr);
 
@@ -283,103 +357,31 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
         return false;
     }
 
-    std::vector<int> ids;
+    // 只物化轻量索引：id / title / tags / 时限 / 内存（不下载题面/标程/生成器）
+    json index = json::array();
     try {
         json arr = json::parse(r.body);
-        if (arr.is_array())
+        if (arr.is_array()) {
             for (auto& it : arr) {
                 int id = it.value("id", 0);
-                bool pub = it.value("isPublic", false);
-                if (id > 0 && pub) ids.push_back(id);
+                if (id <= 0 || !it.value("isPublic", false)) continue;
+                json tags = it.contains("tags") ? it["tags"] : json::array();
+                index.push_back({{"id", id},
+                                 {"title", it.value("title", "")},
+                                 {"description", ""},
+                                 {"sampleIn", ""},
+                                 {"sampleOut", ""},
+                                 {"timeLimitMs", it.value("timeMs", 1000)},
+                                 {"memLimitMB", it.value("memMb", 256)},
+                                 {"tags", tags},
+                                 {"samples", json::array()}});
             }
+        }
     } catch (...) { err = "题目列表解析失败"; return false; }
 
-    for (int id : ids) {
-        HttpResp pr;
-        if (!http_request("GET", g_middleware_url, "/api/problem?id=" + std::to_string(id), "", "", pr, e)
-            || pr.status != 200) continue;
-        json p;
-        try { p = json::parse(pr.body); } catch (...) { continue; }
-        if (!p.value("ok", false)) continue;
+    oj::write_enc_file(problem_dir + "\\_index.json", index.dump());
 
-        std::string title = p.value("title", "");
-        std::string desc = p.value("description", "");
-        std::string sampleIn = p.value("sampleIn", "");
-        std::string sampleOut = p.value("sampleOut", "");
-        int timeMs = p.value("timeMs", 1000); if (timeMs <= 0) timeMs = 1000;
-        int memMb = p.value("memMb", 256); if (memMb <= 0) memMb = 256;
-        std::string tags = p.value("tags", json::array()).dump();
-        std::string stdCode = p.value("stdCode", "");
-
-        std::string dir = problem_dir + "\\" + std::to_string(id);
-        Mkdirs(dir);
-        WriteFileBin(dir + "\\statement.txt", title + "\n" + desc);
-        WriteFileBin(dir + "\\sample.in", sampleIn);
-        WriteFileBin(dir + "\\sample.out", sampleOut);
-        std::string meta = "{\"timeLimitMs\":" + std::to_string(timeMs)
-            + ",\"memLimitMB\":" + std::to_string(memMb)
-            + ",\"tags\":" + (tags.empty() ? "[]" : tags) + "}";
-        WriteFileBin(dir + "\\meta.json", meta);
-        if (!stdCode.empty()) WriteFileBin(dir + "\\std.cpp", stdCode);
-
-        // 仅物化生成器源码与元数据（不生成数据）；数据在判题时按需生成（ensure_problem_data）
-        std::vector<std::string> knownDirs;
-        for (auto& g : p.value("generators", json::array())) {
-            std::string name = g.value("name", "");
-            int count = g.value("genCount", 0);
-            int gid = g.value("id", 0);
-            std::string code = g.value("code", "");
-            std::string gdesc = g.value("description", "");
-            if (name.empty() || count <= 0) continue;
-
-            // 确定性 seedBase（与中间层 bind_generator 同公式）
-            unsigned long long gh = HashString(name);
-            int seedBase = (int)(((unsigned long long)id * 1000003ull + gh) & 0x7fffffff);
-
-            // 目录名用生成器 id（纯 ASCII），避免中文名经 ANSI 文件 API 出现编码问题
-            std::string dirName = gid > 0 ? ("g" + std::to_string(gid))
-                                          : ("g_" + ToHex(gh));
-            std::string gdir = dir + "\\" + dirName;
-            Mkdirs(gdir);
-            WriteFileBin(gdir + "\\gen.cpp", code);
-            WriteFileBin(gdir + "\\desc.txt", gdesc);
-            // 持久化生成参数，供判题时按需生成数据
-            json gm = {{"count", count}, {"seedBase", seedBase}, {"name", name}};
-            WriteFileBin(gdir + "\\genmeta.txt", gm.dump());
-            knownDirs.push_back(dirName);
-        }
-        // 清理已删除的生成器目录
-        {
-            std::string pat = dir + "\\*";
-            WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
-            if (h != INVALID_HANDLE_VALUE) {
-                do {
-                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-                    std::string n = fd.cFileName;
-                    if (n == "." || n == "..") continue;
-                    bool known = false;
-                    for (auto& kd : knownDirs) if (kd == n) { known = true; break; }
-                    if (!known && ExistsFile(dir + "\\" + n + "\\gen.cpp"))
-                        RemoveDir(dir + "\\" + n);
-                } while (FindNextFileA(h, &fd));
-                FindClose(h);
-            }
-        }
-
-        // 题目测试样例（丰富题面/调试用）：物化到 testcases.json
-        {
-            HttpResp tr;
-            if (http_request("GET", g_middleware_url, "/api/testcases?problemId=" + std::to_string(id), "", "", tr, e) && tr.status == 200) {
-                try {
-                    json tj = json::object();
-                    tj["cases"] = json::parse(tr.body);
-                    WriteFileBin(dir + "\\testcases.json", tj.dump());
-                } catch (...) {}
-            }
-        }
-    }
-
-    // 比赛
+    // 比赛配置（轻量，登录时一并同步）
     if (!server_root.empty()) {
         HttpResp cr;
         if (http_request("GET", g_middleware_url, "/api/contests", "", "", cr, e) && cr.status == 200) {
@@ -392,11 +394,130 @@ static bool middleware_sync_problems(const std::string& problem_dir, const std::
                         if (cid <= 0 || content.empty()) continue;
                         std::string cdir = server_root + "\\contests\\" + std::to_string(cid);
                         Mkdirs(cdir);
-                        WriteFileBin(cdir + "\\contest.json", content);
+                        oj::write_enc_file(cdir + "\\contest.json", content);
                     }
             } catch (...) {}
         }
     }
+    return true;
+}
+
+// 按需下载某题完整数据（题面/样例/标程/生成器/测试样例），加密落盘。
+static bool middleware_fetch_problem(int id, const std::string& problem_dir, std::string& err) {
+    if (id <= 0) { err = "题目编号无效"; return false; }
+    CreateDirectoryA(problem_dir.c_str(), nullptr);
+
+    HttpResp pr; std::string e;
+    if (!http_request("GET", g_middleware_url, "/api/problem?id=" + std::to_string(id), "", "", pr, e)
+        || pr.status != 200) {
+        err = "获取题目详情失败: " + (e.empty() ? ("HTTP " + std::to_string(pr.status)) : e);
+        return false;
+    }
+    json p;
+    try { p = json::parse(pr.body); } catch (...) { err = "题目详情解析失败"; return false; }
+    if (!p.value("ok", false)) { err = p.value("error", "题目不存在"); return false; }
+
+    std::string title = p.value("title", "");
+    std::string desc = p.value("description", "");
+    std::string sampleIn = p.value("sampleIn", "");
+    std::string sampleOut = p.value("sampleOut", "");
+    int timeMs = p.value("timeMs", 1000); if (timeMs <= 0) timeMs = 1000;
+    int memMb = p.value("memMb", 256); if (memMb <= 0) memMb = 256;
+    std::string tags = p.contains("tags") ? p["tags"].dump() : "[]";
+    std::string stdCode = p.value("stdCode", "");
+    int judgeMode = p.value("judgeMode", 0);
+
+    std::string dir = problem_dir + "\\" + std::to_string(id);
+    Mkdirs(dir);
+    oj::write_enc_file(dir + "\\statement.txt", title + "\n" + desc);
+    oj::write_enc_file(dir + "\\sample.in", sampleIn);
+    oj::write_enc_file(dir + "\\sample.out", sampleOut);
+    std::string meta = "{\"timeLimitMs\":" + std::to_string(timeMs)
+        + ",\"memLimitMB\":" + std::to_string(memMb)
+        + ",\"judgeMode\":" + std::to_string(judgeMode)
+        + ",\"tags\":" + (tags.empty() ? "[]" : tags) + "}";
+    oj::write_enc_file(dir + "\\meta.json", meta);
+    if (!stdCode.empty()) oj::write_enc_file(dir + "\\std.cpp", stdCode);
+
+    // 标程编译产物（二进制）：数据库已编译好的 std.exe，base64 解码落盘。
+    std::string stdExe = p.value("stdExe", "");
+    if (!stdExe.empty()) WriteFileBin(dir + "\\std.exe", oj::base64_decode(stdExe));
+    else DeleteFileA((dir + "\\std.exe").c_str());
+
+    // 特殊判题器 SPJ：spj.cpp 源码 + spj.exe 二进制（base64），存在时客户端判题启用 SPJ。
+    std::string spjCode = p.value("spjCode", "");
+    if (!spjCode.empty()) oj::write_enc_file(dir + "\\spj.cpp", spjCode);
+    else DeleteFileA((dir + "\\spj.cpp").c_str());
+    std::string spjExe = p.value("spjExe", "");
+    if (!spjExe.empty()) WriteFileBin(dir + "\\spj.exe", oj::base64_decode(spjExe));
+    else DeleteFileA((dir + "\\spj.exe").c_str());
+
+    // 函数式判题：题目入口 entry.cpp/entry.exe + 接口模板 itf.template.txt。
+    std::string entryCode = p.value("entryCode", "");
+    if (!entryCode.empty()) oj::write_enc_file(dir + "\\entry.cpp", entryCode);
+    else DeleteFileA((dir + "\\entry.cpp").c_str());
+    std::string entryExe = p.value("entryExe", "");
+    if (!entryExe.empty()) WriteFileBin(dir + "\\entry.exe", oj::base64_decode(entryExe));
+    else DeleteFileA((dir + "\\entry.exe").c_str());
+    std::string itfTemplate = p.value("itfTemplate", "");
+    if (!itfTemplate.empty()) oj::write_enc_file(dir + "\\itf.template.cpp", itfTemplate);
+    else DeleteFileA((dir + "\\itf.template.cpp").c_str());
+
+    // 生成器源码与元数据（不生成数据）；数据在判题时按需生成（ensure_problem_data）
+    std::vector<std::string> knownDirs;
+    for (auto& g : p.value("generators", json::array())) {
+        std::string name = g.value("name", "");
+        int count = g.value("genCount", 0);
+        int gid = g.value("id", 0);
+        std::string code = g.value("code", "");
+        std::string gdesc = g.value("description", "");
+        if (name.empty() || count <= 0) continue;
+
+        unsigned long long gh = HashString(name);
+        int seedBase = (int)(((unsigned long long)id * 1000003ull + gh) & 0x7fffffff);
+        std::string dirName = gid > 0 ? ("g" + std::to_string(gid)) : ("g_" + ToHex(gh));
+        std::string gdir = dir + "\\" + dirName;
+        Mkdirs(gdir);
+        oj::write_enc_file(gdir + "\\gen.cpp", code);
+        oj::write_enc_file(gdir + "\\desc.txt", gdesc);
+        // 生成器编译产物（二进制）：数据库已编译好的 gen.exe，base64 解码落盘。
+        std::string gexe = g.value("exe", "");
+        if (!gexe.empty()) WriteFileBin(gdir + "\\gen.exe", oj::base64_decode(gexe));
+        else DeleteFileA((gdir + "\\gen.exe").c_str());
+        json gm = {{"count", count}, {"seedBase", seedBase}, {"name", name}};
+        oj::write_enc_file(gdir + "\\genmeta.txt", gm.dump());
+        knownDirs.push_back(dirName);
+    }
+    // 清理已删除的生成器目录
+    {
+        std::string pat = dir + "\\*";
+        WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                std::string n = fd.cFileName;
+                if (n == "." || n == "..") continue;
+                bool known = false;
+                for (auto& kd : knownDirs) if (kd == n) { known = true; break; }
+                if (!known && ExistsFile(dir + "\\" + n + "\\gen.cpp"))
+                    RemoveDir(dir + "\\" + n);
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+    }
+
+    // 题目测试样例（丰富题面/调试用）
+    {
+        HttpResp tr;
+        if (http_request("GET", g_middleware_url, "/api/testcases?problemId=" + std::to_string(id), "", "", tr, e) && tr.status == 200) {
+            try {
+                json tj = json::object();
+                tj["cases"] = json::parse(tr.body);
+                oj::write_enc_file(dir + "\\testcases.json", tj.dump());
+            } catch (...) {}
+        }
+    }
+
     return true;
 }
 
@@ -591,13 +712,20 @@ bool mysql_list_users(std::string& out_json, std::string& err) {
 bool mysql_upsert_problem(int id, const std::string& title, const std::string& desc,
                           const std::string& sample_in, const std::string& sample_out,
                           int time_ms, int mem_mb, const std::string& tags_json,
-                          const std::string& std_code, bool is_public, std::string& err) {
+                          const std::string& std_code, const std::string& std_exe,
+                          const std::string& spj_code, const std::string& spj_exe,
+                          const std::string& entry_code, const std::string& entry_exe,
+                          const std::string& itf_template, int judge_mode,
+                          bool is_public, std::string& err) {
     int t = time_ms > 0 ? time_ms : 1000;
     int m = mem_mb > 0 ? mem_mb : 256;
     std::string tags = tags_json.empty() ? "[]" : tags_json;
     json b{{"id", id}, {"title", title}, {"description", desc}, {"sampleIn", sample_in},
            {"sampleOut", sample_out}, {"timeMs", t}, {"memMb", m}, {"tags", tags},
-           {"stdCode", std_code}, {"isPublic", is_public}};
+           {"stdCode", std_code}, {"stdExe", std_exe}, {"spjCode", spj_code}, {"spjExe", spj_exe},
+           {"entryCode", entry_code}, {"entryExe", entry_exe},
+           {"itfTemplate", itf_template}, {"judgeMode", judge_mode},
+           {"isPublic", is_public}};
     std::string resp, e;
     if (!mw_req("POST", "/api/problem/upsert", b.dump(), resp, e)) { err = e; return false; }
     return mw_ok(resp, "发布失败", err);
@@ -676,8 +804,12 @@ bool mysql_get_contest(int cid, std::string& out_json) {
     } catch (...) { return false; }
 }
 
-bool mysql_sync_problems(const std::string& problem_dir, const std::string& server_root, std::string& err) {
-    return middleware_sync_problems(problem_dir, server_root, err);
+bool mysql_sync_problem_list(const std::string& problem_dir, const std::string& server_root, std::string& err) {
+    return middleware_sync_problem_list(problem_dir, server_root, err);
+}
+
+bool mysql_fetch_problem(int id, const std::string& problem_dir, std::string& err) {
+    return middleware_fetch_problem(id, problem_dir, err);
 }
 
 // 判题前按需生成数据：读本地 gen.cpp / genmeta.txt / std.cpp，缓存过期或缺失时重新生成。
@@ -688,8 +820,10 @@ bool ensure_problem_data(int problem_id, const std::string& problem_dir, std::st
 
     std::string dir = problem_dir + "\\" + std::to_string(problem_id);
     if (!ExistsFile(dir)) { errOut = "题目目录不存在"; return false; }
-    std::string stdCode = ReadFileText(dir + "\\std.cpp");
-    if (stdCode.empty()) { errOut = "标程不存在"; return false; }
+    std::string stdCode = oj::read_enc_file(dir + "\\std.cpp");
+    std::string stdExePath = dir + "\\std.exe";
+    std::string stdExeBytes = ExistsFile(stdExePath) ? ReadFileText(stdExePath) : "";
+    if (stdCode.empty() && stdExeBytes.empty()) { errOut = "标程不存在"; return false; }
 
     std::vector<GenInfo> regenGens;
     std::string pat = dir + "\\*";
@@ -703,15 +837,20 @@ bool ensure_problem_data(int problem_id, const std::string& problem_dir, std::st
         std::string metaPath = gdir + "\\genmeta.txt";
         if (!ExistsFile(metaPath)) continue;   // 不是生成器目录（无 genmeta.txt）
         json mj;
-        try { mj = json::parse(ReadFileText(metaPath)); } catch (...) { continue; }
+        try { mj = json::parse(oj::read_enc_file(metaPath)); } catch (...) { continue; }
         int count = mj.value("count", 0);
         int seedBase = mj.value("seedBase", 0);
         std::string name = mj.value("name", "");
-        std::string code = ReadFileText(gdir + "\\gen.cpp");
-        if (count <= 0 || code.empty()) continue;
+        std::string code = oj::read_enc_file(gdir + "\\gen.cpp");
+        std::string genExePath = gdir + "\\gen.exe";
+        std::string genExeBytes = ExistsFile(genExePath) ? ReadFileText(genExePath) : "";
+        if (count <= 0 || (code.empty() && genExeBytes.empty())) continue;
 
-        std::string hashInput = code + "|" + std::to_string(count)
-            + "|" + std::to_string(seedBase) + "|" + stdCode;
+        // 缓存哈希以“实际用于生成数据的二进制”为准：有二进制用二进制，否则回退源码。
+        std::string hashInput = (genExeBytes.empty() ? code : genExeBytes)
+            + "|" + std::to_string(count)
+            + "|" + std::to_string(seedBase)
+            + "|" + (stdExeBytes.empty() ? stdCode : stdExeBytes);
         GenInfo gi;
         gi.name = name; gi.dirName = dn; gi.count = count; gi.seedBase = seedBase;
         gi.hash = ToHex(HashString(hashInput));
@@ -767,6 +906,13 @@ bool mysql_update_generator(int id, const std::string& code, const std::string& 
     std::string resp, e;
     if (!mw_req("POST", "/api/generator/update", b.dump(), resp, e)) { err = e; return false; }
     return mw_ok(resp, "更新生成器失败", err);
+}
+
+bool mysql_update_generator_exe(int id, const std::string& exe_base64, std::string& err) {
+    json b{{"id", id}, {"exe", exe_base64}};
+    std::string resp, e;
+    if (!mw_req("POST", "/api/generator/exe", b.dump(), resp, e)) { err = e; return false; }
+    return mw_ok(resp, "上传生成器二进制失败", err);
 }
 
 bool mysql_delete_generator(int id) {

@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using author.Business.Services;
+using author.DataAccess;
 using author.DataAccess.Models;
 using author.Presentation.Helpers;
 using Microsoft.Win32;
@@ -69,7 +70,12 @@ public partial class ProblemWorkspaceWindow : Window
             MemLimitBox.Text = c.Meta.MemLimitMB.ToString();
             TagsBox.Text = string.Join(",", c.Meta.Tags);
             StdBox.Text = c.StdCode;
-            StatementMsg.Text = StdMsg.Text = DataMsg.Text = PublishMsg.Text = "";
+            SpjBox.Text = c.SpjCode;
+            EntryBox.Text = c.EntryCode;
+            ItfBox.Text = string.IsNullOrWhiteSpace(c.ItfTemplate)
+                ? AuthorClient.ItfTemplateDefault
+                : c.ItfTemplate;
+            StatementMsg.Text = StdMsg.Text = DataMsg.Text = PublishMsg.Text = SpjMsg.Text = EntryMsg.Text = "";
             await RefreshDataList();
             await LoadGenAsync();
         });
@@ -81,7 +87,7 @@ public partial class ProblemWorkspaceWindow : Window
         int timeMs = int.TryParse(TimeLimitBox.Text.Trim(), out var t) ? t : 1000;
         int memMb = int.TryParse(MemLimitBox.Text.Trim(), out var m) ? m : 256;
         var tags = TagsBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        await RunBusy("正在保存题面…", async () =>
+        await RunBusy("正在保存题面并同步到数据库…", async () =>
         {
             // 样例由「生成标准答案」页导入，保存题面时保留现有 sample.in / sample.out
             string dir = _wb.Problems.ProblemDir(_id);
@@ -187,6 +193,53 @@ public partial class ProblemWorkspaceWindow : Window
         {
             var r = await _wb.Problems.CompileStdAsync(_id, code);
             if (IsLoaded) StdMsg.Text = r.Message;
+        });
+    }
+
+    // ---------- 特殊判题器（SPJ） ----------
+    private async void OnSaveSpj(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在保存 SPJ…", async () =>
+        {
+            var r = await _wb.Problems.SaveSpjAsync(_id, SpjBox.Text);
+            if (IsLoaded) SpjMsg.Text = r.Message;
+        });
+    }
+
+    private async void OnCompileSpj(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在编译 SPJ（g++）…", async () =>
+        {
+            var r = await _wb.Problems.CompileSpjAsync(_id, SpjBox.Text);
+            if (IsLoaded) SpjMsg.Text = r.Message;
+        });
+    }
+
+    // ---------- 接口判题（函数式） ----------
+    private async void OnSaveEntry(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在保存题目入口…", async () =>
+        {
+            var r = await _wb.Problems.SaveEntryAsync(_id, EntryBox.Text);
+            if (IsLoaded) EntryMsg.Text = r.Message;
+        });
+    }
+
+    private async void OnCompileEntry(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在编译题目入口（g++）…", async () =>
+        {
+            var r = await _wb.Problems.CompileEntryAsync(_id, EntryBox.Text);
+            if (IsLoaded) EntryMsg.Text = r.Message;
+        });
+    }
+
+    private async void OnSaveItf(object sender, RoutedEventArgs e)
+    {
+        await RunBusy("正在保存接口模板…", async () =>
+        {
+            var r = await _wb.Problems.SaveItfAsync(_id, ItfBox.Text);
+            if (IsLoaded) EntryMsg.Text = r.Message;
         });
     }
 

@@ -15,7 +15,7 @@ public static class OJTest {
         [MarshalAs(UnmanagedType.LPUTF8Str)] string problem_dir,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string data_dir);
     [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr oj_mysql_sync_problems();
+    public static extern IntPtr oj_mysql_sync_problem_list();
     [DllImport("$dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void oj_free_string(IntPtr s);
 }
@@ -23,7 +23,7 @@ public static class OJTest {
 
 "init_middleware -> " + [OJTest]::oj_init_middleware($mwUrl, $problemDir, $dataDir)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$p = [OJTest]::oj_mysql_sync_problems()
+$p = [OJTest]::oj_mysql_sync_problem_list()
 $sw.Stop()
 # Read raw UTF-8 bytes from the returned buffer before freeing
 $len = 0

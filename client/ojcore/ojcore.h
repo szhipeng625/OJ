@@ -25,6 +25,9 @@ OJ_API int oj_init_redis(const char* host, int port);
 //   "timeLimitMs":1000,"memLimitMB":256,"tags":["基础"]}]
 OJ_API const char* oj_get_problems(void);
 
+// 获取单道题完整详情（题面/样例/测试样例，解密读本地缓存）。未拉取过返回 {}。
+OJ_API const char* oj_get_problem(int id);
+
 // 获取某道题的全部历史提交记录（从远端 LSM 存储读取），返回 JSON 字符串。
 // [{"id":1,"problemId":3,"verdict":"AC","detail":"...","timeMs":52,
 //   "cases":[...],"ts":"2026-09-19 17:20:00"}]
@@ -137,10 +140,11 @@ OJ_API const char* oj_mysql_problem_visibility(void);
 // 服务端题库列表（含未公开）：[{"id":1,"title":"...","isPublic":true,"dataCount":20}, ...]
 OJ_API const char* oj_mysql_list_problems(void);
 
-// 单道题完整内容（含标程与已绑定生成器源码）：
+// 单道题完整内容（含标程与已绑定生成器源码/二进制、SPJ 特殊判题器）：
 // {"ok":true,"id":1,"title":"...","description":"...","sampleIn":"...","sampleOut":"...",
-//  "timeMs":1000,"memMb":256,"tags":[...],"stdCode":"...","isPublic":true,"updatedAt":"...",
-//  "generators":[{"id":1,"name":"juhua","description":"...","code":"...","genCount":10}, ...]}
+//  "timeMs":1000,"memMb":256,"tags":[...],"stdCode":"...","stdExe":"<base64>",
+//  "spjCode":"...","spjExe":"<base64>","isPublic":true,"updatedAt":"...",
+//  "generators":[{"id":1,"name":"juhua","description":"...","code":"...","exe":"<base64>","genCount":10}, ...]}
 // 不存在返回 {"ok":false,"error":"题目不存在"}
 OJ_API const char* oj_mysql_get_problem(int id);
 
@@ -165,6 +169,9 @@ OJ_API const char* oj_mysql_create_generator(const char* name, const char* code,
 
 // 更新生成器代码/描述：{"ok":true} 或 {"ok":false,"error":"..."}
 OJ_API const char* oj_mysql_update_generator(int id, const char* code, const char* description);
+
+// 上传生成器编译产物（base64）：{"ok":true} 或 {"ok":false,"error":"..."}
+OJ_API const char* oj_mysql_update_generator_exe(int id, const char* exe_base64);
 
 // 删除生成器（并解除与所有题目的绑定）：{"ok":true} 或 {"ok":false,"error":"..."}
 OJ_API const char* oj_mysql_delete_generator(int id);
@@ -193,9 +200,13 @@ OJ_API const char* oj_mysql_list_testcases(int problem_id);
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
 OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json);
 
-// 从 MySQL 同步题目与比赛到本地目录（g_problemDir 与 serverRoot）。
+// 从中间层同步「题目列表索引 + 比赛配置」到本地（轻量，加密缓存，不含题面/标程）。
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
-OJ_API const char* oj_mysql_sync_problems(void);
+OJ_API const char* oj_mysql_sync_problem_list(void);
+
+// 按需拉取某题完整数据到本地（题面/样例/标程/生成器/测试样例，加密落盘）。
+// 返回 {"ok":true} 或 {"ok":false,"error":"..."}。
+OJ_API const char* oj_mysql_fetch_problem(int problem_id);
 
 // 判题前按需生成某题的测试数据（初始化不再预生成）。
 // 返回 {"ok":true} 或 {"ok":false,"error":"..."}。

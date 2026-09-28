@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS problems (
   mem_mb      INT NOT NULL DEFAULT 256,         -- 内存限制（MB）
   tags        TEXT,                             -- JSON 数组原文，如 ["基础","模拟"]
   std_code    MEDIUMTEXT,                       -- 标准程序源码（AES-256 密文，base64）
+  std_exe     LONGBLOB,                         -- 标准程序编译产物（二进制 exe，经接口 base64 传输）
+  spj_code    MEDIUMTEXT,                       -- 特殊判题器源码（AES-256 密文，base64；空则不启用 SPJ）
+  spj_exe     LONGBLOB,                         -- 特殊判题器编译产物（二进制 exe，经接口 base64 传输）
+  entry_code  MEDIUMTEXT,                       -- 题目入口源码（函数式判题；AES-256 密文，base64）
+  entry_exe   LONGBLOB,                         -- 题目入口编译产物（二进制 exe，经接口 base64 传输）
+  itf_template MEDIUMTEXT,                      -- 接口模板（用户实现的函数骨架；AES-256 密文，base64）
+  judge_mode  TINYINT NOT NULL DEFAULT 0,       -- 0=整程序判题 1=函数式判题（入口加载用户 DLL）
   is_public   TINYINT NOT NULL DEFAULT 1,       -- 1=公开（客户端可见）0=未公开（仅服务端可见）
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -109,6 +116,7 @@ CREATE TABLE IF NOT EXISTS generators (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   name        VARCHAR(64) NOT NULL,            -- 生成器全局唯一名（如 juhua）
   code        MEDIUMTEXT NOT NULL,             -- gen.cpp 源码（AES-256 密文，base64）
+  exe         LONGBLOB,                         -- 生成器编译产物（二进制 exe，经接口 base64 传输）
   description TEXT,                             -- 描述（明文）
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

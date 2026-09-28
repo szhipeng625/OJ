@@ -60,6 +60,14 @@ public sealed class GeneratorClient
         if (r.Contains("\"ok\":true")) return (true, "已保存");
         return (false, ParseError(r));
     }
+
+    /// <summary>上传生成器编译产物（base64），客户端拉取后直接运行生成数据。</summary>
+    public (bool Ok, string Message) UpdateExe(int id, string exeBase64)
+    {
+        string r = OjCoreInterop.UpdateGeneratorExeJson(id, exeBase64);
+        if (r.Contains("\"ok\":true")) return (true, "二进制已上传");
+        return (false, ParseError(r));
+    }
     public (bool Ok, string Message) Delete(int id)
     {
         string r = OjCoreInterop.DeleteGeneratorJson(id);

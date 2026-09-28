@@ -2,6 +2,7 @@
 #include "ojcore.h"
 #include "judge.h"
 #include "mysql_dao.h"
+#include "crypt.h"
 
 #include "resp_client.h"
 
@@ -153,6 +154,7 @@ std::vector<int> parseIntArray(const std::string& j, const char* key) {
 struct ProblemMeta {
     long long timeLimitMs = 1000;
     long long memLimitMB = 256;
+    int judgeMode = 0;        // 0=整程序判题 1=函数式判题（入口加载用户 DLL）
     std::string tagsJson;     // JSON 数组原文（如 ["基础","模拟"]），空 = []
     std::string updatedAt;
 };
@@ -160,7 +162,7 @@ struct ProblemMeta {
 // 简单解析 meta.json（不引第三方库）：按 key 提取标量或 tags 数组原文
 ProblemMeta readMeta(const std::string& dir) {
     ProblemMeta m;
-    std::string s = readFile(dir + "\\meta.json");
+    std::string s = oj::read_enc_file(dir + "\\meta.json");
     if (s.empty()) return m;
     auto findVal = [&](const char* key, std::string& out) {
         std::string k = std::string("\"") + key + "\"";
@@ -183,6 +185,7 @@ ProblemMeta readMeta(const std::string& dir) {
     std::string v;
     if (findVal("timeLimitMs", v), !v.empty()) m.timeLimitMs = atoll(v.c_str());
     if (findVal("memLimitMB", v), !v.empty()) m.memLimitMB = atoll(v.c_str());
+    if (findVal("judgeMode", v), !v.empty()) m.judgeMode = atoi(v.c_str());
     findVal("updatedAt", m.updatedAt);
     // tags 数组原文
     size_t tp = s.find("\"tags\"");
@@ -216,16 +219,16 @@ std::vector<ProblemInfo> scanProblems() {
         if (id <= 0) continue;
         ProblemInfo pi; pi.id = id;
         std::string dir = g_problemDir + "\\" + name;
-        std::string st = readFile(dir + "\\statement.txt");
+        std::string st = oj::read_enc_file(dir + "\\statement.txt");
         // 第一行作标题，其余作描述
         size_t nl = st.find('\n');
         if (nl == std::string::npos) { pi.title = st; pi.desc = ""; }
         else { pi.title = st.substr(0, nl); pi.desc = st.substr(nl + 1); }
-        pi.sampleIn  = readFile(dir + "\\sample.in");
-        pi.sampleOut = readFile(dir + "\\sample.out");
+        pi.sampleIn  = oj::read_enc_file(dir + "\\sample.in");
+        pi.sampleOut = oj::read_enc_file(dir + "\\sample.out");
         // 测试样例（丰富题面）：testcases.json 里的 cases 数组原文
         {
-            std::string tc = readFile(dir + "\\testcases.json");
+            std::string tc = oj::read_enc_file(dir + "\\testcases.json");
             size_t sp = tc.find("\"cases\"");
             if (sp != std::string::npos) {
                 sp = tc.find('[', sp);
@@ -293,12 +296,65 @@ static const char* do_judge(int problem_id, const char* code,
     auto meta = readMeta(problemDir);
     jopt.timeoutMs = (DWORD)meta.timeLimitMs;
     jopt.memBytes = (SIZE_T)(meta.memLimitMB) * 1024 * 1024;
-    if (!oj::compile_cpp(src, exe, compileErr)) {
+
+    // 特殊判题器 SPJ：存在 spj.cpp（源码）或 spj.exe（二进制）则启用；仅有源码时回退编译。
+    std::string spjExe = problemDir + "\\spj.exe";
+    std::string spjSrc = oj::read_enc_file(problemDir + "\\spj.cpp");
+    if (!spjSrc.empty() && !exists(spjExe)) {
+        std::string spjTmp = problemDir + "\\spj.tmp.cpp";
+        writeFile(spjTmp, spjSrc);
+        std::string cerr;
+        if (!oj::compile_cpp(spjTmp, spjExe, cerr)) {
+            DeleteFileA(spjExe.c_str());
+            spjExe.clear();
+        }
+        DeleteFileA(spjTmp.c_str());
+    }
+    if (!spjExe.empty() && !exists(spjExe)) spjExe.clear();
+
+    // 函数式判题：入口 exe 加载用户 DLL 并调用接口函数 solve，仅计时 solve 调用本身（不含输入输出）。
+    if (meta.judgeMode == 1) {
+        std::string entryExe = problemDir + "\\entry.exe";
+        std::string entrySrc = oj::read_enc_file(problemDir + "\\entry.cpp");
+        // 入口仅有源码时回退本地编译（与 SPJ 一致）。
+        if (!entrySrc.empty() && !exists(entryExe)) {
+            std::string entryTmp = problemDir + "\\entry.tmp.cpp";
+            writeFile(entryTmp, entrySrc);
+            std::string cerr;
+            if (!oj::compile_cpp(entryTmp, entryExe, cerr)) {
+                DeleteFileA(entryExe.c_str());
+                entryExe.clear();
+            }
+            DeleteFileA(entryTmp.c_str());
+        }
+        if (!entryExe.empty() && !exists(entryExe)) entryExe.clear();
+
+        std::string dll = g_tempDir + "\\user.dll";
+        if (entryExe.empty()) {
+            verdict = "SE";
+            detail = "题目入口缺失（entry.exe）";
+        } else if (!oj::compile_shared(src, dll, compileErr)) {
+            verdict = "CE";
+            detail = compileErr.empty() ? "编译失败" : compileErr;
+        } else {
+            cases = oj::run_tests_entry(entryExe, dll, problemDir, out, jopt, spjExe);
+            verdict = oj::summarize(cases);
+            int acn = 0; for (auto& c : cases) if (c.passed) acn++;
+            detail = "通过 " + std::to_string(acn) + "/" + std::to_string(cases.size()) + " 组测试点";
+            // 未通过时，返回第一个失败测试点所属生成器的描述文本
+            if (verdict != "AC") {
+                for (auto& c : cases) {
+                    if (!c.passed && !c.info.empty()) { detail = c.info; break; }
+                }
+            }
+            DeleteFileA(dll.c_str());
+        }
+    } else if (!oj::compile_cpp(src, exe, compileErr)) {
         verdict = "CE";
         detail = compileErr.empty() ? "编译失败" : compileErr;
     } else {
         // 判题数据来源：题目目录下各数据生成器子目录（二级目录）的 *.in/*.out
-        cases = oj::run_tests(exe, problemDir, out, jopt);
+        cases = oj::run_tests(exe, problemDir, out, jopt, spjExe);
         verdict = oj::summarize(cases);
         int acn = 0; for (auto& c : cases) if (c.passed) acn++;
         detail = "通过 " + std::to_string(acn) + "/" + std::to_string(cases.size()) + " 组测试点";
@@ -574,6 +630,11 @@ OJ_API int oj_init_redis(const char* host, int port) {
 }
 
 OJ_API const char* oj_get_problems(void) {
+    // 优先读登录后同步的轻量索引（加密缓存，含 id/title/tags/时限/内存，无题面）
+    std::string idx = oj::read_enc_file(g_problemDir + "\\_index.json");
+    if (!idx.empty() && idx[0] == '[') return dup(idx);
+
+    // 回退：本地模式或旧缓存，扫描题目目录
     auto probs = scanProblems();
     std::string json = "[";
     for (size_t i = 0; i < probs.size(); ++i) {
@@ -591,6 +652,46 @@ OJ_API const char* oj_get_problems(void) {
              + "}";
     }
     json += "]";
+    return dup(json);
+}
+
+// 单题完整 JSON（解密读本地目录，含题面/样例/测试样例）
+OJ_API const char* oj_get_problem(int id) {
+    std::string dir = g_problemDir + "\\" + std::to_string(id);
+    std::string st = oj::read_enc_file(dir + "\\statement.txt");
+    if (st.empty()) return dup("{}");
+
+    std::string title, desc;
+    size_t nl = st.find('\n');
+    if (nl == std::string::npos) { title = st; desc = ""; }
+    else { title = st.substr(0, nl); desc = st.substr(nl + 1); }
+
+    std::string samplesJson = "[]";
+    {
+        std::string tc = oj::read_enc_file(dir + "\\testcases.json");
+        size_t sp = tc.find("\"cases\"");
+        if (sp != std::string::npos) {
+            sp = tc.find('[', sp);
+            if (sp != std::string::npos) {
+                size_t ep = tc.find(']', sp);
+                if (ep != std::string::npos) samplesJson = tc.substr(sp, ep - sp + 1);
+            }
+        }
+    }
+    auto meta = readMeta(dir);
+
+    std::string json = "{\"id\":" + std::to_string(id)
+        + ",\"title\":\"" + jsonEscape(title) + "\""
+        + ",\"description\":\"" + jsonEscape(desc) + "\""
+        + ",\"sampleIn\":\"" + jsonEscape(oj::read_enc_file(dir + "\\sample.in")) + "\""
+        + ",\"sampleOut\":\"" + jsonEscape(oj::read_enc_file(dir + "\\sample.out")) + "\""
+        + ",\"timeLimitMs\":" + std::to_string(meta.timeLimitMs)
+        + ",\"memLimitMB\":" + std::to_string(meta.memLimitMB)
+        + ",\"judgeMode\":" + std::to_string(meta.judgeMode)
+        + ",\"itfTemplate\":\"" + jsonEscape(oj::read_enc_file(dir + "\\itf.template.cpp")) + "\""
+        + ",\"tags\":" + (meta.tagsJson.empty() ? "[]" : meta.tagsJson)
+        + ",\"samples\":" + samplesJson
+        + "}";
     return dup(json);
 }
 
@@ -696,7 +797,7 @@ OJ_API const char* oj_get_contests(void) {
     std::string json = "[";
     bool first = true;
     for (int cid : ids) {
-        std::string raw = readFile(croot + "\\" + std::to_string(cid) + "\\contest.json");
+        std::string raw = oj::read_enc_file(croot + "\\" + std::to_string(cid) + "\\contest.json");
         std::string name = jsonStr(raw, "name");
         std::string st = jsonStr(raw, "startTime");
         std::string et = jsonStr(raw, "endTime");
@@ -716,7 +817,7 @@ OJ_API const char* oj_get_contests(void) {
 OJ_API const char* oj_get_contest(int cid) {
     std::string root = serverRoot();
     std::string path = root + "\\contests\\" + std::to_string(cid) + "\\contest.json";
-    std::string raw = readFile(path);
+    std::string raw = oj::read_enc_file(path);
     if (raw.empty() || raw[0] != '{') {
         return dup("{\"ok\":false,\"error\":\"比赛不存在\"}");
     }
@@ -728,7 +829,7 @@ OJ_API const char* oj_get_board(int cid) {
     // 1. 读比赛配置
     std::string root = serverRoot();
     std::string cpath = root + "\\contests\\" + std::to_string(cid) + "\\contest.json";
-    std::string craw = readFile(cpath);
+    std::string craw = oj::read_enc_file(cpath);
     if (craw.empty()) return dup("{\"official\":[],\"virtual\":[]}");
     std::vector<int> pids = parseIntArray(craw, "problems");
     std::string startStr = jsonStr(craw, "startTime");
@@ -929,12 +1030,64 @@ OJ_API const char* oj_mysql_publish_problem(int id, const char* problem_dir, int
         sampleOut = readFile(dir + "\\sample.out");
     }
     std::string stdCode   = readFile(dir + "\\std.cpp");
+    std::string spjCode   = readFile(dir + "\\spj.cpp");
+    std::string entryCode = readFile(dir + "\\entry.cpp");
+    std::string itfTemplate = readFile(dir + "\\itf.template.cpp");
     auto meta = readMeta(dir);
+
+    // 编译标程并上传二进制（客户端拉取后直接运行生成数据，无需本地 g++）。
+    std::string stdExeB64;
+    if (!stdCode.empty()) {
+        std::string stdSrc = dir + "\\std.tmp.cpp";
+        std::string stdExe = g_tempDir + "\\std_" + std::to_string(id) + ".exe";
+        writeFile(stdSrc, stdCode);
+        std::string cerr;
+        if (oj::compile_cpp(stdSrc, stdExe, cerr)) {
+            std::string bytes = readFile(stdExe);
+            if (!bytes.empty()) stdExeB64 = oj::base64_encode(bytes);
+            DeleteFileA(stdExe.c_str());
+        }
+        DeleteFileA(stdSrc.c_str());
+    }
+
+    // 编译 SPJ 并上传二进制（客户端判题时加载 spj 判定器）。
+    std::string spjExeB64;
+    if (!spjCode.empty()) {
+        std::string spjSrc = dir + "\\spj.tmp.cpp";
+        std::string spjExe = g_tempDir + "\\spj_" + std::to_string(id) + ".exe";
+        writeFile(spjSrc, spjCode);
+        std::string cerr;
+        if (oj::compile_cpp(spjSrc, spjExe, cerr)) {
+            std::string bytes = readFile(spjExe);
+            if (!bytes.empty()) spjExeB64 = oj::base64_encode(bytes);
+            DeleteFileA(spjExe.c_str());
+        }
+        DeleteFileA(spjSrc.c_str());
+    }
+
+    // 编译题目入口并上传二进制（函数式判题：客户端下发入口 exe，加载用户 DLL 调用接口函数）。
+    std::string entryExeB64;
+    if (!entryCode.empty()) {
+        std::string entrySrc = dir + "\\entry.tmp.cpp";
+        std::string entryExe = g_tempDir + "\\entry_" + std::to_string(id) + ".exe";
+        writeFile(entrySrc, entryCode);
+        std::string cerr;
+        if (oj::compile_cpp(entrySrc, entryExe, cerr)) {
+            std::string bytes = readFile(entryExe);
+            if (!bytes.empty()) entryExeB64 = oj::base64_encode(bytes);
+            DeleteFileA(entryExe.c_str());
+        }
+        DeleteFileA(entrySrc.c_str());
+    }
+    int judgeMode = entryCode.empty() ? 0 : 1;
 
     std::string err;
     if (!oj::mysql_upsert_problem(id, title, desc, sampleIn, sampleOut,
                                   (int)meta.timeLimitMs, (int)meta.memLimitMB,
                                   meta.tagsJson.empty() ? "[]" : meta.tagsJson, stdCode,
+                                  stdExeB64,
+                                  spjCode, spjExeB64,
+                                  entryCode, entryExeB64, itfTemplate, judgeMode,
                                   is_public != 0, err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 
@@ -971,9 +1124,16 @@ OJ_API const char* oj_mysql_publish_contest(int cid, const char* contest_json) {
     return dup("{\"ok\":true}");
 }
 
-OJ_API const char* oj_mysql_sync_problems(void) {
+OJ_API const char* oj_mysql_sync_problem_list(void) {
     std::string err;
-    if (!oj::mysql_sync_problems(g_problemDir, serverRoot(), err))
+    if (!oj::mysql_sync_problem_list(g_problemDir, serverRoot(), err))
+        return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+    return dup("{\"ok\":true}");
+}
+
+OJ_API const char* oj_mysql_fetch_problem(int problem_id) {
+    std::string err;
+    if (!oj::mysql_fetch_problem(problem_id, g_problemDir, err))
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     return dup("{\"ok\":true}");
 }
@@ -1057,6 +1217,14 @@ OJ_API const char* oj_mysql_update_generator(int id, const char* code, const cha
     return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
 }
 
+OJ_API const char* oj_mysql_update_generator_exe(int id, const char* exe_base64) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    if (oj::mysql_update_generator_exe(id, exe_base64 ? exe_base64 : "", err))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
 OJ_API const char* oj_mysql_delete_generator(int id) {
     if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
     if (oj::mysql_delete_generator(id)) return dup("{\"ok\":true}");
@@ -1130,9 +1298,14 @@ OJ_API const char* oj_debug_test(const char* code, int problem_id, int timeout_m
     if (!code || !*code) return dup("{\"ok\":false,\"error\":\"代码为空\"}");
     DWORD t = timeout_ms > 0 ? (DWORD)timeout_ms : 2000;
     std::string dir = g_problemDir + "\\" + std::to_string(problem_id);
-    std::string inFile = dir + "\\sample.in";
-    std::string outFile = dir + "\\sample.out";
+    // 样例文件加密落盘，解密到临时明文文件供比对
+    std::string inFile = g_tempDir + "\\sample.tmp.in";
+    std::string outFile = g_tempDir + "\\sample.tmp.out";
+    writeFile(inFile, oj::read_enc_file(dir + "\\sample.in"));
+    writeFile(outFile, oj::read_enc_file(dir + "\\sample.out"));
     oj::DebugTestResult r = oj::debug_test(g_tempDir, code, inFile, outFile, t);
+    DeleteFileA(inFile.c_str());
+    DeleteFileA(outFile.c_str());
     std::string json = "{\"ok\":" + std::string(r.ok ? "true" : "false")
         + ",\"compileError\":\"" + jsonEscape(r.compileError) + "\""
         + ",\"output\":\"" + jsonEscape(r.output) + "\""

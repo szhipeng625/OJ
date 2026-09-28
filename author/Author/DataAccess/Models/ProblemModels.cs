@@ -75,6 +75,9 @@ public record ProblemContent(
     string SampleIn,
     string SampleOut,
     ProblemMeta Meta,
-    string StdCode
+    string StdCode,
+    string SpjCode,
+    string EntryCode,
+    string ItfTemplate
     )
 { }

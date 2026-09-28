@@ -22,6 +22,25 @@
       "cwd": "${workspaceFolder}/author/Author/bin/Release",
       "console": "internalConsole",
       "stopAtEntry": false
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": true,
+      "cwd": "d:/OJ/author/Author/bin/Debug/problems/125",
+      "program": "d:/OJ/author/Author/bin/Debug/problems/125/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
     }
   ]
 }
