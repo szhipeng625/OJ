@@ -240,7 +240,7 @@ AC_API const char* ac_gen_list(int id) {
 }
 
 // 新建数据生成器：目录 + gen.cpp 模板 + desc.txt
-AC_API const char* ac_gen_create(int id, const char* name, const char* desc) {
+AC_API const char* ac_gen_create(int id, const char* name, const char* desc, const char* tpl) {
     std::string dir = genProblemRoot(id);
     if (!exists(dir)) {
         std::string err = "题目 " + std::to_string(id) + " 不存在";
@@ -260,10 +260,11 @@ AC_API const char* ac_gen_create(int id, const char* name, const char* desc) {
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
     }
     mkdirs(gdir);
-    std::string tpl = kGenTemplate;
-    size_t p = tpl.find("{name}");
-    if (p != std::string::npos) tpl.replace(p, 6, gn);
-    writeFile(genSrcPath(id, gn), tpl);
+    // 模板优先取前端传入内容（来自 config.xml templatesDir 的 gen.template.cpp），否则用内置模板
+    std::string tplText = (tpl && *tpl) ? std::string(tpl) : std::string(kGenTemplate);
+    size_t p = tplText.find("{name}");
+    if (p != std::string::npos) tplText.replace(p, 6, gn);
+    writeFile(genSrcPath(id, gn), tplText);
     writeFile(genDescPath(id, gn), desc ? desc : "");
     g_lastError.clear();
     return dup("{\"ok\":true,\"name\":\"" + jsonEscape(gn) + "\"}");

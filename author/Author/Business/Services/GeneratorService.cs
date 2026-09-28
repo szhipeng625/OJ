@@ -30,23 +30,27 @@ public sealed class GeneratorService
     // 本地编译/运行/读文件都落在 problems/{题号}/{name}/，按题号串行（与 ProblemService 一致）
     private static string PGate(int problemId) => "p" + problemId;
 
-    private const string GenTemplate =
-        "// 数据生成器 {name}.cpp\n"
-        + "// 运行约定：每个测试点独立运行一次，直接把测试数据输出到 stdout（cout）。\n"
-        + "// 后台会把 stdout 重定向写入 1.in ~ n.in。\n"
-        + "// argv[1]=输出目录, argv[2]=随机种子, argv[3]=总组数 n, argv[4]=当前组号 i（1 起）。\n"
-        + "#include <bits/stdc++.h>\n"
-        + "using namespace std;\n"
-        + "int main(int argc, char** argv) {\n"
-        + "    int seed = (argc > 2) ? atoi(argv[2]) : 1;\n"
-        + "    mt19937 rng((unsigned)seed);\n"
-        + "    uniform_int_distribution<int> dist(1, 100);\n"
-        + "    int m = dist(rng);\n"
-        + "    cout << m << \"\\n\";\n"
-        + "    for (int j = 0; j < m; ++j) cout << (j ? \" \" : \"\") << dist(rng);\n"
-        + "    cout << \"\\n\";\n"
-        + "    return 0;\n"
-        + "}\n";
+    // 生成器库模板：优先读取 config.xml templatesDir 下的 gen.template.cpp，缺失回退内置。
+    private static string GenTemplateFor(string name)
+    {
+        string tpl = OjPaths.TemplateContent("gen.template.cpp")
+            ?? "// 数据生成器 {name}.cpp\n"
+            + "// 运行约定：只往 stdout（cout）输出测试数据，不要 freopen；\n"
+            + "// 多个测试点之间用单独一行 ### 分隔，后台切成 1.in / 2.in / ...\n"
+            + "#include <bits/stdc++.h>\n"
+            + "using namespace std;\n"
+            + "int main(int argc, char** argv) {\n"
+            + "    int seed = (argc > 1) ? atoi(argv[1]) : 1;\n"
+            + "    mt19937 rng((unsigned)seed);\n"
+            + "    uniform_int_distribution<int> dist(1, 100);\n"
+            + "    int n = dist(rng);\n"
+            + "    cout << n << \"\\n\";\n"
+            + "    for (int j = 0; j < n; ++j) cout << (j ? \" \" : \"\") << dist(rng);\n"
+            + "    cout << \"\\n\";\n"
+            + "    return 0;\n"
+            + "}\n";
+        return tpl.Replace("{name}", name);
+    }
 
     // ===== 库（全局） =====
     public Task<List<GenLibItem>> ListAsync()
@@ -59,7 +63,7 @@ public sealed class GeneratorService
         => _build.RunAsync(Gate(id), () => _db.GetGenerator(id));
 
     public Task<(bool Ok, string Message, int Id)> CreateAsync(string name, string desc)
-        => _build.RunAsync(LibGate, () => _db.Create(name, GenTemplate.Replace("{name}", name), desc));
+        => _build.RunAsync(LibGate, () => _db.Create(name, GenTemplateFor(name), desc));
 
     public Task<JobResult> SaveAsync(int id, string code)
         => _build.RunAsync(Gate(id), () =>

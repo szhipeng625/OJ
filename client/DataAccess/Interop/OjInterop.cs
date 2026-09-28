@@ -8,6 +8,7 @@ namespace client.DataAccess.Interop;
 /// </summary>
 public static class OJInterop
 {
+    // DLL 文件名来自 config.xml <ojCoreDll>，启动时已由 App 静态构造函数从 OjPaths.NativeDir 预加载；
     private const string Dll = "ojcore.dll";
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]

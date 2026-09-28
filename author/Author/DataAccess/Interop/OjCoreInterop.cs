@@ -9,6 +9,7 @@ namespace author.DataAccess.Interop;
 /// </summary>
 public static class OjCoreInterop
 {
+    // DLL 文件名来自 config.xml <ojCoreDll>，启动时已由 App 静态构造函数从 OjPaths.NativeDir 预加载；
     private const string Dll = "ojcore.dll";
 
     /// <summary>串行化所有 ojcore 调用，保护其内部全局 MySQL 状态。</summary>

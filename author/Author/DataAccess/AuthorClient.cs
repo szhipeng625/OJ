@@ -14,22 +14,22 @@ public sealed class AuthorClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    private const string StdTemplate =
-        "// 标准程序（用于生成答案 / 本地验证）\n#include <iostream>\nusing namespace std;\nint main() {\n    return 0;\n}\n";
+    // 标准程序模板：优先读取 config.xml templatesDir 下的 std.template.cpp，缺失回退内置。
+    private static string StdTemplate
+        => OjPaths.TemplateContent("std.template.cpp")
+           ?? "// 标准程序（用于生成答案 / 本地验证）\n#include <iostream>\nusing namespace std;\nint main() {\n    // TODO: 在此实现标准解法\n    return 0;\n}\n";
 
-    /// <summary>
-    /// 函数式（接口判题）题目的默认 C++ 接口模板：用户只实现 solve，不写 main；
-    /// 客户端提交后后台自动把该 .cpp 编译为 DLL，由题目入口加载调用。
-    /// </summary>
-    public const string ItfTemplateDefault =
-        "// 接口编程题：只需实现 solve 函数，不要写 main 函数和输入输出语句。\n"
-        + "// 提交后你的代码会自动编译为 DLL，由题目入口加载、解析输入并调用 solve，返回值即输出。\n"
-        + "// 函数签名以题面为准（示例为两个整数求和）。\n"
-        + "extern \"C\" __declspec(dllexport)\n"
-        + "int solve(int a, int b) {\n"
-        + "    // TODO: 在此实现你的算法\n"
-        + "    return a + b;\n"
-        + "}\n";
+    /// <summary>函数式（接口判题）题目的默认 C++ 接口模板：文件优先（config.xml templatesDir 的 itf.template.cpp），缺失回退内置。</summary>
+    public static string ItfTemplateDefault
+        => OjPaths.TemplateContent("itf.template.cpp")
+           ?? "// 接口编程题：只需实现 solve 函数，不要写 main 函数和输入输出语句。\n"
+           + "// 提交后你的代码会自动编译为 DLL，由题目入口加载、解析输入并调用 solve，返回值即输出。\n"
+           + "// 函数签名以题面为准（示例为两个整数求和）。\n"
+           + "extern \"C\" __declspec(dllexport)\n"
+           + "int solve(int a, int b) {\n"
+           + "    // TODO: 在此实现你的算法\n"
+           + "    return a + b;\n"
+           + "}\n";
 
     /// <summary>服务端题库根目录（author/problems）。</summary>
     public string Root { get; private set; } = "";
@@ -492,7 +492,9 @@ public sealed class AuthorClient
         catch { return new(); }
     }
 
-    public string GenCreate(int id, string name, string desc) => AuthorCoreInterop.GenCreate(id, name, desc);
+    /// <summary>创建题目数据生成器。模板优先取 config.xml templatesDir 的 gen.template.cpp，缺失时由 C++ 内置模板兜底。</summary>
+    public string GenCreate(int id, string name, string desc)
+        => AuthorCoreInterop.GenCreate(id, name, desc, OjPaths.TemplateContent("gen.template.cpp"));
 
     public string GenSave(int id, string name, string code) => AuthorCoreInterop.GenSave(id, name, code);
 

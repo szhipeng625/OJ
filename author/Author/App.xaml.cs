@@ -51,15 +51,13 @@ public partial class App : Application
 
         try
         {
-            string baseDir = AppContext.BaseDirectory;
-
-            // 全部数据目录相对 exe 目录（可移植），自动创建
-            string authorProblemDir = Path.Combine(baseDir, "problems");       // 出题端自有题库
-            string serverRoot = Path.Combine(baseDir, "server");               // 客户端服务端根目录
-            string serverProblemDir = Path.Combine(serverRoot, "problems");    // 题目发布目标（本地兜底）
-            string testDataDir = Path.Combine(baseDir, "testdata");            // 测试数据目录
-            string tempRoot = Path.Combine(baseDir, "temp");                   // 编译临时目录
-            string dataDir = Path.Combine(baseDir, "ojdata");                  // 本地提交记录
+            // 全部数据目录来自全局路径注册表（OjPaths，由 config.xml 解析），自动创建
+            string authorProblemDir = OjPaths.AuthorProblemDir;    // 出题端自有题库
+            string serverRoot = OjPaths.ServerRoot;                // 客户端服务端根目录
+            string serverProblemDir = OjPaths.ServerProblemDir;   // 题目发布目标（本地兜底）
+            string testDataDir = OjPaths.TestDataDir;              // 测试数据目录
+            string tempRoot = OjPaths.TempDir;                     // 编译临时目录
+            string dataDir = OjPaths.DataDir;                      // 本地提交记录
             foreach (var d in new[] { authorProblemDir, serverProblemDir, testDataDir, tempRoot, dataDir })
                 try { Directory.CreateDirectory(d); } catch { /* 创建目录失败不阻塞启动 */ }
 
@@ -96,7 +94,7 @@ public partial class App : Application
                 return;
             }
 
-            string tokenPath = Path.Combine(baseDir, "auth", "session.txt");
+            string tokenPath = OjPaths.SessionFile;
             var me = await auth.RestoreSessionAsync(tokenPath);
             if (me is null)
             {

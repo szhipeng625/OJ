@@ -16,17 +16,12 @@ public sealed class AuthClient
     {
         try
         {
-            string cfgPath = Path.Combine(AppContext.BaseDirectory, "mysql_config.json");
-            if (!File.Exists(cfgPath)) return false;
-            using var doc = JsonDocument.Parse(File.ReadAllText(cfgPath));
-            var r = doc.RootElement;
-
-            // 统一走中间层，middlewareUrl 必填
-            string mw = r.TryGetProperty("middlewareUrl", out var mv) ? mv.GetString() ?? "" : "";
+            // 中间件地址来自 config.xml <middlewareUrl>（替代原 mysql_config.json）
+            string mw = AppConfig.Current.MiddlewareUrl.Trim();
             if (string.IsNullOrWhiteSpace(mw)) return false;
 
             lock (OjCoreInterop.Lock)
-                OjCoreInterop.InitMiddleware(mw.Trim(), problemDir, dataDir);
+                OjCoreInterop.InitMiddleware(mw, problemDir, dataDir);
             return true;
         }
         catch

@@ -10,6 +10,7 @@ namespace author.DataAccess.Interop;
 /// </summary>
 public static class AuthorCoreInterop
 {
+    // DLL 文件名来自 config.xml <authorCoreDll>，启动时已由 App 静态构造函数从 OjPaths.NativeDir 预加载；
     private const string Dll = "authorcore.dll";
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -73,7 +74,7 @@ public static class AuthorCoreInterop
     private static extern IntPtr ac_gen_list(int id);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr ac_gen_create(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string desc);
+    private static extern IntPtr ac_gen_create(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string desc, [MarshalAs(UnmanagedType.LPUTF8Str)] string? tpl);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr ac_gen_get_current(int id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
@@ -150,7 +151,7 @@ public static class AuthorCoreInterop
 
 public static void GenSetTemp(string tempDir) => ac_gen_set_temp(tempDir);
     public static string GenList(int id) => Take(ac_gen_list(id));
-    public static string GenCreate(int id, string name, string desc) => Take(ac_gen_create(id, name, desc));
+    public static string GenCreate(int id, string name, string desc, string? tpl) => Take(ac_gen_create(id, name, desc, tpl));
     public static string GenGetCurrent(int id, string name) => Take(ac_gen_get_current(id, name));
     public static string GenSetDesc(int id, string name, string desc) => Take(ac_gen_set_desc(id, name, desc));
     public static string GenSave(int id, string name, string code) => Take(ac_gen_save(id, name, code));

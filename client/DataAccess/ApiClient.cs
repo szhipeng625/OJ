@@ -21,13 +21,13 @@ public class ApiClient
 
     public ApiClient()
     {
-        // 题目/数据目录都相对 exe 目录（可移植），自动创建
-        string baseDir = AppContext.BaseDirectory;
-        _problemDir = Path.Combine(baseDir, "problems");
-        var dataDir = Path.Combine(baseDir, "ojdata");
+        // 题目/数据目录均来自全局路径注册表（OjPaths，由 config.xml 解析），自动创建
+
+        _problemDir = OjPaths.ProblemDir;
+        var dataDir = OjPaths.DataDir;
         try { Directory.CreateDirectory(_problemDir); } catch { }
         try { Directory.CreateDirectory(dataDir); } catch { }
-        // 先试本地 LSM 模式
+        // 先试本地 LSM 模式（前端启动即调用后端 C++ oj_init 完成初始化）
         OJInterop.Init(_problemDir, dataDir);
         // 再尝试 MySQL 模式（如果同目录有 mysql_config.json 则启用）
         TryInitMysql(_problemDir, dataDir);
@@ -37,16 +37,11 @@ public class ApiClient
     {
         try
         {
-            var cfg = Path.Combine(AppContext.BaseDirectory, "mysql_config.json");
-            if (!File.Exists(cfg)) { MySqlEnabled = false; return; }
-            using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
-            var root = doc.RootElement;
-
-            // 统一走中间层（MySQL + LSM 都收口），middlewareUrl 必填
-            string mw = root.TryGetProperty("middlewareUrl", out var mv) ? mv.GetString() ?? "" : "";
+            // 中间件地址来自 config.xml <middlewareUrl>（替代原 mysql_config.json）；留空则仅本地 LSM 模式
+            string mw = AppConfig.Current.MiddlewareUrl.Trim();
             if (string.IsNullOrWhiteSpace(mw)) { MySqlEnabled = false; return; }
 
-            OJInterop.InitMiddleware(mw.Trim(), problemDir, dataDir);
+            OJInterop.InitMiddleware(mw, problemDir, dataDir);
             MySqlEnabled = true;
             // 题目/比赛同步延迟到登录后由 SyncProblems() 执行，避免阻塞启动与登录窗口弹出
         }

@@ -12,40 +12,49 @@ namespace client;
 
 public partial class App : Application
 {
-    private static readonly string LogPath = Path.Combine(AppContext.BaseDirectory, "startup.log");
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool SetDllDirectory(string lpPathName);
 
-    // 分层目录：UI 程序集放 ui/，原生 DLL 放 native/；目录不存在时自动回退到 exe 根目录。
+    // 启动配置（config.xml）最先加载 → 全局路径注册表（OjPaths）→ 预加载原生 DLL。
+    // 原生 DLL 放 native/，第三方托管程序集放 ui/；目录不存在时自动回退到 exe 根目录。
     static App()
     {
-        string baseDir = AppContext.BaseDirectory;
-        // 原生 DLL（ojcore/OpenSSL）统一从 native/ 加载，含其传递依赖；
+        AppConfig.Load();       // 1. 读取 config.xml（缺失自动生成模板）
+        OjPaths.Initialize();   // 2. 解析全部路径到全局类
+
+        // 3. 原生 DLL（ojcore/OpenSSL）统一从 NativeDir 加载，含其传递依赖；
         // 安装版公共依赖放 ..\shared\native（客户端/服务端共用，避免重复），开发版仍在 exe 同目录 native/
-        string nativeDir = Path.Combine(baseDir, "native");
-        if (!Directory.Exists(nativeDir))
-            nativeDir = Path.GetFullPath(Path.Combine(baseDir, "..", "shared", "native"));
-
-        // 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 ui/ 加载，同样回退到 ..\shared\ui
-        string uiDir = Path.Combine(baseDir, "ui");
-        if (!Directory.Exists(uiDir))
-            uiDir = Path.GetFullPath(Path.Combine(baseDir, "..", "shared", "ui"));
-
-        if (Directory.Exists(nativeDir))
-            SetDllDirectory(nativeDir);
-
-        AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+        string? nativeDir = OjPaths.NativeDir;
+        if (nativeDir is not null)
         {
-            if (name.Name is null) return null;
-            string p = Path.Combine(uiDir, name.Name + ".dll");
-            return File.Exists(p) ? ctx.LoadFromAssemblyPath(p) : null;
-        };
+            SetDllDirectory(nativeDir);
+            // 预加载原生 DLL（文件名同样来自 config.xml），DllImport 同名即命中；
+            // 加载失败不阻塞启动（后续 DllImport 会按目录再解析）。
+            foreach (var dll in new[] { OjPaths.OjCoreDll })
+            {
+                string p = Path.Combine(nativeDir, dll);
+                if (File.Exists(p))
+                {
+                    try { NativeLibrary.Load(p); } catch { /* 预加载失败不阻塞 */ }
+                }
+            }
+        }
+
+        // 4. 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 AssemblyDir 加载，同样回退到 ..\shared\ui
+        string? uiDir = OjPaths.AssemblyDir;
+        if (uiDir is not null)
+            AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+            {
+                if (name.Name is null) return null;
+                string p = Path.Combine(uiDir, name.Name + ".dll");
+                return File.Exists(p) ? ctx.LoadFromAssemblyPath(p) : null;
+            };
     }
 
     private static void Log(string msg)
     {
-        try { File.AppendAllText(LogPath, $"[{DateTime.Now:HH:mm:ss}] {msg}\n"); } catch { }
+        try { File.AppendAllText(OjPaths.LogPath, $"[{DateTime.Now:HH:mm:ss}] {msg}\n"); } catch { }
     }
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -62,7 +71,7 @@ public partial class App : Application
 
         try
         {
-            File.WriteAllText(LogPath, "");
+            File.WriteAllText(OjPaths.LogPath, "");
             Log("OnStartup 开始");
 
             // ---- 组合根：DAL → BLL ----

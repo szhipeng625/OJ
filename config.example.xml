@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OJ 启动配置：系统初始化时最先加载本文件（exe 同目录 config.xml）。
+  所有相对路径均以 exe 所在目录为基准；找不到本文件时使用默认值运行，并自动生成此模板。
+  dllDirs / assemblyDirs 支持分号分隔多个候选目录，取第一个存在的。
+-->
+<ojConfig>
+  <!-- 原生 DLL 加载目录（ojcore.dll / authorcore.dll / lsm_shared.dll 等传递依赖） -->
+  <dllDirs>native;..\shared\native</dllDirs>
+  <!-- 第三方托管程序集目录（HandyControl / AvalonEdit / Markdig 等） -->
+  <assemblyDirs>ui;..\shared\ui</assemblyDirs>
+  <!-- 原生 DLL 文件名（启动时自动从 dllDirs 预加载） -->
+  <ojCoreDll>ojcore.dll</ojCoreDll>
+  <authorCoreDll>authorcore.dll</authorCoreDll>
+
+  <!-- 客户端：题库目录 / 本地存储目录（提交记录 + LSM 数据 + 判题临时目录，接口判题编译的 user.dll 输出于 存储目录\temp） -->
+  <problemsDir>problems</problemsDir>
+  <dataDir>ojdata</dataDir>
+  <!-- 中间件地址：配置后走 MySQL/LSM 中间层（替代原 mysql_config.json），留空则仅本地 LSM 模式 -->
+  <middlewareUrl></middlewareUrl>
+  <!-- 模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp） -->
+  <templatesDir>templates</templatesDir>
+  <!-- 客户端启动日志 -->
+  <startupLogFile>startup.log</startupLogFile>
+
+  <!-- 出题端：自有题库 / 发布根目录 / 发布题目目录 / 测试数据 / 编译临时目录 / 会话文件 -->
+  <authorProblemsDir>problems</authorProblemsDir>
+  <serverRoot>server</serverRoot>
+  <serverProblemsDir>server\problems</serverProblemsDir>
+  <testDataDir>testdata</testDataDir>
+  <tempDir>temp</tempDir>
+  <sessionFile>auth\session.txt</sessionFile>
+</ojConfig>

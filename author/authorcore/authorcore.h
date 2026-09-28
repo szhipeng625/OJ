@@ -82,7 +82,7 @@ AC_API void ac_gen_set_temp(const char* temp_dir);
 AC_API const char* ac_gen_list(int id);
 
 // 新建一个数据生成器，{"ok":true} / {"ok":false,"error":"..."}
-AC_API const char* ac_gen_create(int id, const char* name, const char* desc);
+AC_API const char* ac_gen_create(int id, const char* name, const char* desc, const char* tpl /* 可为 NULL：用内置模板 */);
 
 // 获取指定生成器的当前代码 + 描述 + 路径（无 gen.cpp 则返回模板）
 // {"ok":true,"name":"...","desc":"...","code":"...","genPath":"...","outDir":"..."}
