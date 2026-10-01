@@ -6,7 +6,7 @@ using author.DataAccess.Models;
 namespace author.DataAccess;
 
 /// <summary>
-/// 认证数据访问：读取 mysql_config.json，经 ojcore 完成 MySQL 初始化、登录、会话校验。
+/// 认证数据访问：读取 config.xml 的 middlewareUrl，经 ojcore 完成中间件初始化、登录、会话校验。
 /// 服务端仅允许 admin / author 角色（角色判定在 BLL AuthService）。
 /// </summary>
 public sealed class AuthClient

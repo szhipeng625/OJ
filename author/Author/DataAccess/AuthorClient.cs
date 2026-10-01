@@ -31,6 +31,26 @@ public sealed class AuthorClient
            + "    return a + b;\n"
            + "}\n";
 
+    /// <summary>函数式（接口判题）题目的默认入口脚手架：文件优先（config.xml templatesDir 的 entry.template.cpp），缺失回退内置。</summary>
+    public static string EntryTemplateDefault
+        => OjPaths.TemplateContent("entry.template.cpp")
+           ?? "// 题目入口 entry.cpp：LoadLibrary 加载 user.dll → 解析输入 → 计时调用 solve → 写输出与耗时。\n"
+           + "#include <windows.h>\n#include <chrono>\n#include <fstream>\nusing namespace std;\n"
+           + "typedef int (*solve_fn)(int, int);\n"
+           + "int main(int argc, char** argv) {\n"
+           + "    if (argc < 5) return 2;\n"
+           + "    HMODULE h = LoadLibraryA(argv[1]);\n"
+           + "    if (!h) return 3;\n"
+           + "    solve_fn solve = (solve_fn)GetProcAddress(h, \"solve\");\n"
+           + "    if (!solve) { FreeLibrary(h); return 4; }\n"
+           + "    ifstream fin(argv[2]); int a = 0, b = 0; fin >> a >> b; fin.close();\n"
+           + "    auto t0 = chrono::steady_clock::now(); int ans = solve(a, b);\n"
+           + "    auto t1 = chrono::steady_clock::now();\n"
+           + "    ofstream(argv[3]) << ans << \"\\n\";\n"
+           + "    ofstream(argv[4]) << chrono::duration_cast<chrono::milliseconds>(t1 - t0).count() << \"\\n\";\n"
+           + "    FreeLibrary(h); return 0;\n"
+           + "}\n";
+
     /// <summary>服务端题库根目录（author/problems）。</summary>
     public string Root { get; private set; } = "";
     /// <summary>编译产物临时目录（author/temp）。</summary>

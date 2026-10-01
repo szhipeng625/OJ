@@ -43,7 +43,7 @@ public sealed class AppConfig
     /// <summary>中间件（middleware）地址。配置后走 MySQL/LSM 中间层；留空则仅本地 LSM 模式。</summary>
     public string MiddlewareUrl { get; set; } = "";
 
-    /// <summary>模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp）。</summary>
+    /// <summary>模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp / entry.template.cpp）。</summary>
     public string TemplatesDir { get; set; } = "templates";
 
     /// <summary>客户端启动日志文件。</summary>
@@ -154,7 +154,7 @@ public sealed class AppConfig
   <dataDir>ojdata</dataDir>
   <!-- 中间件地址：配置后走 MySQL/LSM 中间层（替代原 mysql_config.json），留空则仅本地 LSM 模式 -->
   <middlewareUrl></middlewareUrl>
-  <!-- 模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp） -->
+  <!-- 模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp / entry.template.cpp） -->
   <templatesDir>templates</templatesDir>
   <!-- 客户端启动日志 -->
   <startupLogFile>startup.log</startupLogFile>

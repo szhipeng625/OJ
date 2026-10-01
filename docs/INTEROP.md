@@ -362,6 +362,9 @@ C# 提交
   接口模板文件为题目目录下的 **`itf.template.cpp`**（`.cpp` 文件，不是 txt）。
 - `entry.exe <user.dll> <输入> <输出> <时间文件>`：负责 LoadLibrary、解析输入、
   **只计时 solve 调用本身**（输入解析/输出不计入 timeMs）、写回结果与耗时。
+- 出题端为入口与接口都提供了脚手架模板：`templates/entry.template.cpp`（入口加载/计时骨架，
+  出题人按题面修改「解析输入 / 输出结果」两处）、`templates/itf.template.cpp`（用户实现的接口骨架）。
+  新建函数式判题题目时，工作台的「题目入口」「接口模板」编辑器会用对应模板作为起始代码。
 - ojcore 对签名无感知，只做"编译 DLL → 跑入口 → 读时间文件 → 比输出"。
 - 为保证客户端后台能自动编译，ojcore 的 `resolve_gpp()` 按 **PATH → 随包/常见 mingw64 位置
   （`<dll目录>\..\mingw64\bin`、`<dll目录>\mingw64\bin`、`<exe目录>\mingw64\bin`、

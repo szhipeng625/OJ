@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <chrono>
 #include <ctime>
+#include <cctype>
 #include <mutex>
 #include <utility>
 
@@ -158,6 +159,37 @@ static void wrap(const httplib::Request& req, httplib::Response& res, F fn) {
         res.status = 400;
         res.set_content(jerr(e.what()), "application/json");
     }
+}
+
+// ---- 云端判题沙箱转发 ----
+// 云端判题沙箱（cloud_judge_api.py）监听本机 18081：经 HTTP 桥接收任务（校验 token），
+// 由 RabbitMQ 消费者 → C++ orchestrator → eval_worker 沙箱完成编译与限时运行。
+static const std::string kCloudJudgeHost = "127.0.0.1";
+static const int kCloudJudgePort = 18081;
+
+static json cloud_judge_post(const std::string& path, const std::string& token,
+                             const std::string& body) {
+    httplib::Client cli(kCloudJudgeHost, kCloudJudgePort);
+    cli.set_connection_timeout(5, 0);
+    cli.set_read_timeout(30, 0);
+    httplib::Headers hdrs;
+    if (!token.empty()) hdrs.emplace("Authorization", "Bearer " + token);
+    auto r = cli.Post(path, hdrs, body, "application/json");
+    if (!r) throw std::runtime_error("云端判题服务不可用");
+    if (r->status != 200) throw std::runtime_error("云端判题服务错误 HTTP " + std::to_string(r->status));
+    try { return json::parse(r->body.empty() ? "{}" : r->body); }
+    catch (...) { throw std::runtime_error("云端判题响应解析失败"); }
+}
+
+static json cloud_judge_get(const std::string& path) {
+    httplib::Client cli(kCloudJudgeHost, kCloudJudgePort);
+    cli.set_connection_timeout(5, 0);
+    cli.set_read_timeout(30, 0);
+    auto r = cli.Get(path);
+    if (!r) throw std::runtime_error("云端判题服务不可用");
+    if (r->status != 200) throw std::runtime_error("云端判题服务错误 HTTP " + std::to_string(r->status));
+    try { return json::parse(r->body.empty() ? "{}" : r->body); }
+    catch (...) { throw std::runtime_error("云端判题响应解析失败"); }
 }
 
 int main(int argc, char** argv) {
@@ -330,6 +362,43 @@ int main(int argc, char** argv) {
                 g_board.on_submit(uid, uname, contest_id, problem_id, verdict, ts, virt, base);
             }
             res.set_content(jok({{"sid", sid}}), "application/json");
+        });
+    });
+
+    // 提交代码到云端判题（异步：返回 task_id，客户端轮询 /api/judge/result 取最终结果）
+    svr->Post("/api/judge", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            long long uid = auth(req);
+            json b = json::parse(req.body.empty() ? "{}" : req.body);
+            int problem_id = b.value("problemId", 0);
+            int contest_id = b.value("contestId", 0);
+            std::string code = b.value("code", "");
+            std::string language = b.value("language", "cpp");
+            if (problem_id <= 0) throw std::runtime_error("problemId required");
+            if (code.empty()) throw std::runtime_error("code required");
+            // 报名即获得参赛权限：比赛提交要求已报名
+            if (contest_id > 0) {
+                auto reg = contest_registration(uid, contest_id);
+                if (!reg.first) throw std::runtime_error("未报名，无法提交比赛题目");
+            }
+            json fwd{{"problemId", problem_id}, {"code", code}, {"language", language}};
+            json jr = cloud_judge_post("/api/cloud_judge", get_token(req), fwd.dump());
+            std::string task_id = jr.value("task_id", "");
+            if (task_id.empty()) throw std::runtime_error("云端判题未返回任务号");
+            res.set_content(jok({{"taskId", task_id}}), "application/json");
+        });
+    });
+
+    // 轮询云端判题结果（最终结果含 status=AC/WA/CE/TLE/RE/SE 及 ac_count/total_cases/error）
+    svr->Get("/api/judge/result", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            std::string task_id = req.get_param_value("task_id");
+            if (task_id.empty()) throw std::runtime_error("task_id required");
+            for (char c : task_id)
+                if (!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+                    throw std::runtime_error("invalid task_id");
+            json jr = cloud_judge_get("/api/cloud_judge_result?task_id=" + task_id);
+            res.set_content(jr.dump(), "application/json");
         });
     });
 

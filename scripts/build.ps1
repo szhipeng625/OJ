@@ -11,7 +11,7 @@
     -Publish 时发布到 dist：
       dist\          客户端（client.exe）
       dist\author\   服务端（Author.exe）
-    原生依赖（ojcore/libmysql/mysql_config）由本脚本统一补齐。
+    原生依赖（ojcore/authorcore/OpenSSL）、启动配置 config.xml 与模板代码 templates/ 由本脚本统一补齐。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -All -Publish
@@ -43,7 +43,7 @@ param(
     [string]$MysqlUser = 'root',
     [string]$MysqlPass = '12345678',
     [string]$MysqlDb = 'oj',
-    # 中间层地址（生成 mysql_config.json 时写入 middlewareUrl，客户端/服务端统一走中间层）
+    # 中间层地址（生成 config.xml 时写入 middlewareUrl，客户端/服务端统一走中间层）
     [string]$MiddlewareUrl = 'https://47.253.41.10:8899'
 )
 
@@ -171,20 +171,21 @@ function Sync-NativeAssets([string]$targetDir, [switch]$IsAuthor) {
     if ($IsAuthor -and (Test-Path $ac)) {
         Copy-Item $ac (Join-Path $targetDir 'authorcore.dll') -Force
     }
-    # mysql_config.json：已存在则保留（可能被手工改过）；
-    # 缺失时生成本地开发配置（不入库；模板见 docs\mysql_config.example.json）
-    $cfg = Join-Path $targetDir 'mysql_config.json'
-    if (-not (Test-Path $cfg)) {
-        $cfgObj = [ordered]@{
-            host = $MysqlHost
-            port = $MysqlPort
-            user = $MysqlUser
-            pass = $MysqlPass
-            db   = $MysqlDb
-            middlewareUrl = $MiddlewareUrl
-        }
-        ($cfgObj | ConvertTo-Json) | Set-Content -Path $cfg -Encoding UTF8
-        Write-Host "  已生成本地 mysql_config.json（账号 $MysqlUser，库 $MysqlDb）"
+    # config.xml：启动配置（中间件地址等），缺失时由 config.example.xml 生成并注入 middlewareUrl；
+    # 已存在则保留（可能被手工改过）。
+    $cfgXml = Join-Path $targetDir 'config.xml'
+    if (-not (Test-Path $cfgXml)) {
+        $tpl = Get-Content (Join-Path $RepoRoot 'config.example.xml') -Raw -Encoding UTF8
+        $tpl = $tpl -replace '<middlewareUrl>.*?</middlewareUrl>', "<middlewareUrl>$MiddlewareUrl</middlewareUrl>"
+        [System.IO.File]::WriteAllText($cfgXml, $tpl, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  已生成 config.xml（middlewareUrl=$MiddlewareUrl）"
+    }
+    # templates/：模板代码目录（gen/std/itf/entry.template.cpp），随包分发；缺失时各端回退内置模板
+    $tplDir = Join-Path $RepoRoot 'templates'
+    if (Test-Path $tplDir) {
+        $dstTpl = Join-Path $targetDir 'templates'
+        if (-not (Test-Path $dstTpl)) { New-Item -ItemType Directory -Force -Path $dstTpl | Out-Null }
+        Copy-Item (Join-Path $tplDir '*.template.cpp') $dstTpl -Force
     }
 }
 

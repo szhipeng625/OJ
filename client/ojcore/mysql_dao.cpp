@@ -452,7 +452,7 @@ static bool middleware_fetch_problem(int id, const std::string& problem_dir, std
     if (!spjExe.empty()) WriteFileBin(dir + "\\spj.exe", oj::base64_decode(spjExe));
     else DeleteFileA((dir + "\\spj.exe").c_str());
 
-    // 函数式判题：题目入口 entry.cpp/entry.exe + 接口模板 itf.template.txt。
+    // 函数式判题：题目入口 entry.cpp/entry.exe + 接口模板 itf.template.cpp。
     std::string entryCode = p.value("entryCode", "");
     if (!entryCode.empty()) oj::write_enc_file(dir + "\\entry.cpp", entryCode);
     else DeleteFileA((dir + "\\entry.cpp").c_str());
@@ -625,6 +625,42 @@ long long mysql_upsert_submission(int problem_id, int contest_id,
         long long sid = jint(j, "sid");
         return sid > 0 ? sid : 0;
     } catch (...) { return 0; }
+}
+
+// ---------- 云端判题 ----------
+std::string mysql_cloud_submit(int problem_id, int contest_id,
+                               const std::string& code, std::string& err) {
+    int cid = contest_id > 0 ? contest_id : 0;
+    json b{{"problemId", problem_id}, {"contestId", cid},
+           {"code", code}, {"language", "cpp"}};
+    std::string resp, e;
+    if (!mw_req("POST", "/api/judge", b.dump(), resp, e)) { err = e; return ""; }
+    try {
+        json j = json::parse(resp);
+        if (!j.value("ok", false)) {
+            err = jstr(j, "error");
+            if (err.empty()) err = "云端判题提交失败";
+            return "";
+        }
+        return jstr(j, "taskId");
+    } catch (...) { err = "云端判题响应解析失败"; return ""; }
+}
+
+std::string mysql_cloud_poll(const std::string& task_id, bool& done, std::string& err) {
+    done = false;
+    std::string resp, e;
+    if (!mw_req("GET", "/api/judge/result?task_id=" + UrlEncode(task_id), "", resp, e)) {
+        err = e;
+        return "";
+    }
+    try {
+        json j = json::parse(resp);
+        std::string status = jstr(j, "status");
+        if (status == "AC" || status == "WA" || status == "CE" ||
+            status == "TLE" || status == "RE" || status == "SE")
+            done = true;
+        return resp;
+    } catch (...) { err = "云端判题响应解析失败"; return ""; }
 }
 
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id) {

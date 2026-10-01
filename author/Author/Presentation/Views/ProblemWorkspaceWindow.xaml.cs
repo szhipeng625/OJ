@@ -71,7 +71,9 @@ public partial class ProblemWorkspaceWindow : Window
             TagsBox.Text = string.Join(",", c.Meta.Tags);
             StdBox.Text = c.StdCode;
             SpjBox.Text = c.SpjCode;
-            EntryBox.Text = c.EntryCode;
+            EntryBox.Text = string.IsNullOrWhiteSpace(c.EntryCode)
+                ? AuthorClient.EntryTemplateDefault
+                : c.EntryCode;
             ItfBox.Text = string.IsNullOrWhiteSpace(c.ItfTemplate)
                 ? AuthorClient.ItfTemplateDefault
                 : c.ItfTemplate;

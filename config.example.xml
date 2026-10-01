@@ -18,7 +18,7 @@
   <dataDir>ojdata</dataDir>
   <!-- 中间件地址：配置后走 MySQL/LSM 中间层（替代原 mysql_config.json），留空则仅本地 LSM 模式 -->
   <middlewareUrl></middlewareUrl>
-  <!-- 模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp） -->
+  <!-- 模板代码目录（gen.template.cpp / std.template.cpp / itf.template.cpp / entry.template.cpp） -->
   <templatesDir>templates</templatesDir>
   <!-- 客户端启动日志 -->
   <startupLogFile>startup.log</startupLogFile>

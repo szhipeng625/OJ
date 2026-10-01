@@ -272,99 +272,71 @@ static int init_redis_safe(const std::string& host, int port, std::string& errOu
     }
 }
 
-// 判题核心：跑题、构造结果 JSON、落 LSM。virtual_ 非 0 表示虚拟参赛。
+// 判题核心：提交代码到云端判题沙箱、轮询结果、构造结果 JSON、落 MySQL/LSM。
+// virtual_ 非 0 表示虚拟参赛。云端沙箱（服务器 RabbitMQ → C++ orchestrator → eval_worker）已实现，
+// 客户端不再本地编译/运行用户代码。
 static const char* do_judge(int problem_id, const char* code,
                             const char* username, int virtual_, int contest_id) {
-    std::string problemDir = g_problemDir + "\\" + std::to_string(problem_id);
-    std::string src  = g_tempDir + "\\user.cpp";
-    std::string exe  = g_tempDir + "\\user.exe";
-    std::string out  = g_tempDir + "\\__out.tmp";
-    writeFile(src, code ? code : "");
-
-    // 判题前确保测试数据已生成（按需生成，耗时不计入判题计时）
-    if (oj::mysql_available()) {
-        std::string derr;
-        oj::ensure_problem_data(problem_id, g_problemDir, derr);
-    }
-
     std::string detail, verdict;
     std::vector<oj::CaseResult> cases;
+    int totalMs = 0;
 
-    std::string compileErr;
-    oj::JudgeOptions jopt;
-    // 从题目 meta.json 读取时间/内存限制（默认 1000ms / 256MB）
-    auto meta = readMeta(problemDir);
-    jopt.timeoutMs = (DWORD)meta.timeLimitMs;
-    jopt.memBytes = (SIZE_T)(meta.memLimitMB) * 1024 * 1024;
-
-    // 特殊判题器 SPJ：存在 spj.cpp（源码）或 spj.exe（二进制）则启用；仅有源码时回退编译。
-    std::string spjExe = problemDir + "\\spj.exe";
-    std::string spjSrc = oj::read_enc_file(problemDir + "\\spj.cpp");
-    if (!spjSrc.empty() && !exists(spjExe)) {
-        std::string spjTmp = problemDir + "\\spj.tmp.cpp";
-        writeFile(spjTmp, spjSrc);
-        std::string cerr;
-        if (!oj::compile_cpp(spjTmp, spjExe, cerr)) {
-            DeleteFileA(spjExe.c_str());
-            spjExe.clear();
-        }
-        DeleteFileA(spjTmp.c_str());
-    }
-    if (!spjExe.empty() && !exists(spjExe)) spjExe.clear();
-
-    // 函数式判题：入口 exe 加载用户 DLL 并调用接口函数 solve，仅计时 solve 调用本身（不含输入输出）。
-    if (meta.judgeMode == 1) {
-        std::string entryExe = problemDir + "\\entry.exe";
-        std::string entrySrc = oj::read_enc_file(problemDir + "\\entry.cpp");
-        // 入口仅有源码时回退本地编译（与 SPJ 一致）。
-        if (!entrySrc.empty() && !exists(entryExe)) {
-            std::string entryTmp = problemDir + "\\entry.tmp.cpp";
-            writeFile(entryTmp, entrySrc);
-            std::string cerr;
-            if (!oj::compile_cpp(entryTmp, entryExe, cerr)) {
-                DeleteFileA(entryExe.c_str());
-                entryExe.clear();
-            }
-            DeleteFileA(entryTmp.c_str());
-        }
-        if (!entryExe.empty() && !exists(entryExe)) entryExe.clear();
-
-        std::string dll = g_tempDir + "\\user.dll";
-        if (entryExe.empty()) {
+    if (oj::mysql_available()) {
+        // 1) 提交代码到云端判题（返回任务号）
+        std::string err;
+        std::string taskId = oj::mysql_cloud_submit(problem_id, contest_id,
+                                                    code ? code : "", err);
+        if (taskId.empty()) {
             verdict = "SE";
-            detail = "题目入口缺失（entry.exe）";
-        } else if (!oj::compile_shared(src, dll, compileErr)) {
-            verdict = "CE";
-            detail = compileErr.empty() ? "编译失败" : compileErr;
+            detail = "云端判题提交失败" + (err.empty() ? "" : "：" + err);
         } else {
-            cases = oj::run_tests_entry(entryExe, dll, problemDir, out, jopt, spjExe);
-            verdict = oj::summarize(cases);
-            int acn = 0; for (auto& c : cases) if (c.passed) acn++;
-            detail = "通过 " + std::to_string(acn) + "/" + std::to_string(cases.size()) + " 组测试点";
-            // 未通过时，返回第一个失败测试点所属生成器的描述文本
-            if (verdict != "AC") {
-                for (auto& c : cases) {
-                    if (!c.passed && !c.info.empty()) { detail = c.info; break; }
+            // 2) 轮询结果，直到出最终判定（上限 90s）
+            bool done = false;
+            std::string resp;
+            for (int waited = 0; waited < 90000; waited += 500) {
+                std::string perr;
+                resp = oj::mysql_cloud_poll(taskId, done, perr);
+                if (done) break;
+                Sleep(500);
+            }
+            if (!done) {
+                verdict = "SE";
+                detail = "云端判题超时（90s）";
+            } else {
+                std::string status = jsonStr(resp, "status");
+                long long acCount = jsonInt(resp, "ac_count");
+                long long totalCases = jsonInt(resp, "total_cases");
+                long long cpuNs = jsonInt(resp, "cpu_ns");
+                std::string errText = jsonUnescape(jsonStr(resp, "error"));
+                if (status.empty()) status = "SE";
+                verdict = status;
+                totalMs = (int)(cpuNs / 1000000);
+                if (totalCases <= 0) totalCases = (verdict == "AC") ? (acCount > 0 ? acCount : 1) : 1;
+                if (acCount < 0) acCount = 0;
+                if (acCount > totalCases) acCount = totalCases;
+                if (verdict == "AC") {
+                    detail = "通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点";
+                } else if (verdict == "CE") {
+                    detail = errText.empty() ? "编译失败" : errText;
+                } else {
+                    detail = errText.empty()
+                        ? ("通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点")
+                        : errText;
+                }
+                // 3) 合成逐测试点结果（云端仅返回汇总；首个失败点携带 error 信息）
+                for (long long i = 1; i <= totalCases; ++i) {
+                    oj::CaseResult c;
+                    c.name = "#" + std::to_string(i);
+                    c.timeMs = 0;
+                    if (i <= acCount) { c.passed = true; c.verdict = "AC"; }
+                    else { c.passed = false; c.verdict = verdict; c.info = errText; }
+                    cases.push_back(c);
                 }
             }
-            DeleteFileA(dll.c_str());
         }
-    } else if (!oj::compile_cpp(src, exe, compileErr)) {
-        verdict = "CE";
-        detail = compileErr.empty() ? "编译失败" : compileErr;
     } else {
-        // 判题数据来源：题目目录下各数据生成器子目录（二级目录）的 *.in/*.out
-        cases = oj::run_tests(exe, problemDir, out, jopt, spjExe);
-        verdict = oj::summarize(cases);
-        int acn = 0; for (auto& c : cases) if (c.passed) acn++;
-        detail = "通过 " + std::to_string(acn) + "/" + std::to_string(cases.size()) + " 组测试点";
-        // 未通过时，返回第一个失败测试点所属生成器的描述文本
-        if (verdict != "AC") {
-            for (auto& c : cases) {
-                if (!c.passed && !c.info.empty()) { detail = c.info; break; }
-            }
-        }
-        DeleteFileA(exe.c_str());
+        verdict = "SE";
+        detail = "未配置云端判题服务（middlewareUrl 为空）";
     }
 
     // 提交时间戳
@@ -382,8 +354,6 @@ static const char* do_judge(int problem_id, const char* code,
     long long sid = 0;
     try {
         if (oj::mysql_available()) {
-            int totalMs = 0;
-            for (auto& c : cases) totalMs += (int)c.timeMs;
             sid = oj::mysql_upsert_submission(problem_id, contest_id, verdict, detail,
                                               totalMs, virtual_ != 0, tsBuf,
                                               code ? code : "");

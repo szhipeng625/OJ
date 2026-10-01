@@ -15,31 +15,24 @@ ojcore.dll 已支持可选的 MySQL 后端，存储用户账号、密码哈希�
 
 ## 二、配置客户端
 
-把 `docs/mysql_config.example.json` 复制到客户端与出题服务端的运行目录（`dist/mysql_config.json`、`dist/author/mysql_config.json`），改成真实连接：
-```json
-{
-  "host": "你的服务器IP",
-  "port": 3306,
-  "user": "root",
-  "pass": "你的密码",
-  "db": "oj",
-  "redisHost": "你的LSM服务器IP",
-  "redisPort": 6379
-}
+中间件（middleware）地址统一从运行目录的 `config.xml` 读取（`<middlewareUrl>` 节点）：
+
+```xml
+<middlewareUrl>https://你的中间件服务器:8899</middlewareUrl>
 ```
-把 Connector/C 里的 `libmysql.dll` 复制到两个目录。
-- 首次连接时若 `oj` 库不存在，会自动 `CREATE DATABASE oj`（无需手工建库）。
-- 出题端与服务端共用同一份连接参数：出题端把发布的题目写入该库，客户端从该库拉取题目。
-- `redisHost` / `redisPort` 指向远端 LSM 存储服务（RESP 协议）；`redisHost` 缺省与 `host` 同机，`redisPort` 默认 6380。
+
+- 首次运行会自动在 exe 同目录生成 `config.xml` 模板（`middlewareUrl` 留空 = 仅本地 LSM 模式，不弹登录窗）。
+- 出题端与服务端共用同一份配置：出题端把发布的题目写入中间件数据库，客户端从中间件拉取题目。
+- 构建/打包时 `scripts\build.ps1 -MiddlewareUrl=...` 会把地址自动写入生成的 `config.xml`。
 
 ## 三、使用
 
 启动 `dist/client.exe`：
-- 若检测到 `mysql_config.json` 且 `libmysql.dll` 可加载，会先弹登录窗
-- 首次使用可点"注册"，角色选 `admin` / `author` / `user`
-- 登录态保存在 `ojdata/session.txt`，7 天内免登录
+- 若 `config.xml` 配置了 `middlewareUrl`，会先弹登录窗
+- 首次使用可点"注册"（仅 `user` 角色；`admin`/`author` 由数据库初始化脚本创建）
+- 登录态保存在 `auth\session.txt`，7 天内免登录
 - 顶部蓝色徽章显示 `👤 用户名 [角色]`
-- 不删 `mysql_config.json` 就不启用 MySQL；删掉则回到本地模式
+- `middlewareUrl` 留空则回到本地模式，不启用 MySQL/LSM 中间层
 
 ## 四、判题结果落库（最后提交原地更新）
 
