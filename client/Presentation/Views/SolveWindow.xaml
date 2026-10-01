@@ -73,7 +73,13 @@
                                         </Grid.RowDefinitions>
                                         <TextBlock x:Name="VerdictText" Text="结果：等待提交"
                                                    FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
-                                        <ListBox x:Name="CaseList" Grid.Row="1" BorderThickness="0" Height="130"/>
+                                        <ListBox x:Name="CaseList" Grid.Row="1" BorderThickness="0" Height="130">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Display}" FontSize="12" Foreground="#333"/>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
                                     </Grid>
                                 </DockPanel>
                             </Border>

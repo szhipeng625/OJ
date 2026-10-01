@@ -272,6 +272,35 @@ static int init_redis_safe(const std::string& host, int port, std::string& errOu
     }
 }
 
+// 解析云端判题返回的逐测试点结果数组：cases: [{name,status,cpu_ms,error}, ...]
+static std::vector<oj::CaseResult> parseCloudCases(const std::string& resp) {
+    std::vector<oj::CaseResult> out;
+    size_t cp = resp.find("\"cases\"");
+    if (cp == std::string::npos) return out;
+    size_t sp = resp.find('[', cp);
+    if (sp == std::string::npos) return out;
+    size_t ep = resp.find(']', sp);
+    if (ep == std::string::npos) return out;
+    std::string arr = resp.substr(sp + 1, ep - sp - 1);
+    size_t pos = 0;
+    while ((pos = arr.find('{', pos)) != std::string::npos) {
+        size_t end = arr.find('}', pos);
+        if (end == std::string::npos) break;
+        std::string obj = arr.substr(pos, end - pos + 1);
+        oj::CaseResult c;
+        c.name = jsonStr(obj, "name");
+        c.verdict = jsonStr(obj, "status");
+        if (c.verdict.empty()) c.verdict = "SE";
+        c.timeMs = (long long)jsonInt(obj, "cpu_ms");
+        c.passed = (c.verdict == "AC");
+        c.info = jsonUnescape(jsonStr(obj, "error"));
+        if (c.name.empty()) c.name = std::to_string(out.size() + 1);
+        out.push_back(c);
+        pos = end + 1;
+    }
+    return out;
+}
+
 // 判题核心：提交代码到云端判题沙箱（判题结点推送结果、中间层同步返回），
 // 构造结果 JSON、落 MySQL/LSM。virtual_ 非 0 表示虚拟参赛。
 // 客户端不再本地编译/运行用户代码，也不本地轮询结果。
@@ -318,14 +347,17 @@ static const char* do_judge(int problem_id, const char* code,
             } else {
                 detail = "系统错误";
             }
-            // 合成逐测试点结果（云端仅返回汇总；首个失败点携带 error 信息）
-            for (long long i = 1; i <= totalCases; ++i) {
-                oj::CaseResult c;
-                c.name = "#" + std::to_string(i);
-                c.timeMs = 0;
-                if (i <= acCount) { c.passed = true; c.verdict = "AC"; }
-                else { c.passed = false; c.verdict = verdict; c.info = errText; }
-                cases.push_back(c);
+            // 逐测试点结果（云端返回 cases 数组，按点展示；缺省回退合成）
+            cases = parseCloudCases(resp);
+            if (cases.empty()) {
+                for (long long i = 1; i <= totalCases; ++i) {
+                    oj::CaseResult c;
+                    c.name = "#" + std::to_string(i);
+                    c.timeMs = 0;
+                    if (i <= acCount) { c.passed = true; c.verdict = "AC"; }
+                    else { c.passed = false; c.verdict = verdict; c.info = errText; }
+                    cases.push_back(c);
+                }
             }
         }
     } else {
