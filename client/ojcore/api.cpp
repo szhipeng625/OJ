@@ -272,9 +272,9 @@ static int init_redis_safe(const std::string& host, int port, std::string& errOu
     }
 }
 
-// 判题核心：提交代码到云端判题沙箱、轮询结果、构造结果 JSON、落 MySQL/LSM。
-// virtual_ 非 0 表示虚拟参赛。云端沙箱（服务器 RabbitMQ → C++ orchestrator → eval_worker）已实现，
-// 客户端不再本地编译/运行用户代码。
+// 判题核心：提交代码到云端判题沙箱（判题结点推送结果、中间层同步返回），
+// 构造结果 JSON、落 MySQL/LSM。virtual_ 非 0 表示虚拟参赛。
+// 客户端不再本地编译/运行用户代码，也不本地轮询结果。
 static const char* do_judge(int problem_id, const char* code,
                             const char* username, int virtual_, int contest_id) {
     std::string detail, verdict;
@@ -282,56 +282,50 @@ static const char* do_judge(int problem_id, const char* code,
     int totalMs = 0;
 
     if (oj::mysql_available()) {
-        // 1) 提交代码到云端判题（返回任务号）
+        // 一次同步调用：提交代码并等待云端判题结点推送的最终结果
         std::string err;
-        std::string taskId = oj::mysql_cloud_submit(problem_id, contest_id,
-                                                    code ? code : "", err);
-        if (taskId.empty()) {
+        std::string resp = oj::mysql_cloud_judge(problem_id, contest_id,
+                                                 code ? code : "", err);
+        if (resp.empty()) {
             verdict = "SE";
-            detail = "云端判题提交失败" + (err.empty() ? "" : "：" + err);
+            detail = "云端判题失败" + (err.empty() ? "" : "：" + err);
         } else {
-            // 2) 轮询结果，直到出最终判定（上限 90s）
-            bool done = false;
-            std::string resp;
-            for (int waited = 0; waited < 90000; waited += 500) {
-                std::string perr;
-                resp = oj::mysql_cloud_poll(taskId, done, perr);
-                if (done) break;
-                Sleep(500);
-            }
-            if (!done) {
-                verdict = "SE";
-                detail = "云端判题超时（90s）";
+            std::string status = jsonStr(resp, "status");
+            long long acCount = jsonInt(resp, "ac_count");
+            long long totalCases = jsonInt(resp, "total_cases");
+            long long cpuNs = jsonInt(resp, "cpu_ns");
+            std::string errText = jsonUnescape(jsonStr(resp, "error"));
+            if (status.empty()) status = "SE";
+            verdict = status;
+            totalMs = (int)(cpuNs / 1000000);
+            if (totalCases <= 0) totalCases = (verdict == "AC") ? (acCount > 0 ? acCount : 1) : 1;
+            if (acCount < 0) acCount = 0;
+            if (acCount > totalCases) acCount = totalCases;
+            if (verdict == "AC") {
+                detail = "通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点";
+            } else if (verdict == "CE") {
+                detail = errText.empty() ? "编译失败" : errText;
+            } else if (!errText.empty()) {
+                detail = errText;
+            } else if (verdict == "TLE") {
+                detail = "运行超时";
+            } else if (verdict == "MLE") {
+                detail = "内存超限";
+            } else if (verdict == "RE") {
+                detail = "运行时错误";
+            } else if (verdict == "WA") {
+                detail = "输出与标准答案不一致（通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点）";
             } else {
-                std::string status = jsonStr(resp, "status");
-                long long acCount = jsonInt(resp, "ac_count");
-                long long totalCases = jsonInt(resp, "total_cases");
-                long long cpuNs = jsonInt(resp, "cpu_ns");
-                std::string errText = jsonUnescape(jsonStr(resp, "error"));
-                if (status.empty()) status = "SE";
-                verdict = status;
-                totalMs = (int)(cpuNs / 1000000);
-                if (totalCases <= 0) totalCases = (verdict == "AC") ? (acCount > 0 ? acCount : 1) : 1;
-                if (acCount < 0) acCount = 0;
-                if (acCount > totalCases) acCount = totalCases;
-                if (verdict == "AC") {
-                    detail = "通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点";
-                } else if (verdict == "CE") {
-                    detail = errText.empty() ? "编译失败" : errText;
-                } else {
-                    detail = errText.empty()
-                        ? ("通过 " + std::to_string(acCount) + "/" + std::to_string(totalCases) + " 组测试点")
-                        : errText;
-                }
-                // 3) 合成逐测试点结果（云端仅返回汇总；首个失败点携带 error 信息）
-                for (long long i = 1; i <= totalCases; ++i) {
-                    oj::CaseResult c;
-                    c.name = "#" + std::to_string(i);
-                    c.timeMs = 0;
-                    if (i <= acCount) { c.passed = true; c.verdict = "AC"; }
-                    else { c.passed = false; c.verdict = verdict; c.info = errText; }
-                    cases.push_back(c);
-                }
+                detail = "系统错误";
+            }
+            // 合成逐测试点结果（云端仅返回汇总；首个失败点携带 error 信息）
+            for (long long i = 1; i <= totalCases; ++i) {
+                oj::CaseResult c;
+                c.name = "#" + std::to_string(i);
+                c.timeMs = 0;
+                if (i <= acCount) { c.passed = true; c.verdict = "AC"; }
+                else { c.passed = false; c.verdict = verdict; c.info = errText; }
+                cases.push_back(c);
             }
         }
     } else {

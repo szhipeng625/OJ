@@ -51,12 +51,10 @@ long long mysql_upsert_submission(int problem_id, int contest_id,
                                   int time_ms, bool virt, const std::string& ts,
                                   const std::string& code);
 
-// 云端判题：提交代码到中间层（云端沙箱编译/运行），成功返回任务号 task_id，失败返回空串并填 err。
-std::string mysql_cloud_submit(int problem_id, int contest_id,
-                               const std::string& code, std::string& err);
-// 云端判题：轮询任务结果，返回结果 JSON（含 status）；done=true 表示已出最终判定
-//（status 为 AC/WA/CE/TLE/RE/SE）。网络失败返回空串并填 err。
-std::string mysql_cloud_poll(const std::string& task_id, bool& done, std::string& err);
+// 云端判题：提交代码并等待最终结果（判题结点推送结果，中间层同步返回）。
+// 成功返回结果 JSON（含 status/ac_count/total_cases/cpu_ns/error），失败返回空串并填 err。
+std::string mysql_cloud_judge(int problem_id, int contest_id,
+                              const std::string& code, std::string& err);
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id);
 bool mysql_user_progress(const std::string& username, int contest_id, std::string& out_json);
 bool mysql_user_solution(int problem_id, int contest_id, std::string& out_json);

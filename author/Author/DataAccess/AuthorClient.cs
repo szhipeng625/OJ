@@ -23,9 +23,13 @@ public sealed class AuthorClient
     public static string ItfTemplateDefault
         => OjPaths.TemplateContent("itf.template.cpp")
            ?? "// 接口编程题：只需实现 solve 函数，不要写 main 函数和输入输出语句。\n"
-           + "// 提交后你的代码会自动编译为 DLL，由题目入口加载、解析输入并调用 solve，返回值即输出。\n"
+           + "// 提交后你的代码会自动编译为共享库（DLL/.so），由题目入口加载、解析输入并调用 solve，返回值即输出。\n"
            + "// 函数签名以题面为准（示例为两个整数求和）。\n"
+           + "#ifdef _WIN32\n"
            + "extern \"C\" __declspec(dllexport)\n"
+           + "#else\n"
+           + "extern \"C\" __attribute__((visibility(\"default\")))\n"
+           + "#endif\n"
            + "int solve(int a, int b) {\n"
            + "    // TODO: 在此实现你的算法\n"
            + "    return a + b;\n"
@@ -34,21 +38,29 @@ public sealed class AuthorClient
     /// <summary>函数式（接口判题）题目的默认入口脚手架：文件优先（config.xml templatesDir 的 entry.template.cpp），缺失回退内置。</summary>
     public static string EntryTemplateDefault
         => OjPaths.TemplateContent("entry.template.cpp")
-           ?? "// 题目入口 entry.cpp：LoadLibrary 加载 user.dll → 解析输入 → 计时调用 solve → 写输出与耗时。\n"
-           + "#include <windows.h>\n#include <chrono>\n#include <fstream>\nusing namespace std;\n"
+           ?? "// 题目入口 entry.cpp：加载用户共享库 → 解析输入 → 计时调用 solve → 写输出与耗时（Win/Linux 通用）。\n"
+           + "#ifdef _WIN32\n#include <windows.h>\ntypedef HMODULE lib_t;\n"
+           + "static lib_t load_lib(const char* p){return LoadLibraryA(p);}\n"
+           + "static void* get_fn(lib_t h,const char* n){return (void*)GetProcAddress(h,n);}\n"
+           + "static void close_lib(lib_t h){if(h)FreeLibrary(h);}\n"
+           + "#else\n#include <dlfcn.h>\ntypedef void* lib_t;\n"
+           + "static lib_t load_lib(const char* p){return dlopen(p,RTLD_LAZY);}\n"
+           + "static void* get_fn(lib_t h,const char* n){return dlsym(h,n);}\n"
+           + "static void close_lib(lib_t h){if(h)dlclose(h);}\n#endif\n"
+           + "#include <chrono>\n#include <fstream>\nusing namespace std;\n"
            + "typedef int (*solve_fn)(int, int);\n"
            + "int main(int argc, char** argv) {\n"
            + "    if (argc < 5) return 2;\n"
-           + "    HMODULE h = LoadLibraryA(argv[1]);\n"
+           + "    lib_t h = load_lib(argv[1]);\n"
            + "    if (!h) return 3;\n"
-           + "    solve_fn solve = (solve_fn)GetProcAddress(h, \"solve\");\n"
-           + "    if (!solve) { FreeLibrary(h); return 4; }\n"
+           + "    solve_fn solve = (solve_fn)get_fn(h, \"solve\");\n"
+           + "    if (!solve) { close_lib(h); return 4; }\n"
            + "    ifstream fin(argv[2]); int a = 0, b = 0; fin >> a >> b; fin.close();\n"
            + "    auto t0 = chrono::steady_clock::now(); int ans = solve(a, b);\n"
            + "    auto t1 = chrono::steady_clock::now();\n"
            + "    ofstream(argv[3]) << ans << \"\\n\";\n"
            + "    ofstream(argv[4]) << chrono::duration_cast<chrono::milliseconds>(t1 - t0).count() << \"\\n\";\n"
-           + "    FreeLibrary(h); return 0;\n"
+           + "    close_lib(h); return 0;\n"
            + "}\n";
 
     /// <summary>服务端题库根目录（author/problems）。</summary>

@@ -13,13 +13,15 @@ struct HttpResp {
 };
 
 // 发起 HTTP 请求（GET/POST，支持 http/https）。token 非空时带 Authorization: Bearer。
+// timeoutSec：连接/读写超时（秒），默认 8s；云端判题等长耗时请求可传更大值。
 inline bool http_request(const std::string& method, const std::string& baseUrl,
                          const std::string& pathQuery, const std::string& body,
-                         const std::string& token, HttpResp& out, std::string& err) {
+                         const std::string& token, HttpResp& out, std::string& err,
+                         int timeoutSec = 8) {
     httplib::Client cli(baseUrl);
-    cli.set_connection_timeout(8, 0);
-    cli.set_read_timeout(8, 0);
-    cli.set_write_timeout(8, 0);
+    cli.set_connection_timeout(timeoutSec, 0);
+    cli.set_read_timeout(timeoutSec, 0);
+    cli.set_write_timeout(timeoutSec, 0);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
     // 服务端为自签证书，跳过证书校验
     cli.enable_server_certificate_verification(false);

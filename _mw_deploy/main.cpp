@@ -21,6 +21,7 @@
 #include <chrono>
 #include <ctime>
 #include <cctype>
+#include <thread>
 #include <mutex>
 #include <utility>
 
@@ -365,7 +366,8 @@ int main(int argc, char** argv) {
         });
     });
 
-    // 提交代码到云端判题（异步：返回 task_id，客户端轮询 /api/judge/result 取最终结果）
+    // 提交代码到云端判题（同步：中间层等待判题结点推送结果后，一次性返回最终判定，
+    // 客户端无需轮询 /api/judge/result）
     svr->Post("/api/judge", [](const httplib::Request& req, httplib::Response& res) {
         wrap(req, res, [&]() {
             long long uid = auth(req);
@@ -385,20 +387,19 @@ int main(int argc, char** argv) {
             json jr = cloud_judge_post("/api/cloud_judge", get_token(req), fwd.dump());
             std::string task_id = jr.value("task_id", "");
             if (task_id.empty()) throw std::runtime_error("云端判题未返回任务号");
-            res.set_content(jok({{"taskId", task_id}}), "application/json");
-        });
-    });
 
-    // 轮询云端判题结果（最终结果含 status=AC/WA/CE/TLE/RE/SE 及 ac_count/total_cases/error）
-    svr->Get("/api/judge/result", [](const httplib::Request& req, httplib::Response& res) {
-        wrap(req, res, [&]() {
-            std::string task_id = req.get_param_value("task_id");
-            if (task_id.empty()) throw std::runtime_error("task_id required");
-            for (char c : task_id)
-                if (!(isalnum((unsigned char)c) || c == '_' || c == '-'))
-                    throw std::runtime_error("invalid task_id");
-            json jr = cloud_judge_get("/api/cloud_judge_result?task_id=" + task_id);
-            res.set_content(jr.dump(), "application/json");
+            // 等待判题结点推送结果（最长 ~120s）
+            for (int i = 0; i < 240; ++i) {
+                json r = cloud_judge_get("/api/cloud_judge_result?task_id=" + task_id);
+                std::string st = r.value("status", "");
+                if (st == "AC" || st == "WA" || st == "CE" || st == "TLE" ||
+                    st == "RE" || st == "SE" || st == "MLE") {
+                    res.set_content(r.dump(), "application/json");
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            throw std::runtime_error("云端判题超时");
         });
     });
 

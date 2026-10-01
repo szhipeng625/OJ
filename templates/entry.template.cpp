@@ -17,7 +17,19 @@
 // 修改点（按题面改这两处，其余保持不变）：
 //   (a) 函数指针类型与函数名（与接口模板 itf.template.cpp 中声明的签名一致）；
 //   (b) 「解析输入」与「输出结果」两部分。
+#ifdef _WIN32
 #include <windows.h>
+typedef HMODULE lib_t;
+static lib_t load_lib(const char* p) { return LoadLibraryA(p); }
+static void* get_fn(lib_t h, const char* n) { return (void*)GetProcAddress(h, n); }
+static void close_lib(lib_t h) { if (h) FreeLibrary(h); }
+#else
+#include <dlfcn.h>
+typedef void* lib_t;
+static lib_t load_lib(const char* p) { return dlopen(p, RTLD_LAZY); }
+static void* get_fn(lib_t h, const char* n) { return dlsym(h, n); }
+static void close_lib(lib_t h) { if (h) dlclose(h); }
+#endif
 #include <chrono>
 #include <fstream>
 #include <string>
@@ -27,17 +39,17 @@ using namespace std;
 typedef int (*solve_fn)(int, int);
 
 int main(int argc, char** argv) {
-    if (argc < 5) return 2;                 // 参数不足：dll/in/out/time
+    if (argc < 5) return 2;                 // 参数不足：lib/in/out/time
     const char* dllFile  = argv[1];
     const char* inFile   = argv[2];
     const char* outFile  = argv[3];
     const char* timeFile = argv[4];
 
-    // 1) 加载用户 DLL 并取接口函数
-    HMODULE h = LoadLibraryA(dllFile);
-    if (!h) return 3;                       // DLL 加载失败
-    solve_fn solve = (solve_fn)GetProcAddress(h, "solve");
-    if (!solve) { FreeLibrary(h); return 4; } // 未找到接口函数
+    // 1) 加载用户共享库并取接口函数
+    lib_t h = load_lib(dllFile);
+    if (!h) return 3;                       // 库加载失败
+    solve_fn solve = (solve_fn)get_fn(h, "solve");
+    if (!solve) { close_lib(h); return 4; } // 未找到接口函数
 
     // 2) (b) 解析输入：按题面约定从 inFile 读参数
     ifstream fin(inFile);
@@ -60,6 +72,6 @@ int main(int argc, char** argv) {
     ftime << chrono::duration_cast<chrono::milliseconds>(t1 - t0).count() << "\n";
     ftime.close();
 
-    FreeLibrary(h);
+    close_lib(h);
     return 0;
 }

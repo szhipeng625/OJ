@@ -628,39 +628,27 @@ long long mysql_upsert_submission(int problem_id, int contest_id,
 }
 
 // ---------- 云端判题 ----------
-std::string mysql_cloud_submit(int problem_id, int contest_id,
-                               const std::string& code, std::string& err) {
+// 判题结点（服务器 RabbitMQ → orchestrator → eval_worker 沙箱）推送结果，中间层同步等待后一次性返回。
+std::string mysql_cloud_judge(int problem_id, int contest_id,
+                              const std::string& code, std::string& err) {
     int cid = contest_id > 0 ? contest_id : 0;
     json b{{"problemId", problem_id}, {"contestId", cid},
            {"code", code}, {"language", "cpp"}};
-    std::string resp, e;
-    if (!mw_req("POST", "/api/judge", b.dump(), resp, e)) { err = e; return ""; }
-    try {
-        json j = json::parse(resp);
-        if (!j.value("ok", false)) {
-            err = jstr(j, "error");
-            if (err.empty()) err = "云端判题提交失败";
-            return "";
-        }
-        return jstr(j, "taskId");
-    } catch (...) { err = "云端判题响应解析失败"; return ""; }
-}
-
-std::string mysql_cloud_poll(const std::string& task_id, bool& done, std::string& err) {
-    done = false;
-    std::string resp, e;
-    if (!mw_req("GET", "/api/judge/result?task_id=" + UrlEncode(task_id), "", resp, e)) {
-        err = e;
+    HttpResp r;
+    if (!http_request("POST", g_middleware_url, "/api/judge", b.dump(),
+                      g_middleware_token, r, err, 150)) {
+        if (err.empty()) err = "云端判题请求失败";
         return "";
     }
-    try {
-        json j = json::parse(resp);
-        std::string status = jstr(j, "status");
-        if (status == "AC" || status == "WA" || status == "CE" ||
-            status == "TLE" || status == "RE" || status == "SE")
-            done = true;
-        return resp;
-    } catch (...) { err = "云端判题响应解析失败"; return ""; }
+    if (r.status != 200) {
+        try {
+            json j = json::parse(r.body.empty() ? "{}" : r.body);
+            err = jstr(j, "error");
+            if (err.empty()) err = "云端判题失败（HTTP " + std::to_string(r.status) + "）";
+        } catch (...) { err = "云端判题失败（HTTP " + std::to_string(r.status) + "）"; }
+        return "";
+    }
+    return r.body;   // 最终结果 JSON：{status, ac_count, total_cases, cpu_ns, mem_bytes, error}
 }
 
 bool mysql_user_id_by_name(const std::string& username, long long& out_user_id) {
