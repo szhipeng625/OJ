@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using client.Business.Services;
 using client.DataAccess.Models;
 using client.Presentation.Helpers;
+using OjUiControls.Helpers;
 
 namespace client.Presentation.Views;
 
@@ -70,7 +71,7 @@ public partial class SolveWindow : Window
         string tags = problem.Tags is { Length: > 0 } ? string.Join(", ", problem.Tags) : "无";
         DescTitle.Text = problem.Title;
         MetaText.Text = $"时间限制 {problem.TimeLimitMs}ms · 内存 {problem.MemLimitMB}MB · 标签：{tags}";
-        MarkdownRenderer.Render(DescBox, MarkdownRenderer.CombineStatement(problem.Description, problem.Samples, problem.SampleIn, problem.SampleOut));
+        MarkdownRenderer.Render(DescBox, ProblemViewFactory.Create(problem).StatementMarkdown);
 
         Loaded += async (_, _) => await LoadSavedCodeAsync();
         Closed += (_, _) => ReleaseResources();

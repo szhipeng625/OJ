@@ -34,6 +34,50 @@ public sealed class ProblemService
 
     public Task<List<ProblemInfo>> ListAsync() => _build.RunAsync("list", () => _author.ListFromMySql());
 
+    /// <summary>
+    /// 题库里已用过的全部标签（按出现次数降序）。供 Codex 在新增标签时与既有风格保持一致。
+    /// 标签取自本地工作副本的 meta.json（MySQL 列表接口不返回标签），因此是尽力而为的结果。
+    /// </summary>
+    public Task<List<string>> ListAllTagsAsync()
+        => _build.RunAsync("list", () =>
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var p in _author.ListFromMySql())
+            {
+                try
+                {
+                    foreach (var t in _author.GetMeta(p.Id).Tags ?? Array.Empty<string>())
+                        if (!string.IsNullOrWhiteSpace(t))
+                            counts[t] = counts.GetValueOrDefault(t) + 1;
+                }
+                catch { /* 单题 meta 读不到不影响整体 */ }
+            }
+            return counts.OrderByDescending(kv => kv.Value)
+                         .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+                         .Select(kv => kv.Key)
+                         .ToList();
+        });
+
+    /// <summary>
+    /// 只读本地工作副本的题面正文（无网络往返），供 Codex 建检索索引。
+    /// 本地副本是「打开过/同步过」的题目才有，未物化的题返回空串 —— 这是刻意的：
+    /// 为了索引去逐题拉取会把检索省下的 token 全赔进网络往返里。
+    /// </summary>
+    public Task<string> LocalStatementTextAsync(int id)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            try { return _author.LoadContent(id).StatementDesc ?? ""; }
+            catch { return ""; }
+        });
+
+    /// <summary>读某题的标签（取自本地工作副本 meta.json；读不到返回空数组）。</summary>
+    public Task<string[]> GetTagsAsync(int id)
+        => _build.RunAsync(Gate(id), () =>
+        {
+            try { return _author.GetMeta(id).Tags ?? Array.Empty<string>(); }
+            catch { return Array.Empty<string>(); }
+        });
+
     /// <summary>给出下一个可用的题目编号（数据库最大编号 + 1，空题库时为 1；本地缓存兜底）。</summary>
     public Task<int> SuggestIdAsync()
         => _build.RunAsync("list", () =>

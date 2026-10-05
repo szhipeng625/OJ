@@ -1,23 +1,29 @@
-﻿using System;
-using System.Windows.Controls;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
+using System.Xml;
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
-using System.IO;
-using System.Xml;
-using System.Windows.Threading;
 using OjEditorCore;
 
-namespace author.Presentation.Controls
+namespace OjUiControls.Controls
 {
+    /// <summary>
+    /// 客户端与出题端共用的代码编辑器（AvalonEdit 封装）。
+    /// 两套行为取并集：
+    ///   · 代码模式（IsLight=false）：C++ Dark+ 高亮 + 补全 + 自动闭合括号/引号 + 配对退格 + 回车智能缩进；
+    ///   · 纯文本模式（IsLight=true）：白底无高亮，用于题目描述 Markdown，不触发括号行为，Tab 只缩进当前行。
+    /// </summary>
     public partial class CodeEditor : UserControl
     {
         private CompletionWindow? _completionWindow;
@@ -59,7 +65,7 @@ namespace author.Presentation.Controls
             editor.Editor.ShowLineNumbers = !(bool)e.NewValue;
         }
 
-        // IsLight：true 时为白色背景的纯文本编辑（用于题目描述 Markdown，无 C++ 高亮与补全）
+        // IsLight：true 时为白色背景的纯文本编辑（用于题目描述 Markdown，无 C++ 高亮与补全、无括号处理）
         public static readonly DependencyProperty IsLightProperty =
             DependencyProperty.Register("IsLight", typeof(bool), typeof(CodeEditor),
                 new PropertyMetadata(false, OnIsLightChanged));
@@ -168,7 +174,7 @@ namespace author.Presentation.Controls
             Editor.Focus();
         }
 
-        // 高亮定义名称（XSHD 插件，见 Presentation/Highlighting/CppDarkPlus.xshd）
+        // 高亮定义名称（XSHD 插件，见 Highlighting/CppDarkPlus.xshd）
         private const string DarkDefinitionName = "C++ Dark+";
         private static readonly object HighlightInitLock = new();
 
@@ -229,16 +235,35 @@ namespace author.Presentation.Controls
                 return HighlightingManager.Instance.GetDefinition("C++");
             }
         }
-        // C++ 补全规则统一由 OjEditorCore.CppCompletionEngine 提供（关键字 + 用户自定义标识符）
+        // 自动闭合括号 / 引号（仅代码模式；C++ 补全规则统一由 OjEditorCore.CppCompletionEngine 提供）
+
+        private static readonly Dictionary<char, string> AutoClosePairs = new()
+        {
+            ['{'] = "}", ['('] = ")", ['['] = "]", ['"'] = "\"", ['\''] = "'"
+        };
 
         private void TextArea_TextEntering(object sender, TextCompositionEventArgs e)
         {
-            if (IsLight) return;   // 纯文本（Markdown）模式：不触发 C++ 补全
+            if (IsLight) return;                          // 纯文本（Markdown）模式：不触发补全与括号处理
+            if (e.Text.Length == 0) return;
 
-            if (e.Text.Length > 0 && _completionWindow != null)
+            // 自动闭合括号 / 引号，光标留在中间
+            if (e.Text.Length == 1 && AutoClosePairs.TryGetValue(e.Text[0], out var closer))
+            {
+                _completionWindow?.Close();
+                var ta = Editor.TextArea;
+                int caret = ta.Caret.Offset;
+                ta.Document.Insert(caret, e.Text + closer);
+                ta.Caret.Offset = caret + 1;
+                e.Handled = true;
+                return;
+            }
+
+            if (_completionWindow != null)
             {
                 if (char.IsLetterOrDigit(e.Text[0]) || e.Text[0] == '_')
                 {
+                    // 让字符先写入，再按新前缀刷新；无匹配时自动关闭
                     Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(RefreshCompletion));
                     return;
                 }
@@ -257,20 +282,84 @@ namespace author.Presentation.Controls
             if (e.Key == Key.Space && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
             {
                 e.Handled = true;
-                ShowCompletion();
+                if (!IsLight) ShowCompletion();
             }
         }
 
-        // 纯文本（题目描述 Markdown）模式：Tab 只缩进当前行，避免 AvalonEdit 默认的
-        // “选区/整段缩进”导致下面几行跟着一起缩进。
         private void TextArea_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (!IsLight || e.Key != Key.Tab) return;
-            e.Handled = true;
-            if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
-                OutdentCurrentLine();
-            else
-                InsertTabIndent();
+            // 纯文本（题目描述 Markdown）模式：Tab 只缩进当前行，避免 AvalonEdit 默认的
+            // “选区/整段缩进”导致下面几行跟着一起缩进。
+            if (IsLight)
+            {
+                if (e.Key != Key.Tab) return;
+                e.Handled = true;
+                if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                    OutdentCurrentLine();
+                else
+                    InsertTabIndent();
+                return;
+            }
+
+            // 代码模式：配对退格 + 回车智能缩进
+            var ta = Editor.TextArea;
+            if (e.Key == Key.Back)
+            {
+                int off = ta.Caret.Offset;
+                if (off > 0 && off < ta.Document.TextLength && IsMatchingPair(ta.Document.GetCharAt(off - 1), ta.Document.GetCharAt(off)))
+                {
+                    ta.Document.Remove(off - 1, 2);
+                    e.Handled = true;
+                }
+            }
+            else if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                HandleEnter(ta);
+            }
+        }
+
+        private static bool IsMatchingPair(char a, char b)
+        {
+            return (a, b) switch
+            {
+                ('{', '}') or ('(', ')') or ('[', ']') or ('"', '"') or ('\'', '\'') => true,
+                _ => false
+            };
+        }
+
+        private void HandleEnter(TextArea ta)
+        {
+            var doc = ta.Document;
+            int offset = ta.Caret.Offset;
+            var line = doc.GetLineByOffset(offset);
+            string lineText = doc.GetText(line.Offset, offset - line.Offset);
+
+            int indentLen = 0;
+            while (indentLen < lineText.Length && (lineText[indentLen] == ' ' || lineText[indentLen] == '\t'))
+                indentLen++;
+            string indent = new string(' ', indentLen);
+            string nl = Environment.NewLine;
+
+            // 光标夹在自动闭合的 {} 中间：拆成三行
+            if (offset > line.Offset && offset < doc.TextLength &&
+                doc.GetCharAt(offset - 1) == '{' && doc.GetCharAt(offset) == '}')
+            {
+                doc.Insert(offset, nl + indent + "    " + nl + indent);
+                ta.Caret.Offset = offset + nl.Length + indent.Length + 4;
+                return;
+            }
+
+            // 行尾是 { ：换行并缩进一级
+            if (offset > line.Offset && doc.GetCharAt(offset - 1) == '{')
+            {
+                doc.Insert(offset, nl + indent + "    ");
+                ta.Caret.Offset = offset + nl.Length + indent.Length + 4;
+                return;
+            }
+
+            doc.Insert(offset, nl + indent);
+            ta.Caret.Offset = offset + nl.Length + indent.Length;
         }
 
         private void InsertTabIndent()

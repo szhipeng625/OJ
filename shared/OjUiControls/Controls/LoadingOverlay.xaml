@@ -1,0 +1,21 @@
+<UserControl x:Class="OjUiControls.Controls.LoadingOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <!-- 半透明遮罩：Background 非空 => 可命中测试，挡住下层控件的一切鼠标操作 -->
+    <Grid x:Name="Root" Background="#66152030" Visibility="Collapsed">
+        <Border Background="White" CornerRadius="8" Padding="24,18"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                BorderBrush="#FFE3E6EB" BorderThickness="1">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.25"/>
+            </Border.Effect>
+            <StackPanel MinWidth="220">
+                <TextBlock x:Name="MessageText" Text="正在加载…" FontSize="14"
+                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <ProgressBar IsIndeterminate="True" Height="6" Width="200"
+                             Foreground="#2D7DF6" Background="#FFE3E6EB" BorderThickness="0"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

@@ -71,6 +71,8 @@ test_login/
 test_upsert/
 client.csproj.user
 dist/
+# 便携包暂存（客户端+出题端+运行时，含 80MB zip，不上传）
+dist_pack/
 store/
 installer_out/
 **/problems/

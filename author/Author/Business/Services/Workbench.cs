@@ -16,4 +16,10 @@ public sealed class Workbench
 
     /// <summary>题目发布目标目录（serverRoot\problems），固定不可修改。</summary>
     public string ServerProblemDir { get; init; } = "";
+
+    /// <summary>
+    /// ACMDOGCodex 的题库工具宿主。组合根装配后赋值；
+    /// Codex 面板与 MCP 服务共用它，因此两条入口的题库操作路径完全一致。
+    /// </summary>
+    public AuthorOjToolHost? CodexHost { get; set; }
 }

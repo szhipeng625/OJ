@@ -27,6 +27,9 @@ public sealed class AppConfig
     /// <summary>第三方托管程序集目录（分号分隔多个候选，取第一个存在的）。</summary>
     public string AssemblyDirs { get; set; } = "ui;..\\shared\\ui";
 
+    /// <summary>ACMDOGCodex 专用程序集目录（Claude SDK / MCP / Microsoft.Extensions 一族，分号分隔，取第一个存在的）。</summary>
+    public string CodexDirs { get; set; } = "codex;..\\shared\\codex";
+
     /// <summary>判题核心 DLL 文件名（启动时从 dllDirs 预加载，DllImport 同名即命中）。</summary>
     public string OjCoreDll { get; set; } = "ojcore.dll";
 
@@ -67,6 +70,51 @@ public sealed class AppConfig
 
     /// <summary>登录会话文件（相对路径含子目录）。</summary>
     public string SessionFile { get; set; } = "auth\\session.txt";
+
+    // ---------- ACMDOGCodex（出题助手） ----------
+    /// <summary>
+    /// Codex 运行参数（模型 / effort / 缓存 / 思考链 / MCP）。
+    /// API Key 也可以不放这里，改用环境变量 ANTHROPIC_API_KEY。
+    /// </summary>
+    public OjCodex.CodexSettings Codex { get; set; } = new();
+
+    /// <summary>把当前 Codex 配置写回 config.xml 的 &lt;codex&gt; 节（面板上改完即存）。</summary>
+    public void SaveCodex()
+    {
+        try
+        {
+            if (!File.Exists(ConfigFile)) return;
+            var doc = XDocument.Load(ConfigFile);
+            var root = doc.Root;
+            if (root is null) return;
+
+            var old = root.Element("codex");
+            old?.Remove();
+
+            var el = new XElement("codex",
+                new XElement("apiKey", Codex.ApiKey),
+                new XElement("baseUrl", Codex.BaseUrl),
+                new XElement("model", Codex.Model),
+                new XElement("effort", Codex.Effort),
+                new XElement("maxTokens", Codex.MaxTokens),
+                new XElement("maxToolRounds", Codex.MaxToolRounds),
+                new XElement("runOutputTokenBudget", Codex.RunOutputTokenBudget),
+                new XElement("enablePromptCaching", Codex.EnablePromptCaching),
+                new XElement("cacheTtl", Codex.CacheTtl),
+                new XElement("enableCacheWarmup", Codex.EnableCacheWarmup),
+                new XElement("useParallelTools", Codex.UseParallelTools),
+                new XElement("maxContextMessages", Codex.MaxContextMessages),
+                new XElement("enableRetrieval", Codex.EnableRetrieval),
+                new XElement("retrievalTopK", Codex.RetrievalTopK),
+                new XElement("retrievalSnippetChars", Codex.RetrievalSnippetChars),
+                new XElement("showThinking", Codex.ShowThinking),
+                new XElement("mcpEnabled", Codex.McpEnabled),
+                new XElement("thinkingChain", Codex.ThinkingChain));
+            root.Add(el);
+            doc.Save(ConfigFile);
+        }
+        catch { /* 写配置失败不阻塞使用，面板上会提示重试 */ }
+    }
 
     /// <summary>解析为绝对路径：绝对路径原样返回，相对路径基于 exe 所在目录。</summary>
     public string Resolve(string path)
@@ -109,6 +157,7 @@ public sealed class AppConfig
 
             Set(Get(root, "dllDirs"), v => cfg.DllDirs = v);
             Set(Get(root, "assemblyDirs"), v => cfg.AssemblyDirs = v);
+            Set(Get(root, "codexDirs"), v => cfg.CodexDirs = v);
             Set(Get(root, "ojCoreDll"), v => cfg.OjCoreDll = v);
             Set(Get(root, "authorCoreDll"), v => cfg.AuthorCoreDll = v);
             Set(Get(root, "problemsDir"), v => cfg.ProblemsDir = v);
@@ -122,6 +171,34 @@ public sealed class AppConfig
             Set(Get(root, "testDataDir"), v => cfg.TestDataDir = v);
             Set(Get(root, "tempDir"), v => cfg.TempDir = v);
             Set(Get(root, "sessionFile"), v => cfg.SessionFile = v);
+
+            // ---- ACMDOGCodex ----
+            if (root?.Element("codex") is { } codex)
+            {
+                string? G(string tag) => codex.Element(tag)?.Value?.Trim();
+                bool B(string tag, bool dflt) => bool.TryParse(G(tag), out var b) ? b : dflt;
+                int I(string tag, int dflt) => int.TryParse(G(tag), out var n) ? n : dflt;
+
+                Set(G("apiKey"), v => cfg.Codex.ApiKey = v);
+                Set(G("baseUrl"), v => cfg.Codex.BaseUrl = v);
+                Set(G("model"), v => cfg.Codex.Model = v);
+                Set(G("effort"), v => cfg.Codex.Effort = v);
+                Set(G("cacheTtl"), v => cfg.Codex.CacheTtl = v);
+                cfg.Codex.MaxTokens = I("maxTokens", cfg.Codex.MaxTokens);
+                cfg.Codex.MaxToolRounds = I("maxToolRounds", cfg.Codex.MaxToolRounds);
+                cfg.Codex.RunOutputTokenBudget = I("runOutputTokenBudget", cfg.Codex.RunOutputTokenBudget);
+                cfg.Codex.EnablePromptCaching = B("enablePromptCaching", cfg.Codex.EnablePromptCaching);
+                cfg.Codex.ShowThinking = B("showThinking", cfg.Codex.ShowThinking);
+                cfg.Codex.McpEnabled = B("mcpEnabled", cfg.Codex.McpEnabled);
+                cfg.Codex.EnableCacheWarmup = B("enableCacheWarmup", cfg.Codex.EnableCacheWarmup);
+                cfg.Codex.UseParallelTools = B("useParallelTools", cfg.Codex.UseParallelTools);
+                cfg.Codex.MaxContextMessages = I("maxContextMessages", cfg.Codex.MaxContextMessages);
+                cfg.Codex.EnableRetrieval = B("enableRetrieval", cfg.Codex.EnableRetrieval);
+                cfg.Codex.RetrievalTopK = I("retrievalTopK", cfg.Codex.RetrievalTopK);
+                cfg.Codex.RetrievalSnippetChars = I("retrievalSnippetChars", cfg.Codex.RetrievalSnippetChars);
+                // 思考链是多行文本，不做 Trim 以保留用户缩进
+                cfg.Codex.ThinkingChain = codex.Element("thinkingChain")?.Value ?? "";
+            }
 
             Current = cfg;
         }
@@ -145,6 +222,8 @@ public sealed class AppConfig
   <dllDirs>native;..\shared\native</dllDirs>
   <!-- 第三方托管程序集目录（HandyControl / AvalonEdit / Markdig 等） -->
   <assemblyDirs>ui;..\shared\ui</assemblyDirs>
+  <!-- ACMDOGCodex 专用程序集目录（Claude SDK / MCP / Microsoft.Extensions 一族） -->
+  <codexDirs>codex;..\shared\codex</codexDirs>
   <!-- 原生 DLL 文件名（启动时自动从 dllDirs 预加载） -->
   <ojCoreDll>ojcore.dll</ojCoreDll>
   <authorCoreDll>authorcore.dll</authorCoreDll>
@@ -166,6 +245,38 @@ public sealed class AppConfig
   <testDataDir>testdata</testDataDir>
   <tempDir>temp</tempDir>
   <sessionFile>auth\session.txt</sessionFile>
+
+  <!-- ACMDOGCodex 出题助手：API Key 也可留空，改用环境变量 ANTHROPIC_API_KEY -->
+  <codex>
+    <apiKey></apiKey>
+    <!-- 自定义网关（留空走官方 API） -->
+    <baseUrl></baseUrl>
+    <model>claude-opus-5-5</model>
+    <!-- 思考力度：low / medium / high / max -->
+    <effort>high</effort>
+    <maxTokens>16000</maxTokens>
+    <!-- 单次指令最多几轮工具调用 / 单次会话输出 token 软上限（0 = 不限） -->
+    <maxToolRounds>12</maxToolRounds>
+    <runOutputTokenBudget>60000</runOutputTokenBudget>
+    <!-- 缓存命中是主要降本手段：开启后 tools/system/消息尾部都打缓存断点 -->
+    <enablePromptCaching>true</enablePromptCaching>
+    <cacheTtl>5m</cacheTtl>
+    <!-- 打开面板/切题/改思考链后先空跑一次，把 tools+system 前缀预热进缓存（首包即命中） -->
+    <enableCacheWarmup>true</enableCacheWarmup>
+    <!-- 同一轮的多个工具调用并发执行 -->
+    <useParallelTools>true</useParallelTools>
+    <!-- 会话最多保留多少条消息，超出按整对裁掉最早的往返 -->
+    <maxContextMessages>40</maxContextMessages>
+    <!-- 向量检索：把题库拆成 TF-IDF 稀疏向量，按指令取最相关的 topK 题放进上下文 -->
+    <enableRetrieval>true</enableRetrieval>
+    <retrievalTopK>8</retrievalTopK>
+    <!-- 检索结果每条的字符预算（转成 token 的闸门） -->
+    <retrievalSnippetChars>240</retrievalSnippetChars>
+    <showThinking>true</showThinking>
+    <mcpEnabled>true</mcpEnabled>
+    <!-- 自定义思考逻辑链：留空用内置默认链路 -->
+    <thinkingChain></thinkingChain>
+  </codex>
 </ojConfig>
 """;
         File.WriteAllText(file, tpl, new System.Text.UTF8Encoding(false));

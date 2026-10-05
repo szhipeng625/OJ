@@ -44,6 +44,27 @@ std::string problem_generators(int problem_id);
 bool bind_generator(int problem_id, int generator_id, int gen_count);
 bool unbind_generator(int problem_id, int generator_id);
 std::string search_generators(const std::string& keyword);
+
+// ============ ACMDOGCodex：运行用量 + 题面改动审计 ============
+// 出题端的 AI 助手对题库有写权限，这里给它留痕：每次指令一行用量账，
+// 每次写回题面一行改动记录（前后对照），用 run_uid 关联。
+void codex_record_run(const std::string& run_uid, const std::string& username,
+                      const std::string& model, const std::string& effort,
+                      const std::string& instruction, int tool_calls, long long elapsed_ms,
+                      bool ok, const std::string& error,
+                      long long in_tok, long long out_tok,
+                      long long cache_read, long long cache_write,
+                      long long context_tok, double cost_usd);
+void codex_record_audit(const std::string& run_uid, int problem_id, const std::string& username,
+                        const std::string& before_title, const std::string& before_desc,
+                        const std::string& after_title, const std::string& after_desc,
+                        const std::string& tags_csv, int time_ms, int mem_mb,
+                        const std::string& message);
+// 运行列表（含用量合计）；problem_id > 0 时只列改动过该题的运行
+std::string codex_list_runs(int limit, int problem_id);
+// 某次运行（或某道题）的题面改动明细
+std::string codex_list_audits(const std::string& run_uid, int problem_id, int limit);
+
 long long add_problem_generator(int problem_id, const std::string& name,
                                 const std::string& code, const std::string& desc,
                                 int gen_count, int seed_base);

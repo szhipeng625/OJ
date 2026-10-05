@@ -51,6 +51,46 @@ public static class OjCoreInterop
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_get_problem(int id);
 
+    // ===== ACMDOGCodex：用量与题面改动审计 =====
+    // 走的是 ojcore 里同一套 http_client（地址 / Bearer 令牌 / 自签证书处理与题目拉取完全一致），
+    // 不在这里自己发 HTTP。
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_codex_record_run([MarshalAs(UnmanagedType.LPUTF8Str)] string bodyJson);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_codex_record_audit([MarshalAs(UnmanagedType.LPUTF8Str)] string bodyJson);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_codex_list_runs(int limit, int problemId);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr oj_codex_list_audits([MarshalAs(UnmanagedType.LPUTF8Str)] string runUid,
+        int problemId, int limit);
+
+    /// <summary>写一条运行用量记录（body 为 JSON，字段由调用方拼好）。返回 {"ok":true} 或 {"ok":false,"error":...}。</summary>
+    public static string CodexRecordRunJson(string bodyJson)
+    {
+        lock (Lock) return Take(oj_codex_record_run(bodyJson));
+    }
+
+    /// <summary>写一条题面改动审计。</summary>
+    public static string CodexRecordAuditJson(string bodyJson)
+    {
+        lock (Lock) return Take(oj_codex_record_audit(bodyJson));
+    }
+
+    /// <summary>最近的运行记录（JSON 数组；接口不可用时返回空数组）。</summary>
+    public static string CodexListRunsJson(int limit, int problemId)
+    {
+        lock (Lock) return Take(oj_codex_list_runs(limit, problemId));
+    }
+
+    /// <summary>题面改动明细（JSON 数组）。</summary>
+    public static string CodexListAuditsJson(string runUid, int problemId, int limit)
+    {
+        lock (Lock) return Take(oj_codex_list_audits(runUid, problemId, limit));
+    }
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr oj_mysql_list_generators();
 

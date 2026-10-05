@@ -140,6 +140,14 @@ OJ_API const char* oj_mysql_problem_visibility(void);
 // 服务端题库列表（含未公开）：[{"id":1,"title":"...","isPublic":true,"dataCount":20}, ...]
 OJ_API const char* oj_mysql_list_problems(void);
 
+// ===== ACMDOGCodex：运行用量 + 题面改动审计 =====
+// 与题目拉取共用同一条网络路径（http_client.h），因此地址 / 令牌 / 证书处理完全一致。
+// 载荷是调用方拼好的 JSON，原生侧只做透传。
+OJ_API const char* oj_codex_record_run(const char* body_json);
+OJ_API const char* oj_codex_record_audit(const char* body_json);
+OJ_API const char* oj_codex_list_runs(int limit, int problem_id);
+OJ_API const char* oj_codex_list_audits(const char* run_uid, int problem_id, int limit);
+
 // 单道题完整内容（含标程与已绑定生成器源码/二进制、SPJ 特殊判题器）：
 // {"ok":true,"id":1,"title":"...","description":"...","sampleIn":"...","sampleOut":"...",
 //  "timeMs":1000,"memMb":256,"tags":[...],"stdCode":"...","stdExe":"<base64>",

@@ -1155,6 +1155,36 @@ OJ_API const char* oj_mysql_list_problems(void) {
     return dup("[]");
 }
 
+// ===== ACMDOGCodex：运行用量 + 题面改动审计 =====
+
+OJ_API const char* oj_codex_record_run(const char* body_json) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    if (oj::mysql_codex_record_run(body_json ? body_json : "", err))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_codex_record_audit(const char* body_json) {
+    if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
+    std::string err;
+    if (oj::mysql_codex_record_audit(body_json ? body_json : "", err))
+        return dup("{\"ok\":true}");
+    return dup("{\"ok\":false,\"error\":\"" + jsonEscape(err) + "\"}");
+}
+
+OJ_API const char* oj_codex_list_runs(int limit, int problem_id) {
+    std::string out;
+    if (oj::mysql_codex_list_runs(limit, problem_id, out)) return dup(out);
+    return dup("[]");
+}
+
+OJ_API const char* oj_codex_list_audits(const char* run_uid, int problem_id, int limit) {
+    std::string out;
+    if (oj::mysql_codex_list_audits(run_uid ? run_uid : "", problem_id, limit, out)) return dup(out);
+    return dup("[]");
+}
+
 OJ_API const char* oj_mysql_get_problem(int id) {
     if (!oj::mysql_available()) return dup("{\"ok\":false,\"error\":\"MySQL 不可用\"}");
     std::string out;

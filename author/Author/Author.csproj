@@ -19,20 +19,25 @@
     </None>
   </ItemGroup>
 
-  <!-- 公共 HandyControl 控件库 -->
+  <!-- 公共 HandyControl 控件库 + 共享 UI 层（编辑器 / 分页列表 / 只读题面窗口）-->
   <ItemGroup>
     <ProjectReference Include="..\..\shared\HandyControl\HandyControl.csproj" />
     <ProjectReference Include="..\..\shared\OjEditorCore\OjEditorCore.csproj" />
+    <ProjectReference Include="..\..\shared\OjUiControls\OjUiControls.csproj" />
+    <!-- ACMDOGCodex 核心（Claude 客户端 / 工具集 / 指标） -->
+    <ProjectReference Include="..\..\shared\OjCodex\OjCodex.csproj" />
+  </ItemGroup>
+
+  <!-- ACMDOGCodex 的 MCP 服务：出题端带 mcp 开关启动时对外暴露题库工具 -->
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
   </ItemGroup>
 
   <!-- NuGet 包 -->
   <ItemGroup>
     <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
     <PackageReference Include="Markdig" Version="0.37.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="Presentation\Highlighting\CppDarkPlus.xshd" />
   </ItemGroup>
 
   <ItemGroup>

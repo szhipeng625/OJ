@@ -15,9 +15,15 @@ public partial class App : Application
     private static extern bool SetDllDirectory(string lpPathName);
 
     // 启动配置（config.xml）最先加载 → 全局路径注册表（OjPaths）→ 预加载原生 DLL。
-    // 原生 DLL 放 native/，第三方托管程序集放 ui/；目录不存在时自动回退到 exe 根目录。
+    // 原生 DLL 放 native/，托管程序集放 ui/ 与 codex/；目录不存在时自动回退到 exe 根目录。
     static App()
     {
+        // 0. 必须最先装托管程序集解析器。
+        //    AppConfig.Load() 会用到 OjCodex.CodexSettings —— 若此时解析器还没装，
+        //    codex/ 里的程序集永远加载不到（静态构造函数第一步就 TypeInitializationException）。
+        //    所以这一步只认 exe 同目录下的固定目录名，不依赖 config（config 还没读）。
+        InstallDefaultManagedResolver();
+
         AppConfig.Load();       // 1. 读取 config.xml（缺失自动生成模板）
         OjPaths.Initialize();   // 2. 解析全部路径到全局类
 
@@ -39,20 +45,65 @@ public partial class App : Application
             }
         }
 
-        // 4. 第三方托管程序集（HandyControl/AvalonEdit/Markdig）从 AssemblyDir 加载，同样回退到 ..\shared\ui
-        string? uiDir = OjPaths.AssemblyDir;
-        if (uiDir is not null)
+        // 4. 再挂一路「配置驱动」的解析器，让 config.xml 的 assemblyDirs / codexDirs
+        //    能覆盖默认布局（安装版的 ..\shared\ui、..\shared\codex 就走这里）。
+        //    与第 0 步的解析器并存：先装的先问，任一命中即止。
+        string?[] configuredDirs = { OjPaths.AssemblyDir, OjPaths.CodexDir };
+        if (configuredDirs.Any(d => d is not null))
             AssemblyLoadContext.Default.Resolving += (ctx, name) =>
             {
                 if (name.Name is null) return null;
-                string p = Path.Combine(uiDir, name.Name + ".dll");
-                return File.Exists(p) ? ctx.LoadFromAssemblyPath(p) : null;
+                foreach (var dir in configuredDirs)
+                {
+                    if (dir is null) continue;
+                    string p = Path.Combine(dir, name.Name + ".dll");
+                    if (File.Exists(p)) return ctx.LoadFromAssemblyPath(p);
+                }
+                return null;
             };
+    }
+
+    /// <summary>
+    /// exe 同目录下的默认托管程序集目录。必须在读 config 之前可用，所以用固定名字。
+    ///   ui/    —— 通用第三方（HandyControl / AvalonEdit / Markdig）+ 共享 UI 层
+    ///   codex/ —— ACMDOGCodex 专用（Claude SDK / MCP / Microsoft.Extensions 一族）
+    /// </summary>
+    private static readonly string[] DefaultManagedDirs = { "ui", "codex", "..\\shared\\ui", "..\\shared\\codex" };
+
+    private static void InstallDefaultManagedResolver()
+    {
+        AssemblyLoadContext.Default.Resolving += (ctx, name) =>
+        {
+            if (name.Name is null) return null;
+            foreach (var dir in DefaultManagedDirs)
+            {
+                string p = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dir, name.Name + ".dll"));
+                if (File.Exists(p)) return ctx.LoadFromAssemblyPath(p);
+            }
+            return null;
+        };
     }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // ACMDOGCodex 的 MCP 模式：不弹任何窗口，直接以 stdio 承载 MCP 协议后退出。
+        // 放在最前面，保证 WPF 的资源、登录流程都不启动（stdout 必须干净地留给协议）。
+        if (CodexMcp.CodexMcpHost.IsMcpMode(e.Args))
+        {
+            try
+            {
+                await CodexMcp.CodexMcpHost.RunAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("MCP 启动失败：" + ex);
+            }
+            Shutdown();
+            return;
+        }
+
         DispatcherUnhandledException += (_, ev) =>
         {
             MessageBox.Show(ev.Exception.ToString(), "未处理异常");
@@ -94,6 +145,8 @@ public partial class App : Application
                 ServerRoot = serverRoot,
                 ServerProblemDir = serverProblemDir,
             };
+            // ACMDOGCodex：题库工具宿主（面板与 MCP 共用同一实现）
+            workbench.CodexHost = new AuthorOjToolHost(workbench);
 
             // ---- MySQL 认证（服务端强制要求） ----
             if (!await auth.InitAsync(serverProblemDir, dataDir))

@@ -19,9 +19,7 @@ WPF 客户端 + C++ 判题核心 + **远端 LSM 存储（RESP）**，全 C/S 一
 D:\OJ\
 ├── client\                      判题客户端（WPF，三层架构）
 │   ├── client.sln               客户端解决方案（client + HandyControl + ojcore）
-│   ├── Presentation\            UI 层：Views（窗口）/ Controls（CodeEditor 等）/ Helpers
-│   │   └── Highlighting\
-│   │       └── CppDarkPlus.xshd C++ 语法高亮插件（VS Code Dark+ 配色，内嵌资源，改色无需改代码）
+│   ├── Presentation\            UI 层：Views（窗口）/ Helpers；代码编辑器等控件在 shared\OjUiControls
 │   ├── Business\Services\       业务逻辑层（Auth/Judge/Submit 等服务）
 │   ├── DataAccess\              数据访问层（Interop P/Invoke ojcore.dll、Models）
 │   ├── App.xaml.cs              组合根（DAL → BLL → UI）
@@ -32,19 +30,145 @@ D:\OJ\
 ├── author\                      出题服务端（WPF + C++，三层架构，与 client 同构）
 │   ├── Author.sln
 │   ├── Author\                  WPF 出题工作台
-│   │   ├── Presentation\        Views（启动器/题目工作台/登录）/ Controls / Helpers（WorkspaceManager）
+│   │   ├── Presentation\        Views（启动器/题目工作台/登录）/ Helpers（WorkspaceManager）
 │   │   ├── Business\Services\   BuildService（并发编译，同题串行/跨题并行，退出 Drain）等
 │   │   └── DataAccess\          Interop（authorcore/ojcore P/Invoke）、各 Client、Models
 │   ├── authorcore\              C++ 出题核心 DLL（authorcore.dll，仅 x64）
 │   ├── problems\                服务端题库（本地数据，git 忽略）
 │   └── temp\                    标程/spj 编译产物（git 忽略）
 ├── shared\HandyControl\         本地 HandyControl 控件库源码（client/author 共用）
+├── shared\OjEditorCore\         C++ 补全引擎（client/author 共用）
+├── shared\OjCodex\              ACMDOGCodex 核心：Claude 客户端、题库工具集、用量/缓存统计
+├── shared\OjUiControls\         共享 UI 层（client/author 共用）：统一代码编辑器（含括号自动
+│   ├── Controls\                   闭合/配对退格/回车智能缩进）、分页题目列表、只读题面窗口
+│   └── Highlighting\
+│       └── CppDarkPlus.xshd     C++ 语法高亮插件（VS Code Dark+ 配色，内嵌资源，改色无需改代码）
 ├── server\problems\             判题/出题共用的题目目录
 ├── scripts\build.ps1            一键构建/打包脚本（Visual Studio 与 VS Code 共用）
+├── scripts\make_portable.ps1    便携包：客户端 + 出题端 + .NET 运行时，解压即用
 ├── .vscode\                     VS Code 任务（tasks.json）与调试（launch.json）配置
 ├── docs\                        setup.sql、MYSQL.md、mysql_config.example.json
 └── build_all.bat                一键打包入口（内部调用 scripts\build.ps1）
 ```
+
+## 便携包（解压即用，不装 .NET）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -All -Publish      # 先发布两个应用
+powershell -ExecutionPolicy Bypass -File scripts\make_portable.ps1 -DownloadRuntime
+```
+
+产物 `dist_pack\OJ.zip`（约 80 MB）+ `.sha256`，布局：
+
+```
+client\     客户端
+server\     出题端
+runtime\    .NET 8 桌面运行时（两个应用共用，约 162 MB）
+启动客户端.bat / 启动出题端.bat / 使用说明.txt
+```
+
+启动脚本设 `DOTNET_ROOT` 指向随包的 `runtime\`，并置 `DOTNET_MULTILEVEL_LOOKUP=0`
+强制只用这一份 —— 目标机**不需要预装 .NET、不需要管理员权限**。直接双击 `client.exe`
+不会设置这两个变量，所以务必用启动脚本。
+
+运行时的准备方式（脚本里已封装，手工做的话要**装两次**）：
+
+```
+dotnet-install.ps1 -Runtime dotnet         -Version 8.0.31 -InstallDir <dir>   # 带 dotnet.exe + host\fxr
+dotnet-install.ps1 -Runtime windowsdesktop -Version 8.0.31 -InstallDir <dir>   # 只补桌面框架
+```
+
+⚠️ 只装 `windowsdesktop` 拿到的是 runtime pack（只有 `shared\Microsoft.WindowsDesktop.App`），
+没有宿主，`DOTNET_ROOT` 起不来。另外 `Microsoft.WindowsDesktop.App` 的 zip 版同样只有 shared 层。
+
+打包时会**剔除运行时状态**：`auth\`（含登录会话令牌）、`ojdata\`、`logs\`、`temp\`、`testdata\`、
+`contests\`、`problems\`。注意 `runtimes\`（复数）不能排 —— 那是部分 NuGet 包的聚合程序集目录。
+
+## ACMDOGCodex（出题端的 AI 助手）
+
+出题工作台内置的 Codex 式助手，主场是**题面**：审校、补数据范围、消歧义、整理标签、重写样例，
+改完直接写回题库。入口两处：启动器右上角「Codex 助手」，或题目工作台题面页的「Codex 助手」（聚焦当前题）。
+
+**看板与仪表盘**：左侧任务看板（进行中 / 待办 / 已完成），中间「思考 · 工具 · 回复」流式展示，
+右侧 token 仪表盘（输入 / 输出 / 缓存读 / 缓存写 / 计费输入 / 估算成本 / 缓存命中率 / 上一轮明细）。
+
+**缓存命中（降 token 的主线）**：
+
+1. **会话级缓存复用**：整段对话跨指令保留。第二条指令只在尾部追加，前面整段前缀走缓存读 ——
+   命中率主要来自这里。换题自动开新会话（历史里是另一道题的上下文，既没用也拖累缓存）。
+2. **缓存预热**：开面板 / 切题 / 改思考链 / 题面被写回后，后台先发一次 `max_tokens=0` 的空请求，
+   把 tools+system 前缀写进缓存。总写入次数不变，只是把等待挪到用户打字那段时间，点发送时首包即命中。
+   可在工具栏「预热」里关掉。
+3. **前缀稳定**：渲染顺序 tools → system → messages 都打缓存断点。稳定内容（角色规约、思考链、
+   题库快照）在前并带 `cache_control`；易变内容（题目正文、用户指令）一律放断点之后。
+   system 拆两块各打一个断点 —— 题库变动时只失效后面那块。顶层再补自动断点，覆盖多轮工具往返的历史。
+4. **思考链稳定**：自定义思考链位于缓存前缀内，只在用户编辑时变化；绝不把题号、时间戳拼进 system。
+
+命中率看仪表盘；连续两次调用后「缓存读」若始终为 0，说明前缀里有东西在变（顺序、时间戳、题库快照）。
+
+**推理加速**：
+
+- **并行工具**：同一轮的多个 `tool_use` 并发执行（各自仍走按题串行闸门），少几个 RTT。工具栏「并行」可关。
+- **effort 分档**：`low/medium/high/max`，默认 `high`。降档要实测后再调 —— 改题面属推理型任务，
+  effort 对它的影响比聊天类大得多。
+- **护栏**：`maxToolRounds` 限工具轮次，`runOutputTokenBudget` 是单次指令的输出 token 软上限。
+
+**上下文**：
+
+- 仪表盘直接显示**上下文**（最近一次请求的完整提示词 token 数 = 输入 + 缓存读 + 缓存写）与**会话消息条数**，
+  这两个数一起看才有意义：会话攒着才能复用缓存，但上下文会线性增长。
+- **自动裁剪**：超过 `maxContextMessages`（默认 40）时按「整对」裁掉最早的往返，保留首条任务消息
+  （它带着题目正文）与最近往返。裁剪会让消息尾部缓存失效一次，system 前缀不受影响。
+- **测上下文**：用 `count_tokens` 精确统计当前 tools + system + 历史的 token 数。
+- 单条工具结果超过 `MaxToolResultChars`（默认 20000 字符）会截断，避免一次 `oj_get_problem` 把上下文撑爆。
+
+**MCP 服务**：出题端本身就是一台 MCP 服务器，把题库能力暴露给任意 MCP 客户端：
+
+```bash
+Author.exe --mcp      # stdio 承载 MCP，不弹窗口
+```
+
+```json
+{ "mcpServers": { "acmdog": { "command": "…\\Author.exe", "args": ["--mcp"] } } }
+```
+
+暴露工具：`oj_list_problems` / `oj_get_problem` / `oj_save_statement` / `oj_list_tags` / `oj_get_std` / `oj_compile_std`。
+面板与 MCP 共用同一份实现（`AuthorOjToolHost` + `OjToolCatalog`），所以两条入口的行为与并发闸门完全一致。
+
+**向量分解与检索**：题库文档拆成 TF-IDF 稀疏向量（中文按字 + 字双字，英文按词），指令与文档算余弦取 top-K。
+索引按题库内容哈希缓存（题库没变不重建），查询结果按归一化查询串缓存 —— 重复问同一件事不再重算。
+指令里点名题号（`P129`）时强制入选 —— 向量对短数字不敏感，但点名的题目漏掉就是帮倒忙。
+题库规模不超过 `retrievalTopK` 时自动跳过检索（全量已在 system 索引里，检索纯属白算）。
+
+**上下文布局（关键取舍）**：system 稳定块放**与指令无关**的全量紧凑索引（题号/标题/标签），
+检索结果放**首条 user 消息**。原因：检索结果随指令变，塞进 system 会让每条指令的缓存前缀都失效 ——
+为了检索把 prompt cache 打没，得不偿失。
+
+**接入的模型网关**：本仓库当前配置指向 DeepSeek 的 Anthropic 兼容端点
+（`baseUrl = https://api.deepseek.com/anthropic`，`model = deepseek-flash`）。
+实测该端点支持 `cache_control` 缓存断点、`tool_use`、带 signature 的 thinking 块与 `effort`，
+但 `max_tokens` 要求 ≥ 1（预热请求会自动从 0 退到 1），且 `cache_creation_input_tokens` 恒为 0
+（由服务端自行决定写缓存，`cache_control` 更像建议）。换成官方 Anthropic 只需改 `baseUrl` 与 `model`。
+
+**审计与用量（落库）**：Codex 对题库有写权限，所以必须留痕。中间件侧新增两张表：
+
+- `codex_runs` —— 每次指令一行：模型 / effort / 指令原文 / 工具次数 / 耗时 / 成功与否 /
+  输入·输出·缓存读·缓存写·上下文 token / 估算成本 / 时间戳，`run_uid` 唯一键（`REPLACE` 写入，客户端重试不留重复行）。
+- `codex_statement_audits` —— 每次写回题面一行：题目、**改前**与**改后**的标题与正文、标签、时限内存、
+  写回结果，挂在同一个 `run_uid` 上。
+
+对应接口：`POST /api/codex/run`、`POST /api/codex/audit`、`GET /api/codex/runs`、`GET /api/codex/audits`
+（均需 author/admin 鉴权）。面板工具栏「审计」可查看：左边每次指令的账，右边该次运行改过的题面（改前 → 改后）。
+
+> ⚠️ **这两张表和四个接口需要在中间件重新构建部署后才生效**（`_mw_deploy` 是部署暂存目录）。
+> 未部署时审计会静默失败，界面显示「中间件返回 404（旧版中间件可能还没有 /api/codex/* 接口）」，不影响 Codex 正常使用。
+
+客户端直接以 HTTPS 调中间件（不经 ojcore.dll：审计是纯旁路，没必要为它给原生库加导出并重新编译）。
+中间件是自签名证书，所以 `HttpClient` 显式关掉了证书校验与系统代理 —— 跟原生客户端的行为保持一致。
+
+配置在 `config.xml` 的 `<codex>` 节：`apiKey`（也可用环境变量 `ANTHROPIC_API_KEY`）、`baseUrl`、`model`、`effort`、
+`enablePromptCaching`、`enableCacheWarmup`、`useParallelTools`、`enableRetrieval`、`retrievalTopK`、
+`maxContextMessages`、`thinkingChain`（自定义思考逻辑链）、`mcpEnabled` 等。
 
 ## 用 VS 打开
 

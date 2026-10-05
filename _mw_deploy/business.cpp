@@ -12,6 +12,7 @@
 #include <string>
 #include <cstdlib>
 #include <cctype>
+#include <cstdio>
 #include <sstream>
 #include <memory>
 
@@ -21,7 +22,7 @@ using json = nlohmann::json;
 extern std::unique_ptr<DBPool> g_db;
 extern std::unique_ptr<LsmClient> g_lsm;
 
-// ============ 提交落库（ICPC 语义）============
+// ============ 提交落库（ICPC 语义：同一用户同一题原地更新，AC 后锁定）============
 long long upsert_submission(long long user_id, int problem_id, int contest_id,
                             const std::string& verdict, const std::string& detail,
                             int time_ms, bool virt, const std::string& ts,
@@ -42,8 +43,9 @@ long long upsert_submission(long long user_id, int problem_id, int contest_id,
         curVerdict = q.rows[0][1];
     }
 
-    // 已 AC 则永久锁定：非 AC 提交不覆盖 AC 代码
-    if (exists && curVerdict == "AC") return existingId;
+    // 已 AC 则锁定：非 AC 提交不覆盖 AC 代码；但 AC→AC 允许更新代码
+    //（例如旧记录 code 为 NULL，或用户改进了 AC 代码）。
+    if (exists && curVerdict == "AC" && !ac) return existingId;
 
     if (!exists) {
         long long wrong = ac ? 0 : 1;
@@ -151,7 +153,7 @@ std::string user_solution(long long uid, int problem_id, int contest_id) {
     auto q = g_db->query("SELECT id,verdict,IFNULL(detail,''),IFNULL(code,''),DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
                          "FROM submissions WHERE user_id=" + std::to_string(uid)
                          + " AND problem_id=" + std::to_string(problem_id)
-                         + " AND contest_id=" + std::to_string(cid) + " LIMIT 1");
+                         + " AND contest_id=" + std::to_string(cid) + " ORDER BY id DESC LIMIT 1");
     if (q.rows.empty()) return "{\"found\":false}";
     json o = {{"found", true}, {"id", atoll(q.rows[0][0].c_str())}, {"verdict", q.rows[0][1]},
               {"detail", q.rows[0][2]}, {"code", q.rows[0][3]}, {"ts", q.rows[0][4]}};
@@ -444,4 +446,121 @@ std::string get_contest(int id) {
     auto q = g_db->query("SELECT content FROM contests WHERE id=" + std::to_string(id));
     if (q.rows.empty()) return "{\"ok\":false,\"error\":\"比赛不存在\"}";
     return (json{{"ok", true}, {"id", id}, {"content", q.rows[0][0]}}).dump();
+}
+// ============ ACMDOGCodex：运行用量 + 题面改动审计 ============
+
+// 数值入参做一次钳位：这些值来自客户端，虽然走的是本端鉴权接口，
+// 但拼进 SQL 前仍然不能放任（cost_usd 尤其——它是字符串拼进语句的）。
+static long long clamp_ll(long long v, long long lo, long long hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+void codex_record_run(const std::string& run_uid, const std::string& username,
+                      const std::string& model, const std::string& effort,
+                      const std::string& instruction, int tool_calls, long long elapsed_ms,
+                      bool ok, const std::string& error,
+                      long long in_tok, long long out_tok,
+                      long long cache_read, long long cache_write,
+                      long long context_tok, double cost_usd) {
+    if (run_uid.empty()) return;
+    if (!(cost_usd >= 0.0) || cost_usd > 100000.0) cost_usd = 0.0;   // 顺手挡住 NaN / inf
+
+    char cost[32];
+    snprintf(cost, sizeof(cost), "%.6f", cost_usd);
+
+    // REPLACE 而非 INSERT：同一 run_uid 重传以最后一次为准，客户端重试不留重复行
+    g_db->exec("REPLACE INTO codex_runs(run_uid,username,model,effort,instruction,tool_calls,"
+               "elapsed_ms,ok,error,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,"
+               "context_tokens,cost_usd,ts) VALUES('"
+        + g_db->esc(run_uid) + "','" + g_db->esc(username) + "','" + g_db->esc(model) + "','"
+        + g_db->esc(effort) + "','" + g_db->esc(instruction) + "',"
+        + std::to_string(clamp_ll(tool_calls, 0, 100000)) + ","
+        + std::to_string(clamp_ll(elapsed_ms, 0, 86400000LL)) + ","
+        + (ok ? "1" : "0") + ",'" + g_db->esc(error) + "',"
+        + std::to_string(clamp_ll(in_tok, 0, 1000000000LL)) + ","
+        + std::to_string(clamp_ll(out_tok, 0, 1000000000LL)) + ","
+        + std::to_string(clamp_ll(cache_read, 0, 1000000000LL)) + ","
+        + std::to_string(clamp_ll(cache_write, 0, 1000000000LL)) + ","
+        + std::to_string(clamp_ll(context_tok, 0, 1000000000LL)) + ","
+        + std::string(cost) + ",NOW())");
+}
+
+void codex_record_audit(const std::string& run_uid, int problem_id, const std::string& username,
+                        const std::string& before_title, const std::string& before_desc,
+                        const std::string& after_title, const std::string& after_desc,
+                        const std::string& tags_csv, int time_ms, int mem_mb,
+                        const std::string& message) {
+    if (run_uid.empty() || problem_id <= 0) return;
+
+    g_db->exec("INSERT INTO codex_statement_audits(run_uid,problem_id,username,"
+               "before_title,before_description,after_title,after_description,"
+               "tags,time_ms,mem_mb,message,ts) VALUES('"
+        + g_db->esc(run_uid) + "'," + std::to_string(problem_id) + ",'" + g_db->esc(username) + "','"
+        + g_db->esc(before_title) + "','" + g_db->esc(before_desc) + "','"
+        + g_db->esc(after_title) + "','" + g_db->esc(after_desc) + "','"
+        + g_db->esc(tags_csv) + "',"
+        + std::to_string(clamp_ll(time_ms, 0, 1000000)) + ","
+        + std::to_string(clamp_ll(mem_mb, 0, 1000000)) + ",'"
+        + g_db->esc(message) + "',NOW())");
+}
+
+std::string codex_list_runs(int limit, int problem_id) {
+    limit = (int)clamp_ll(limit, 1, 500);
+
+    // problem_id > 0 时只列「改动过该题」的运行 —— 题目页上看「这题被 AI 改过几次」最常用
+    std::string sql = "SELECT r.run_uid,r.username,r.model,r.effort,r.instruction,r.tool_calls,"
+                      "r.elapsed_ms,r.ok,r.error,r.input_tokens,r.output_tokens,"
+                      "r.cache_read_tokens,r.cache_write_tokens,r.context_tokens,r.cost_usd,r.ts";
+    if (problem_id > 0) {
+        sql += ",(SELECT COUNT(*) FROM codex_statement_audits a WHERE a.run_uid=r.run_uid"
+               " AND a.problem_id=" + std::to_string(problem_id) + ") AS audits";
+        sql += " FROM codex_runs r WHERE EXISTS(SELECT 1 FROM codex_statement_audits a"
+               " WHERE a.run_uid=r.run_uid AND a.problem_id=" + std::to_string(problem_id) + ")";
+    } else {
+        sql += ",(SELECT COUNT(*) FROM codex_statement_audits a WHERE a.run_uid=r.run_uid) AS audits";
+        sql += " FROM codex_runs r";
+    }
+    sql += " ORDER BY r.id DESC LIMIT " + std::to_string(limit);
+
+    auto q = g_db->query(sql);
+    json arr = json::array();
+    for (auto& r : q.rows) {
+        arr.push_back({
+            {"runUid", r[0]}, {"username", r[1]}, {"model", r[2]}, {"effort", r[3]},
+            {"instruction", r[4]}, {"toolCalls", atoi(r[5].c_str())},
+            {"elapsedMs", atoll(r[6].c_str())}, {"ok", atoi(r[7].c_str()) != 0},
+            {"error", r[8]},
+            {"inputTokens", atoll(r[9].c_str())}, {"outputTokens", atoll(r[10].c_str())},
+            {"cacheReadTokens", atoll(r[11].c_str())}, {"cacheWriteTokens", atoll(r[12].c_str())},
+            {"contextTokens", atoll(r[13].c_str())}, {"costUsd", atof(r[14].c_str())},
+            {"ts", r[15]}, {"auditCount", atoi(r[16].c_str())}
+        });
+    }
+    return arr.dump();
+}
+
+std::string codex_list_audits(const std::string& run_uid, int problem_id, int limit) {
+    limit = (int)clamp_ll(limit, 1, 200);
+
+    std::string where = " WHERE 1=1";
+    if (!run_uid.empty()) where += " AND run_uid='" + g_db->esc(run_uid) + "'";
+    if (problem_id > 0)  where += " AND problem_id=" + std::to_string(problem_id);
+
+    auto q = g_db->query("SELECT id,run_uid,problem_id,username,before_title,before_description,"
+                         "after_title,after_description,tags,time_ms,mem_mb,message,ts"
+                         " FROM codex_statement_audits" + where +
+                         " ORDER BY id DESC LIMIT " + std::to_string(limit));
+
+    json arr = json::array();
+    for (auto& r : q.rows) {
+        arr.push_back({
+            {"id", atoll(r[0].c_str())}, {"runUid", r[1]}, {"problemId", atoi(r[2].c_str())},
+            {"username", r[3]},
+            {"beforeTitle", r[4]}, {"beforeDescription", r[5]},
+            {"afterTitle", r[6]}, {"afterDescription", r[7]},
+            {"tags", r[8]}, {"timeMs", atoi(r[9].c_str())}, {"memMb", atoi(r[10].c_str())},
+            {"message", r[11]}, {"ts", r[12]}
+        });
+    }
+    return arr.dump();
 }

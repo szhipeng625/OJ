@@ -23,6 +23,9 @@ public static class OjPaths
     /// <summary>第三方托管程序集目录（AssemblyLoadContext 解析目录）。null = 未找到。</summary>
     public static string? AssemblyDir { get; private set; }
 
+    /// <summary>ACMDOGCodex 专用程序集目录（Claude SDK / MCP / Microsoft.Extensions）。</summary>
+    public static string? CodexDir { get; private set; }
+
     /// <summary>判题核心 DLL 文件名。</summary>
     public static string OjCoreDll { get; private set; } = "ojcore.dll";
 
@@ -88,6 +91,7 @@ public static class OjPaths
         BaseDir = AppContext.BaseDirectory;
         NativeDir = cfg.FirstExistingDir(cfg.DllDirs);
         AssemblyDir = cfg.FirstExistingDir(cfg.AssemblyDirs);
+        CodexDir = cfg.FirstExistingDir(cfg.CodexDirs);
         OjCoreDll = cfg.OjCoreDll;
         AuthorCoreDll = cfg.AuthorCoreDll;
         ProblemDir = cfg.Resolve(cfg.ProblemsDir);

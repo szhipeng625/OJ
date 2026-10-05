@@ -1,0 +1,36 @@
+<Window x:Class="OjUiControls.Views.ProblemViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="题目" Height="700" Width="900"
+        WindowStartupLocation="CenterOwner"
+        Background="#FFF7F8FA" FontSize="13">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题 + 元信息 -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock x:Name="TitleText" FontSize="18" FontWeight="Bold" TextWrapping="Wrap"/>
+            <TextBlock x:Name="MetaText" Foreground="#666" FontSize="12" TextWrapping="Wrap"
+                       Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <!-- 题面 -->
+        <Border Grid.Row="1" BorderBrush="#FFE3E6EB" BorderThickness="1" CornerRadius="8"
+                Background="White" Padding="4">
+            <WebBrowser x:Name="StatementBox"/>
+        </Border>
+
+        <!-- 操作栏 -->
+        <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="False">
+            <Button x:Name="PrimaryBtn" DockPanel.Dock="Right" Width="120" Height="34"
+                    Style="{StaticResource ButtonPrimary}" Margin="8,0,0,0"
+                    Click="OnPrimaryAction"/>
+            <Button x:Name="CloseBtn" DockPanel.Dock="Right" Content="关闭"
+                    Width="90" Height="34" Click="OnClose"/>
+        </DockPanel>
+    </Grid>
+</Window>

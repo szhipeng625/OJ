@@ -83,6 +83,35 @@ public partial class ProblemWorkspaceWindow : Window
         });
     }
 
+    // ---------- ACMDOGCodex：AI 出题助手（聚焦当前题目） ----------
+    private async void OnOpenCodex(object sender, RoutedEventArgs e)
+    {
+        var host = _wb.CodexHost ??= new AuthorOjToolHost(_wb);
+
+        // Codex 写回本题题面时，记一笔；关窗后再问用户要不要重新载入（避免直接覆盖未保存的手改内容）
+        bool changed = false;
+        void OnChanged(int id) { if (id == _id) changed = true; }
+        host.ProblemChanged += OnChanged;
+
+        try
+        {
+            var win = new CodexWindow(_wb, host, _id) { Owner = this };
+            win.ShowDialog();
+        }
+        finally
+        {
+            host.ProblemChanged -= OnChanged;
+        }
+
+        if (!changed) return;
+        var answer = MessageBox.Show(this,
+            $"P{_id} 的题面已被 Codex 写回题库。\n\n是否重新载入本窗口，以显示最新内容？\n"
+            + "（本窗口里未保存的手动修改会被覆盖）",
+            "ACMDOGCodex", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer == MessageBoxResult.Yes)
+            await LoadAllAsync();
+    }
+
     // ---------- 题面 ----------
     private async void OnSaveStatement(object sender, RoutedEventArgs e)
     {

@@ -20,7 +20,6 @@
 #include <iomanip>
 #include <chrono>
 #include <ctime>
-#include <cctype>
 #include <thread>
 #include <mutex>
 #include <utility>
@@ -36,6 +35,20 @@ std::mutex g_db_mtx;  // DB 连接非线程安全，串行化写操作
 std::mutex g_lsm_mtx; // LSM 连接非线程安全，串行化
 bool g_lsm_up = false;
 BoardCache g_board;   // 内存实时榜（每场比赛一张）
+
+// 比赛结束：把内存榜持久化到数据库（含每题 XCPC 明细）
+static void persist_board(int cid) {
+    std::lock_guard<std::mutex> lk(g_db_mtx);
+    g_db->exec("CREATE TABLE IF NOT EXISTS contest_boards("
+               "contest_id INT NOT NULL PRIMARY KEY,"
+               "board MEDIUMTEXT,"
+               "saved_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+               ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    json b = g_board.get(cid, 100000);
+    std::string dump = b.dump();
+    g_db->exec("REPLACE INTO contest_boards(contest_id,board) VALUES("
+               + std::to_string(cid) + ",'" + g_db->esc(dump) + "')");
+}
 
 // ---- 工具 ----
 static std::string hex_rnd(int bytes) {
@@ -212,25 +225,55 @@ int main(int argc, char** argv) {
         catch (const std::exception&) { /* 列已存在则忽略 */ }
         try { g_db->exec("ALTER TABLE users ADD COLUMN school VARCHAR(128) NOT NULL DEFAULT ''"); }
         catch (const std::exception&) { /* 列已存在则忽略 */ }
-        // 幂等迁移：problems 增加 std_exe / spj_code / spj_exe 列（二进制判题数据 + SPJ 特殊判题器）
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN std_exe LONGBLOB NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN spj_code MEDIUMTEXT NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN spj_exe LONGBLOB NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        // 幂等迁移：generators 增加 exe 列（生成器编译产物）
-        try { g_db->exec("ALTER TABLE generators ADD COLUMN exe LONGBLOB NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        // 幂等迁移：problems 增加函数式判题列（题目入口 + 接口模板 + 判题模式）
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN entry_code MEDIUMTEXT NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN entry_exe LONGBLOB NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN itf_template MEDIUMTEXT NULL"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
-        try { g_db->exec("ALTER TABLE problems ADD COLUMN judge_mode TINYINT NOT NULL DEFAULT 0"); }
-        catch (const std::exception&) { /* 列已存在则忽略 */ }
+
+        // 幂等迁移：ACMDOGCodex 审计与用量。
+        // 出题端的 AI 助手能直接改写题面，必须留痕：每次指令一行用量账，
+        // 每次写回题面一行改动记录（前后对照），两者用 run_uid 关联。
+        try {
+            g_db->exec(
+                "CREATE TABLE IF NOT EXISTS codex_runs ("
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                "run_uid CHAR(32) NOT NULL,"
+                "username VARCHAR(64) NOT NULL DEFAULT '',"
+                "model VARCHAR(64) NOT NULL DEFAULT '',"
+                "effort VARCHAR(16) NOT NULL DEFAULT '',"
+                "instruction MEDIUMTEXT,"
+                "tool_calls INT NOT NULL DEFAULT 0,"
+                "elapsed_ms BIGINT NOT NULL DEFAULT 0,"
+                "ok TINYINT NOT NULL DEFAULT 1,"
+                "error TEXT,"
+                "input_tokens BIGINT NOT NULL DEFAULT 0,"
+                "output_tokens BIGINT NOT NULL DEFAULT 0,"
+                "cache_read_tokens BIGINT NOT NULL DEFAULT 0,"
+                "cache_write_tokens BIGINT NOT NULL DEFAULT 0,"
+                "context_tokens BIGINT NOT NULL DEFAULT 0,"
+                "cost_usd DECIMAL(12,6) NOT NULL DEFAULT 0,"
+                "ts DATETIME NOT NULL,"
+                "UNIQUE KEY uk_run_uid (run_uid),"
+                "KEY idx_ts (ts)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } catch (const std::exception& e) { std::cerr << "[init] codex_runs 建表失败: " << e.what() << "\n"; }
+
+        try {
+            g_db->exec(
+                "CREATE TABLE IF NOT EXISTS codex_statement_audits ("
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                "run_uid CHAR(32) NOT NULL,"
+                "problem_id INT NOT NULL,"
+                "username VARCHAR(64) NOT NULL DEFAULT '',"
+                "before_title TEXT,"
+                "before_description MEDIUMTEXT,"
+                "after_title TEXT,"
+                "after_description MEDIUMTEXT,"
+                "tags VARCHAR(1024) NOT NULL DEFAULT '',"
+                "time_ms INT NOT NULL DEFAULT 0,"
+                "mem_mb INT NOT NULL DEFAULT 0,"
+                "message TEXT,"
+                "ts DATETIME NOT NULL,"
+                "KEY idx_problem (problem_id, ts),"
+                "KEY idx_run (run_uid)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } catch (const std::exception& e) { std::cerr << "[init] codex_statement_audits 建表失败: " << e.what() << "\n"; }
     } catch (const std::exception& e) {
         std::cerr << "[init] MySQL 连接失败: " << e.what() << "\n";
         return 1;
@@ -327,6 +370,41 @@ int main(int argc, char** argv) {
     });
 
     // 提交判题结果（需鉴权）
+    svr->Post("/api/judge", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            long long uid = auth(req);
+            json b = json::parse(req.body.empty() ? "{}" : req.body);
+            int problem_id = b.value("problemId", 0);
+            int contest_id = b.value("contestId", 0);
+            std::string code = b.value("code", "");
+            std::string language = b.value("language", "cpp");
+            if (problem_id <= 0) throw std::runtime_error("problemId required");
+            if (code.empty()) throw std::runtime_error("code required");
+            // 报名即获得参赛权限：比赛提交要求已报名
+            if (contest_id > 0) {
+                auto reg = contest_registration(uid, contest_id);
+                if (!reg.first) throw std::runtime_error("未报名，无法提交比赛题目");
+            }
+            json fwd{{"problemId", problem_id}, {"code", code}, {"language", language}};
+            json jr = cloud_judge_post("/api/cloud_judge", get_token(req), fwd.dump());
+            std::string task_id = jr.value("task_id", "");
+            if (task_id.empty()) throw std::runtime_error("云端判题未返回任务号");
+
+            // 等待判题结点推送结果（最长 ~120s）
+            for (int i = 0; i < 240; ++i) {
+                json r = cloud_judge_get("/api/cloud_judge_result?task_id=" + task_id);
+                std::string st = r.value("status", "");
+                if (st == "AC" || st == "WA" || st == "CE" || st == "TLE" ||
+                    st == "RE" || st == "SE" || st == "MLE") {
+                    res.set_content(r.dump(), "application/json");
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            throw std::runtime_error("云端判题超时");
+        });
+    });
+
     svr->Post("/api/submit", [](const httplib::Request& req, httplib::Response& res) {
         wrap(req, res, [&]() {
             long long uid = auth(req);
@@ -366,43 +444,6 @@ int main(int argc, char** argv) {
         });
     });
 
-    // 提交代码到云端判题（同步：中间层等待判题结点推送结果后，一次性返回最终判定，
-    // 客户端无需轮询 /api/judge/result）
-    svr->Post("/api/judge", [](const httplib::Request& req, httplib::Response& res) {
-        wrap(req, res, [&]() {
-            long long uid = auth(req);
-            json b = json::parse(req.body.empty() ? "{}" : req.body);
-            int problem_id = b.value("problemId", 0);
-            int contest_id = b.value("contestId", 0);
-            std::string code = b.value("code", "");
-            std::string language = b.value("language", "cpp");
-            if (problem_id <= 0) throw std::runtime_error("problemId required");
-            if (code.empty()) throw std::runtime_error("code required");
-            // 报名即获得参赛权限：比赛提交要求已报名
-            if (contest_id > 0) {
-                auto reg = contest_registration(uid, contest_id);
-                if (!reg.first) throw std::runtime_error("未报名，无法提交比赛题目");
-            }
-            json fwd{{"problemId", problem_id}, {"code", code}, {"language", language}};
-            json jr = cloud_judge_post("/api/cloud_judge", get_token(req), fwd.dump());
-            std::string task_id = jr.value("task_id", "");
-            if (task_id.empty()) throw std::runtime_error("云端判题未返回任务号");
-
-            // 等待判题结点推送结果（最长 ~120s）
-            for (int i = 0; i < 240; ++i) {
-                json r = cloud_judge_get("/api/cloud_judge_result?task_id=" + task_id);
-                std::string st = r.value("status", "");
-                if (st == "AC" || st == "WA" || st == "CE" || st == "TLE" ||
-                    st == "RE" || st == "SE" || st == "MLE") {
-                    res.set_content(r.dump(), "application/json");
-                    return;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            }
-            throw std::runtime_error("云端判题超时");
-        });
-    });
-
     // 榜单（公开）
     svr->Get("/api/board", [](const httplib::Request& req, httplib::Response& res) {
         wrap(req, res, [&]() {
@@ -422,6 +463,25 @@ int main(int argc, char** argv) {
             int top = req.has_param("top") ? std::stoi(req.get_param_value("top")) : 100;
             if (top <= 0) top = 100;
             res.set_content(g_board.get(cid, top).dump(), "application/json");
+        });
+    });
+    // 比赛结束：持久化内存榜到数据库
+    svr->Post("/api/board/persist", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            json b = json::parse(req.body.empty() ? "{}" : req.body);
+            int cid = b.value("contestId", 0);
+            if (cid <= 0) throw std::runtime_error("contestId required");
+            persist_board(cid);
+            res.set_content(jok({{"persisted", true}}), "application/json");
+        });
+    });
+    // 已持久化的历史榜单（比赛结束后查询）
+    svr->Get("/api/board/persisted", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            int cid = std::stoi(req.get_param_value("cid"));
+            auto q = g_db->query("SELECT board FROM contest_boards WHERE contest_id=" + std::to_string(cid));
+            if (q.rows.empty()) throw std::runtime_error("no persisted board");
+            res.set_content(q.rows[0][0], "application/json");
         });
     });
 
@@ -449,13 +509,66 @@ int main(int argc, char** argv) {
                            b.value("sampleIn", ""), b.value("sampleOut", ""), b.value("timeMs", 1000),
                            b.value("memMb", 256), b.value("tags", "[]"), b.value("stdCode", ""),
                            b.value("stdExe", ""), b.value("spjCode", ""), b.value("spjExe", ""),
-                           b.value("entryCode", ""), b.value("entryExe", ""),
-                           b.value("itfTemplate", ""), b.value("judgeMode", 0),
-                           b.value("isPublic", true));
+                           b.value("entryCode", ""), b.value("entryExe", ""), b.value("itfTemplate", ""),
+                           b.value("judgeMode", 0), b.value("isPublic", true));
             res.set_content(jok({{"saved", true}}), "application/json");
         });
     });
 
+
+    // ---- ACMDOGCodex：用量与题面改动审计（出题端专用）----
+    svr->Post("/api/codex/run", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            long long uid = auth_author(req);
+            json b = json::parse(req.body.empty() ? "{}" : req.body);
+            std::lock_guard<std::mutex> lk(g_db_mtx);
+            codex_record_run(b.value("runUid", ""), b.value("username", ""),
+                             b.value("model", ""), b.value("effort", ""),
+                             b.value("instruction", ""), b.value("toolCalls", 0),
+                             b.value("elapsedMs", 0LL), b.value("ok", true), b.value("error", ""),
+                             b.value("inputTokens", 0LL), b.value("outputTokens", 0LL),
+                             b.value("cacheReadTokens", 0LL), b.value("cacheWriteTokens", 0LL),
+                             b.value("contextTokens", 0LL), b.value("costUsd", 0.0));
+            res.set_content(jok({{"recorded", true}, {"userId", uid}}), "application/json");
+        });
+    });
+
+    svr->Post("/api/codex/audit", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            auth_author(req);
+            json b = json::parse(req.body.empty() ? "{}" : req.body);
+            std::lock_guard<std::mutex> lk(g_db_mtx);
+            codex_record_audit(b.value("runUid", ""), b.value("problemId", 0),
+                               b.value("username", ""),
+                               b.value("beforeTitle", ""), b.value("beforeDescription", ""),
+                               b.value("afterTitle", ""), b.value("afterDescription", ""),
+                               b.value("tags", ""), b.value("timeMs", 0), b.value("memMb", 0),
+                               b.value("message", ""));
+            res.set_content(jok({{"recorded", true}}), "application/json");
+        });
+    });
+
+    svr->Get("/api/codex/runs", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            auth_author(req);
+            int limit = 100, pid = 0;
+            try { if (!req.get_param_value("limit").empty()) limit = std::stoi(req.get_param_value("limit")); } catch (...) {}
+            try { if (!req.get_param_value("problemId").empty()) pid = std::stoi(req.get_param_value("problemId")); } catch (...) {}
+            std::lock_guard<std::mutex> lk(g_db_mtx);
+            res.set_content(codex_list_runs(limit, pid), "application/json");
+        });
+    });
+
+    svr->Get("/api/codex/audits", [](const httplib::Request& req, httplib::Response& res) {
+        wrap(req, res, [&]() {
+            auth_author(req);
+            int limit = 50, pid = 0;
+            try { if (!req.get_param_value("limit").empty()) limit = std::stoi(req.get_param_value("limit")); } catch (...) {}
+            try { if (!req.get_param_value("problemId").empty()) pid = std::stoi(req.get_param_value("problemId")); } catch (...) {}
+            std::lock_guard<std::mutex> lk(g_db_mtx);
+            res.set_content(codex_list_audits(req.get_param_value("runUid"), pid, limit), "application/json");
+        });
+    });
     svr->Get("/api/generators", [](const httplib::Request& req, httplib::Response& res) {
         wrap(req, res, [&]() { res.set_content(list_generators(), "application/json"); });
     });
@@ -475,15 +588,6 @@ int main(int argc, char** argv) {
             json b = json::parse(req.body.empty() ? "{}" : req.body);
             std::lock_guard<std::mutex> lk(g_db_mtx);
             update_generator(b.value("id", 0), b.value("code", ""), b.value("description", ""));
-            res.set_content(jok({{"updated", true}}), "application/json");
-        });
-    });
-    svr->Post("/api/generator/exe", [](const httplib::Request& req, httplib::Response& res) {
-        wrap(req, res, [&]() {
-            auth_author(req);
-            json b = json::parse(req.body.empty() ? "{}" : req.body);
-            std::lock_guard<std::mutex> lk(g_db_mtx);
-            update_generator_exe(b.value("id", 0), b.value("exe", ""));
             res.set_content(jok({{"updated", true}}), "application/json");
         });
     });

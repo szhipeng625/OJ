@@ -112,4 +112,13 @@ bool mysql_set_testcase(int problem_id, const std::string& name,
 bool mysql_remove_testcase(int problem_id, const std::string& name);
 bool mysql_list_testcases(int problem_id, std::string& out_json);
 
+// ACMDOGCodex：运行用量 + 题面改动审计。
+// 载荷由调用方拼成 JSON 透传（字段多且只在 C# 侧有语义，逐个跨 P/Invoke 传标量既啰嗦又容易错位），
+// 与 mysql_upsert_contest 的既有做法一致。
+bool mysql_codex_record_run(const std::string& body_json, std::string& err);
+bool mysql_codex_record_audit(const std::string& body_json, std::string& err);
+bool mysql_codex_list_runs(int limit, int problem_id, std::string& out_json);
+bool mysql_codex_list_audits(const std::string& run_uid, int problem_id, int limit,
+                             std::string& out_json);
+
 } // namespace oj

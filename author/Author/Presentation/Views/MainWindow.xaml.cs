@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly WorkspaceManager _workspaces;
     private bool _allowClose;
     private List<ProblemInfo> _problems = new();
+    private bool _openingWorkspace;   // 工作台打开中，防止连点开出多个窗口
 
     public MainWindow(Workbench workbench, WorkspaceManager workspaces)
     {
@@ -34,6 +35,9 @@ public partial class MainWindow : Window
 
         _wb.Build.PendingChanged += OnPendingChanged;
         _workspaces.ProblemListChanged += () => Dispatcher.InvokeAsync(RefreshProblems);
+        // Codex 写回题面后，题库列表要跟着刷新
+        if (_wb.CodexHost is { } codex)
+            codex.ProblemChanged += _ => Dispatcher.InvokeAsync(RefreshProblems);
 
         await RefreshProblems();
     }
@@ -80,10 +84,33 @@ public partial class MainWindow : Window
         finally { IsEnabled = true; }
     }
 
-    private void OnOpenWorkspace(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 双击题库题目：先亮加载遮罩再开工作台（与客户端同一套 UI）。
+    /// 工作台窗口自身的「正在载入题目…」遮罩负责后续的详情加载，这里只覆盖启动器这一段。
+    /// </summary>
+    private async void OnOpenWorkspace(object sender, EventArgs e)
     {
-        if (ProblemList.SelectedItem is ProblemInfo p)
+        if (_openingWorkspace) return;
+        if (ProblemList.SelectedItem is not ProblemInfo p) return;
+
+        _openingWorkspace = true;
+        BusyOverlay.Message = $"正在打开 P{p.Id} 工作台…";
+        BusyOverlay.IsBusy = true;
+        try
+        {
+            // 先让遮罩渲染出来，再做（同步阻塞 UI 线程的）窗口创建
+            await Dispatcher.Yield(DispatcherPriority.Background);
             _workspaces.Open(p.Id);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "打开失败：" + ex.Message;
+        }
+        finally
+        {
+            BusyOverlay.IsBusy = false;
+            _openingWorkspace = false;
+        }
     }
 
     // ---------- 比赛管理（独立窗口） ----------
@@ -91,6 +118,14 @@ public partial class MainWindow : Window
     {
         var win = new ContestManagementWindow(_wb) { Owner = this };
         win.ShowDialog();
+    }
+
+    // ---------- ACMDOGCodex：AI 出题助手 ----------
+    private void OnOpenCodex(object sender, RoutedEventArgs e)
+    {
+        var host = _wb.CodexHost ??= new AuthorOjToolHost(_wb);
+        var win = new CodexWindow(_wb, host, focusProblemId: null) { Owner = this };
+        win.Show();
     }
 
     // ---------- 退出：等待所有后台线程/任务结束 ----------

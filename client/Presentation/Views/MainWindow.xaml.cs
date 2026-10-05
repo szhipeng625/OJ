@@ -11,6 +11,8 @@ using client.Business.Services;
 using client.DataAccess.Models;
 using client.Presentation.Helpers;
 using Microsoft.Win32;
+using OjUiControls.Helpers;
+using OjUiControls.Views;
 
 namespace client.Presentation.Views;
 
@@ -23,9 +25,8 @@ public partial class MainWindow : Window
     private string _nickname = "anonymous";
     private LoginResult? _me;     // MySQL 登录态；null = 本地模式
 
-    // 题库列表行：左侧列表可搜索过滤，右侧个人信息复用同一数据源
+    // 题库列表行：左侧列表可搜索过滤（分页在共享 PagedListControl 内完成），右侧个人信息复用同一数据源
     private readonly ObservableCollection<ProblemRow> _problemRows = new();
-    private readonly ListCollectionView _problemView;
     private readonly ListCollectionView _profileView;
 
     // 比赛
@@ -50,6 +51,9 @@ public partial class MainWindow : Window
     // 题目详情缓存（点开时按需拉取，避免重复下载）
     private readonly Dictionary<int, Problem> _detailCache = new();
 
+    // 题面窗口打开中（拉题面 + 弹窗期间为 true），防止连点弹出多个窗口
+    private bool _viewerOpening;
+
     public MainWindow(JudgeService judge, AuthService auth, LocalIdentityService identity)
     {
         InitializeComponent();
@@ -57,16 +61,39 @@ public partial class MainWindow : Window
         _auth = auth;
         _identity = identity;
 
-        _problemView = new ListCollectionView(_problemRows);
         _profileView = new ListCollectionView(_problemRows);
         _contestProblemView = new ListCollectionView(_contestProblemRows);
 
-        ProblemList.ItemsSource = _problemView;
         ProfileStatusList.ItemsSource = _profileView;
         ContestProblemList.ItemsSource = _contestProblemView;
 
         Loaded += async (_, _) => await OnLoaded();
     }
+
+    // ---------- 落地页 ↔ 题库 / 比赛 视图切换 ----------
+
+    private void ShowHome()
+    {
+        HomeView.Visibility = Visibility.Visible;
+        ProblemBankView.Visibility = Visibility.Collapsed;
+        ContestView.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnOpenBank(object sender, RoutedEventArgs e)
+    {
+        HomeView.Visibility = Visibility.Collapsed;
+        ContestView.Visibility = Visibility.Collapsed;
+        ProblemBankView.Visibility = Visibility.Visible;
+    }
+
+    private void OnOpenContest(object sender, RoutedEventArgs e)
+    {
+        HomeView.Visibility = Visibility.Collapsed;
+        ProblemBankView.Visibility = Visibility.Collapsed;
+        ContestView.Visibility = Visibility.Visible;
+    }
+
+    private void OnBackHome(object sender, RoutedEventArgs e) => ShowHome();
 
     private async Task OnLoaded()
     {
@@ -363,11 +390,15 @@ public partial class MainWindow : Window
     private void RefreshProblemView()
     {
         string q = SearchBox?.Text?.Trim() ?? "";
-        _problemView.Filter = o => o is ProblemRow r &&
-            (string.IsNullOrEmpty(q) ||
-             r.Problem.Id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
-             r.Problem.Title.Contains(q, StringComparison.OrdinalIgnoreCase));
-        _problemView.Refresh();
+        var filtered = string.IsNullOrEmpty(q)
+            ? _problemRows.ToList()
+            : _problemRows.Where(r =>
+                r.Problem.Id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                r.Problem.Title.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // 分页控件按当前过滤结果重新分页（赋 ItemsSource 会自动回到第 1 页）
+        if (ProblemList is not null)
+            ProblemList.ItemsSource = filtered;
     }
 
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e) => RefreshProblemView();
@@ -383,18 +414,44 @@ public partial class MainWindow : Window
         SolveProgress.Value = solved;
     }
 
-    private async void ProblemList_OnSelected(object sender, SelectionChangedEventArgs e)
+    /// <summary>双击题库题目：弹出共享只读题面窗口，主按钮「开始做题」再进做题页。</summary>
+    private async void ProblemList_OnDoubleClick(object sender, EventArgs e)
     {
         if (ProblemList.SelectedItem is not ProblemRow row) return;
-        var full = await EnsureProblemDetailAsync(row.Problem);
-        ShowProblemDescription(full);
+        var full = await LoadProblemDetailBusyAsync(row.Problem);
+        if (full is null) return;   // 已有一次加载在进行中，忽略重复点击
+        ShowProblemViewer(full, () => OpenSolveWindow(full, null, false));
     }
 
-    private async void ProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
+    /// <summary>
+    /// 带加载遮罩与重入保护的题面拉取。
+    /// 「双击 → 异步拉题面 → 弹窗」之间有一段 await 空档，连点会依次进入多次并弹出多个窗口；
+    /// 这里先置遮罩（立刻挡住后续鼠标）再 await，并用 <c>_viewerOpening</c> 标记兜底。
+    /// 返回 null 表示本次点击被忽略（已有加载在进行）。
+    /// </summary>
+    private async Task<Problem?> LoadProblemDetailBusyAsync(Problem p)
     {
-        if (ProblemList.SelectedItem is not ProblemRow row) return;
-        var full = await EnsureProblemDetailAsync(row.Problem);
-        OpenSolveWindow(full, null, false);
+        if (_viewerOpening) return null;
+        _viewerOpening = true;
+        BusyOverlay.Message = $"正在加载 P{p.Id} 题面…";
+        BusyOverlay.IsBusy = true;
+        try
+        {
+            return await EnsureProblemDetailAsync(p);
+        }
+        finally
+        {
+            BusyOverlay.IsBusy = false;
+            _viewerOpening = false;
+        }
+    }
+
+    /// <summary>共享只读题面窗口：服务端/客户端同一套 UI（OjUiControls.Views.ProblemViewerWindow）。</summary>
+    private void ShowProblemViewer(Problem p, Action? onPrimaryAction = null, string primaryActionText = "开始做题")
+    {
+        var dlg = new ProblemViewerWindow(ProblemViewFactory.Create(p, primaryActionText)) { Owner = this };
+        if (dlg.ShowDialog() == true)
+            onPrimaryAction?.Invoke();
     }
 
     /// <summary>列表项只含 id/title/tags，点开时按需下载完整题面并缓存。</summary>
@@ -416,22 +473,6 @@ public partial class MainWindow : Window
         }
         catch { /* 拉取失败则退回仅有标题的列表项 */ }
         return p;
-    }
-
-    private void ShowProblemDescription(Problem p)
-    {
-        HomeDescTitle.Text = p.Title;
-        MarkdownRenderer.Render(HomeDescBox, MarkdownRenderer.CombineStatement(p.Description, p.Samples, p.SampleIn, p.SampleOut));
-        string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
-        HomeMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
-        ProfilePanel.Visibility = Visibility.Collapsed;
-        ProblemDescPanel.Visibility = Visibility.Visible;
-    }
-
-    private void OnBackToProfile(object sender, RoutedEventArgs e)
-    {
-        ProblemDescPanel.Visibility = Visibility.Collapsed;
-        ProfilePanel.Visibility = Visibility.Visible;
     }
 
     private void OpenSolveWindow(Problem p, ContestDetail? contest, bool roomVirtual)
@@ -495,7 +536,6 @@ public partial class MainWindow : Window
                     ToolTip = $"{c.StartTime} ~ {c.EndTime}"
                 });
             }
-            ContestTab.IsEnabled = true;
         }
         catch { /* 无比赛也正常 */ }
     }
@@ -729,23 +769,29 @@ public partial class MainWindow : Window
         ShowContestProblemDescription(full);
     }
 
+    /// <summary>双击比赛题目：走与题库一致的共享只读题面窗口；未报名仍可看题面，但主按钮不进入做题。</summary>
     private async void ContestProblemList_OnDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (_roomContest is null) return;
-        if (_roomViewOnly)
-        {
-            MessageBox.Show("未报名，仅可查看题面，无法提交");
-            return;
-        }
         if (ContestProblemList.SelectedItem is not ProblemRow row) return;
-        var full = await EnsureProblemDetailAsync(row.Problem);
-        OpenSolveWindow(full, _roomContest, _roomVirtual);
+
+        var contest = _roomContest;
+        var virt = _roomVirtual;
+        var viewOnly = _roomViewOnly;
+
+        var full = await LoadProblemDetailBusyAsync(row.Problem);
+        if (full is null) return;   // 已有一次加载在进行中，忽略重复点击
+
+        if (viewOnly)
+            ShowProblemViewer(full, primaryActionText: "关闭（未报名，无法提交）");
+        else
+            ShowProblemViewer(full, () => OpenSolveWindow(full, contest, virt));
     }
 
     private void ShowContestProblemDescription(Problem p)
     {
         ContestDescTitle.Text = p.Title;
-        MarkdownRenderer.Render(ContestDescBox, MarkdownRenderer.CombineStatement(p.Description, p.Samples, p.SampleIn, p.SampleOut));
+        MarkdownRenderer.Render(ContestDescBox, ProblemViewFactory.Create(p).StatementMarkdown);
         string tags = p.Tags is { Length: > 0 } ? string.Join(", ", p.Tags) : "无";
         ContestMetaText.Text = $"时间限制 {p.TimeLimitMs}ms · 内存 {p.MemLimitMB}MB · 标签：{tags}";
         ContestInfoPanel.Visibility = Visibility.Collapsed;

@@ -193,12 +193,44 @@ function Sync-NativeAssets([string]$targetDir, [switch]$IsAuthor) {
 function Organize-LayeredOutput([string]$targetDir) {
     if (-not (Test-Path $targetDir)) { return }
     $uiDir     = Join-Path $targetDir 'ui'
+    $codexDir  = Join-Path $targetDir 'codex'
     $nativeDir = Join-Path $targetDir 'native'
+    # ui/ 与 native/ 两个应用都要，先建；codex/ 只有出题端用得上，
+    # 按需创建 —— 否则客户端那边会留一个空目录，很难看。
     New-Item -ItemType Directory -Force -Path $uiDir, $nativeDir | Out-Null
 
-    foreach ($f in @('HandyControl.dll', 'HandyControl.pdb', 'ICSharpCode.AvalonEdit.dll', 'Markdig.dll', 'OjEditorCore.dll', 'OjEditorCore.pdb')) {
-        $src = Join-Path $targetDir $f
-        if (Test-Path $src) { Move-Item $src (Join-Path $uiDir $f) -Force }
+    # 按模式列出「第三方 / 非入口」程序集，用模式而非逐个文件名 ——
+    # 新增依赖包不用再来改这里。两类分开：
+    #   ui/    —— 通用第三方 + 共享 UI 层
+    #   codex/ —— ACMDOGCodex 专用（Claude SDK / MCP / Microsoft.Extensions 一族，
+    #            数量四十来个，只此一处用，混在 ui/ 里会把目录撑得很难看）
+    # 注意：System.Text.Json 等框架程序集故意留在根目录 —— 静态构造函数安装程序集解析器之前
+    # 就可能被加载，挪走有解析不到的风险。
+    $uiPatterns = @(
+        'HandyControl.*',
+        'ICSharpCode.AvalonEdit.*',
+        'Markdig.dll',
+        'OjEditorCore.*',
+        'OjUiControls.*'
+    )
+    $codexPatterns = @(
+        'OjCodex.*',                              # ACMDOGCodex 核心
+        'Anthropic.dll',                          # 官方 Claude SDK
+        'ModelContextProtocol*.dll',              # MCP 服务
+        'Microsoft.Extensions.*.dll',             # MCP / Hosting 依赖族
+        'System.Diagnostics.DiagnosticSource.dll',
+        'System.IO.Pipelines.dll',
+        'System.Net.ServerSentEvents.dll'
+    )
+    foreach ($pair in @(@($uiPatterns, $uiDir), @($codexPatterns, $codexDir))) {
+        $destDir = $pair[1]
+        foreach ($pat in $pair[0]) {
+            $files = @(Get-ChildItem (Join-Path $targetDir $pat) -File -ErrorAction SilentlyContinue)
+            if ($files.Count -eq 0) { continue }
+            # 有东西要放才建目录（客户端不会产生任何 codex 程序集）
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+            foreach ($f in $files) { Move-Item $f.FullName (Join-Path $destDir $f.Name) -Force }
+        }
     }
     # HandyControl 卫星资源（本地化，<culture>\HandyControl.resources.dll）随主程序集移入 ui/
     Get-ChildItem $targetDir -Directory | Where-Object {

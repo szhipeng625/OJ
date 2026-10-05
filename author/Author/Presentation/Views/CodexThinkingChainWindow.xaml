@@ -1,0 +1,33 @@
+<Window x:Class="author.Presentation.Views.CodexThinkingChainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="自定义思考逻辑链" Height="560" Width="760"
+        WindowStartupLocation="CenterOwner"
+        Background="#FFF7F8FA" FontSize="13">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="思考逻辑链" FontWeight="Bold" FontSize="15"/>
+            <TextBlock TextWrapping="Wrap" Foreground="#666" FontSize="12" Margin="0,4,0,0"
+                       Text="这段文字会拼进 system prompt 的稳定区，决定 Codex 每次接到任务后按什么步骤推进。&#x0a;注意：它会在多次调用之间走 prompt 缓存，所以只写「每次都一样」的流程说明，不要写进题号或具体题目内容。"/>
+        </StackPanel>
+
+        <TextBox x:Name="ChainBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="13"
+                 Padding="8" Background="White"/>
+
+        <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" Content="恢复默认" Width="96" Height="32" Margin="8,0,0,0"
+                    Click="OnResetDefault"/>
+            <Button DockPanel.Dock="Right" Content="取消" Width="80" Height="32" Margin="8,0,0,0"
+                    Click="OnCancel"/>
+            <Button DockPanel.Dock="Right" Content="保存" Width="96" Height="32"
+                    Click="OnSave"/>
+        </DockPanel>
+    </Grid>
+</Window>

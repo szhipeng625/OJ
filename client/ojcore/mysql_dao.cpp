@@ -762,6 +762,48 @@ bool mysql_problem_visibility(std::string& out_json) {
     return true;
 }
 
+// ---------- ACMDOGCodex：用量与题面改动审计 ----------
+// 全部经 mw_req → http_client.h，因此地址、Bearer 令牌、自签证书这些
+// 与题目拉取共用同一套处理，不在这里另起一套。
+bool mysql_codex_record_run(const std::string& body_json, std::string& err) {
+    std::string resp, e;
+    if (!mw_req("POST", "/api/codex/run", body_json, resp, e)) { err = e; return false; }
+    return mw_ok(resp, "写入运行记录失败", err);
+}
+
+bool mysql_codex_record_audit(const std::string& body_json, std::string& err) {
+    std::string resp, e;
+    if (!mw_req("POST", "/api/codex/audit", body_json, resp, e)) { err = e; return false; }
+    return mw_ok(resp, "写入改动审计失败", err);
+}
+
+// 注意：mw_req 只要 HTTP 往返成功就返回 true，状态码另算。
+// 中间件缺这个路由时回 404 且 body 为空 —— 必须当成失败，
+// 否则空串会一路传到 C# 被当 JSON 解析，报出一串与真实原因（路由不存在）无关的错。
+bool mysql_codex_list_runs(int limit, int problem_id, std::string& out_json) {
+    std::string resp, e;
+    int status = 0;
+    if (!mw_req("GET", "/api/codex/runs?limit=" + std::to_string(limit)
+                       + "&problemId=" + std::to_string(problem_id), "", resp, e, &status)) return false;
+    if (status < 200 || status >= 300) return false;
+    out_json = resp;
+    return true;
+}
+
+bool mysql_codex_list_audits(const std::string& run_uid, int problem_id, int limit,
+                             std::string& out_json) {
+    // run_uid 是 32 位十六进制 GUID，无需转义即可安全放进 query
+    std::string path = "/api/codex/audits?limit=" + std::to_string(limit)
+                     + "&problemId=" + std::to_string(problem_id);
+    if (!run_uid.empty()) path += "&runUid=" + run_uid;
+    std::string resp, e;
+    int status = 0;
+    if (!mw_req("GET", path, "", resp, e, &status)) return false;
+    if (status < 200 || status >= 300) return false;
+    out_json = resp;
+    return true;
+}
+
 bool mysql_list_problems(std::string& out_json) {
     std::string resp, e;
     if (!mw_req("GET", "/api/problems", "", resp, e)) return false;

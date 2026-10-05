@@ -1,0 +1,267 @@
+<Window x:Class="author.Presentation.Views.CodexWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        xmlns:local="clr-namespace:author.Presentation.Views"
+        Title="ACMDOGCodex · 出题助手" Height="820" Width="1400"
+        WindowStartupLocation="CenterOwner"
+        Background="#FFF7F8FA" FontSize="13">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题 -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="False">
+            <TextBlock x:Name="StatusText" DockPanel.Dock="Right" Foreground="#2D7DF6"
+                       VerticalAlignment="Center" Text="就绪"/>
+            <TextBlock Text="ACMDOGCodex" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+            <TextBlock x:Name="FocusText" Foreground="#666" Margin="12,0,0,0"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
+
+        <!-- 工具栏：快捷指令 + 运行参数 -->
+        <Border Grid.Row="1" Background="White" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
+            <StackPanel>
+                <!-- 第一行：快捷指令 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="快捷指令" VerticalAlignment="Center" Foreground="#666" Margin="0,0,8,0"/>
+                    <Button Content="审校题面" Width="88" Height="28" Margin="0,0,6,0" Tag="quick:review"
+                            Click="OnQuickAction" Style="{StaticResource ButtonPrimary}"/>
+                    <Button Content="补数据范围" Width="98" Height="28" Margin="0,0,6,0" Tag="quick:range"
+                            Click="OnQuickAction"/>
+                    <Button Content="补边界/歧义" Width="104" Height="28" Margin="0,0,6,0" Tag="quick:edge"
+                            Click="OnQuickAction"/>
+                    <Button Content="整理标签" Width="88" Height="28" Margin="0,0,6,0" Tag="quick:tags"
+                            Click="OnQuickAction"/>
+                    <Button Content="重写样例" Width="88" Height="28" Tag="quick:sample"
+                            Click="OnQuickAction"/>
+                </StackPanel>
+
+                <!-- 第二行：运行参数（单独一行，避免把快捷指令挤没） -->
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="模型" VerticalAlignment="Center" Foreground="#666"/>
+                    <ComboBox x:Name="ModelBox" Width="168" Height="28" Margin="6,0,12,0"
+                              VerticalContentAlignment="Center"/>
+                    <TextBlock Text="力度" VerticalAlignment="Center" Foreground="#666"/>
+                    <ComboBox x:Name="EffortBox" Width="92" Height="28" Margin="6,0,12,0"
+                              VerticalContentAlignment="Center"/>
+                    <CheckBox x:Name="CacheBox" Content="缓存" VerticalAlignment="Center" Margin="0,0,12,0"
+                              ToolTip="开启 prompt caching：tools / system / 消息尾部都打缓存断点，多轮工具往返走缓存读"/>
+                    <CheckBox x:Name="ThinkingBox" Content="思考" VerticalAlignment="Center" Margin="0,0,12,0"
+                              ToolTip="是否回传思考摘要（display=summarized）"/>
+                    <CheckBox x:Name="WarmBox" Content="预热" VerticalAlignment="Center" Margin="0,0,12,0"
+                              ToolTip="打开面板/切题/改思考链后先空跑一次，把 tools+system 前缀写进缓存，首包即命中"/>
+                    <CheckBox x:Name="ParallelBox" Content="并行" VerticalAlignment="Center" Margin="0,0,12,0"
+                              ToolTip="同一轮的多个工具调用并发执行"/>
+                    <Button Content="思考链…" Width="86" Height="28" Margin="0,0,8,0"
+                            Click="OnEditThinkingChain"
+                            ToolTip="自定义思考逻辑链：这段文字会进 system prompt 的稳定区，不随题目变化，因此不会破坏缓存"/>
+                    <Button Content="审计" Width="70" Height="28" Margin="0,0,8,0" Click="OnShowAudit"
+                            ToolTip="查看每次指令的 token/成本，以及 AI 改过的题面（改前 → 改后）"/>
+                    <Button Content="MCP 信息" Width="86" Height="28" Click="OnShowMcp"
+                            ToolTip="查看如何把出题端挂成 MCP 服务"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 主体三栏：看板 / 思考流 / token 仪表盘 -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="290"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 任务看板 -->
+            <Border Grid.Column="0" Background="White" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                    CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="任务看板" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="进行中" FontWeight="SemiBold" Foreground="#2D7DF6" Margin="0,0,0,4"/>
+                            <ItemsControl x:Name="RunningList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#FFF0F4FB" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding SubText}" Foreground="#666" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="待办" FontWeight="SemiBold" Foreground="#D48806" Margin="0,10,0,4"/>
+                            <ItemsControl x:Name="PendingList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#FFFFFBF0" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding SubText}" Foreground="#999" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="已完成" FontWeight="SemiBold" Foreground="#339966" Margin="0,10,0,4"/>
+                            <ItemsControl x:Name="DoneList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#FFF3FAF5" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding SubText}" Foreground="#666" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- 思考 / 工具流 -->
+            <Border Grid.Column="2" Background="White" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                    CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="思考 · 工具 · 回复" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ListBox x:Name="StreamList" BorderThickness="0" Background="Transparent"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <!-- 这是只读日志：去掉选中高亮，但保留滚轮 -->
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Focusable" Value="False"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{Binding Brush}" CornerRadius="5" Padding="8" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Header}" FontWeight="SemiBold"
+                                                   Foreground="{Binding HeaderBrush}" FontSize="11"/>
+                                        <TextBlock Text="{Binding Body}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   FontFamily="{Binding Font}"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- token 仪表盘 -->
+            <Border Grid.Column="4" Background="White" BorderBrush="#FFE3E6EB" BorderThickness="1"
+                    CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Token 仪表盘" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <StackPanel>
+                        <Border Background="#FFF7F9FC" CornerRadius="6" Padding="10">
+                            <StackPanel>
+                                <TextBlock Text="本次会话累计" Foreground="#666" FontSize="11" Margin="0,0,0,6"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/>
+                                        <RowDefinition/><RowDefinition/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Text="输入" Foreground="#666"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="InTokens" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Row="1" Text="输出" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="OutTokens" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="2" Text="缓存读" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="CacheReadTokens" FontWeight="SemiBold"
+                                               Foreground="#339966" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="3" Text="缓存写" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="CacheWriteTokens" FontWeight="SemiBold"
+                                               Foreground="#D48806" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="4" Text="计费输入" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="BillableInput" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="5" Text="估算成本" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="CostText" FontWeight="SemiBold"
+                                               Foreground="#2D7DF6" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="6" Text="上下文" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="6" Grid.Column="1" x:Name="ContextTokens" FontWeight="SemiBold"
+                                               Margin="0,4,0,0" ToolTip="最近一次请求的完整提示词 token 数（输入 + 缓存读 + 缓存写）"/>
+                                    <TextBlock Grid.Row="7" Text="会话消息" Foreground="#666" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="7" Grid.Column="1" x:Name="SessionMessages" Margin="0,4,0,0"
+                                               ToolTip="当前会话里累积的消息条数；跨指令保留才能复用缓存前缀"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="缓存命中率" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <ProgressBar x:Name="CacheHitBar" Height="10" Foreground="#339966" Background="#FFE3E6EB"/>
+                        <TextBlock x:Name="CacheHitText" Foreground="#666" FontSize="12" Margin="0,4,0,0"/>
+
+                        <TextBlock Text="上一轮" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <TextBlock x:Name="LastRoundText" Foreground="#666" FontSize="12" TextWrapping="Wrap"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="NewSessionBtn" Content="新会话" Width="80" Height="26"
+                                    Click="OnNewSession" IsEnabled="False"
+                                    ToolTip="丢弃当前会话历史。下一条指令会重新写一次缓存；换题时会自动开新会话"/>
+                            <Button x:Name="CountBtn" Content="测上下文" Width="80" Height="26" Margin="6,0,0,0"
+                                    Click="OnCountContext"
+                                    ToolTip="用 count_tokens 精确统计当前 tools + system + 历史的 token 数"/>
+                        </StackPanel>
+                        <TextBlock x:Name="WarmText" Foreground="#888" FontSize="11" Margin="0,6,0,0"
+                                   TextWrapping="Wrap"/>
+
+                        <Border Background="#FFF7F9FC" CornerRadius="6" Padding="10" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="思考逻辑链" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <ItemsControl x:Name="ChainList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#555"
+                                                       FontSize="12" Margin="0,0,0,3"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- 指令输入 -->
+        <DockPanel Grid.Row="3" Margin="0,8,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                <Button x:Name="SendBtn" Content="发送" Width="96" Height="34"
+                        Style="{StaticResource ButtonPrimary}" Click="OnSend"/>
+                <Button x:Name="StopBtn" Content="停止" Width="80" Height="34" Margin="8,0,0,0"
+                        IsEnabled="False" Click="OnStop"/>
+            </StackPanel>
+            <TextBox x:Name="InstructionBox" Height="34" VerticalContentAlignment="Center" Padding="8,0"
+                     KeyDown="OnInstructionKeyDown"
+                     ToolTip="描述你要改什么。例如：把 P113 的题面补上数据范围，样例说明写清楚"/>
+        </DockPanel>
+    </Grid>
+</Window>

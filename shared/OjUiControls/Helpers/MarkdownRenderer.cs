@@ -1,11 +1,14 @@
-﻿using System.Windows.Controls;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows.Controls;
 using Markdig;
-using client.DataAccess.Models;
+using OjUiControls.Models;
 
-namespace client.Presentation.Helpers;
+namespace OjUiControls.Helpers;
 
 /// <summary>
 /// UI 辅助：题面 Markdown 转 HTML 并渲染到 WebBrowser（统一样式）。
+/// 服务端与客户端共用（原 client.Presentation.Helpers.MarkdownRenderer 上移而来）。
 /// </summary>
 public static class MarkdownRenderer
 {
@@ -13,9 +16,10 @@ public static class MarkdownRenderer
         .UseAdvancedExtensions().Build();
 
     /// <summary>把题面描述与测试样例拼成完整 Markdown（样例直接放进题面里展示）。</summary>
-    public static string CombineStatement(string description, List<TestCaseSample>? samples, string sampleIn, string sampleOut)
+    public static string CombineStatement(string description, IReadOnlyList<ProblemSample>? samples,
+        string sampleIn, string sampleOut)
     {
-        var sb = new System.Text.StringBuilder(description ?? "");
+        var sb = new StringBuilder(description ?? "");
         if (samples is { Count: > 0 })
         {
             foreach (var s in samples)
